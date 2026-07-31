@@ -1,6 +1,6 @@
-# Vepo Multivendor Water Delivery Platform — Developer Guide
+# Drop Multivendor Water Delivery Platform — Developer Guide
 
-This file contains instructions and context for AI coding assistants working on the Vepo platform.
+This file contains instructions and context for AI coding assistants working on the Drop platform.
 
 ## Architecture & Monorepo Structure
 This is a monorepo containing three React Native Expo applications and one FastAPI backend:
