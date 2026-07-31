@@ -1,3 +1,4 @@
+import { errorMessage } from "@/API/errors";
 import React, { useContext, useState } from "react";
 import { View, Text, StatusBar, ScrollView, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
@@ -12,11 +13,9 @@ import { useUserDetails } from "@/hooks/queries/useUser";
 import { Image } from "expo-image";
 import { BRAND } from "@/constants/brandColors";
 import { Toast } from "@/lib/toast";
-import Constants from 'expo-constants';
 import { SavedLocationSkeleton } from '@/components/skeletons/ContextualSkeletons';
 import { Ionicons } from "@expo/vector-icons";
 
-const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.ios?.config?.googleMapsApiKey || Constants.expoConfig?.android?.config?.googleMaps?.apiKey || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 
 export default function LocationSearch() {
 	const router = useRouter();
@@ -68,7 +67,7 @@ export default function LocationSearch() {
 			let location = await Location.getCurrentPositionAsync({});
 			handleSelectLocation(location.coords.latitude, location.coords.longitude);
 		} catch (error) {
-			Toast.error("Error", "Could not fetch current location.");
+			Toast.error("Location unavailable", "We couldn't read your current position. Check that location services are on and try again.");
 		} finally {
 			setIsLocating(false);
 		}
@@ -82,7 +81,7 @@ export default function LocationSearch() {
 			Toast.success("Location Updated", `Delivering to ${loc.address}`);
 			router.back();
 		} catch (e: unknown) {
-			Toast.error("Error", (e as Error).message || "Could not select location");
+			Toast.error("Couldn't use location", errorMessage(e, "Could not select location."));
 		} finally {
 			setLoadingLocationId(null);
 		}
@@ -93,8 +92,8 @@ export default function LocationSearch() {
 		try {
 			await revokeLocation.mutateAsync();
 			Toast.success("Cleared", "Location revoked");
-		} catch (e) {
-			Toast.error("Error", "Could not revoke location");
+		} catch (e: unknown) {
+			Toast.error("Couldn't remove location", errorMessage(e, "Please try again."));
 		} finally {
 			setLoadingLocationId(null);
 		}
@@ -108,8 +107,8 @@ export default function LocationSearch() {
 				await revokeLocation.mutateAsync();
 			}
 			Toast.success("Deleted", "Location removed");
-		} catch (e) {
-			Toast.error("Error", "Could not delete location");
+		} catch (e: unknown) {
+			Toast.error("Couldn't delete location", errorMessage(e, "Please try again."));
 		} finally {
 			setLoadingLocationId(null);
 		}
@@ -194,7 +193,6 @@ export default function LocationSearch() {
 
 			<View className="px-4 z-40 relative mt-4 mb-4">
 				<PlacesAutocomplete
-					apiKey={GOOGLE_MAPS_API_KEY}
 					placeholder="Search for a location..."
 					fetchDetails={true}
 					language="en"

@@ -84,7 +84,7 @@ export default function VendorDirectory() {
                             <Text className={`${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>•</Text>
                             <View className="flex-row items-center gap-1">
                                 <Ionicons name="bicycle" size={24} color={BRAND.primary} />
-                                <Text className={`${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat, User?.lng)}</Text>
+                                <Text className={`${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
                             </View>
                         </View>
                         <View className="flex-row flex-wrap gap-2 mt-1">

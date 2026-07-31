@@ -7,7 +7,7 @@ import {
     ScrollView, 
     StatusBar, 
     Dimensions,
-    TouchableOpacity,
+    
     ActivityIndicator
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
@@ -19,13 +19,17 @@ import { useUserDetails } from "@/hooks/queries/useUser";
 import UserAvatar from "@/components/ui/UserAvatar";
 import { Image } from "expo-image";
 
-import { ApiRoutes } from "@/API/routes/ApiRoutes";
+import { ApiRoutes, ROUTES } from "@/API/routes/ApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import { errorMessage } from "@/API/errors";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Toast } from "@/lib/toast";
 import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import CloudinaryUpload from "@/Helpers/imageUpload";
 import { Popup } from "@/lib/popup";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 const { width } = Dimensions.get("window");
 
@@ -34,6 +38,8 @@ export default function SettingsMain() {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
     const queryClient = useQueryClient();
+    const api = useApiRequest();
+    const { clearPushToken } = usePushNotifications();
     const { data: User } = useUserDetails();
     const [isUploadingPic, setIsUploadingPic] = React.useState(false);
     const { user } = useUser();
@@ -59,28 +65,20 @@ export default function SettingsMain() {
                     const secureUrl = uploadedData.secure_url;
                     
                     // Send to backend
-                    const res = await fetch(ApiRoutes.UpdateProfilePic.path, {
-                        method: ApiRoutes.UpdateProfilePic.method,
-                        headers: {
-                            Authorization: `Bearer ${await getToken()}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ profile_pic: secureUrl })
-                    });
-                    
-                    if (res.ok) {
+                    try {
+                        await api.post(ROUTES.UPDATE_PROFILE_PIC, { profile_pic: secureUrl });
                         queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
                         Toast.success("Success", "Profile picture updated!");
-                    } else {
-                        Toast.error("Error", "Failed to update profile picture on server.");
+                    } catch (error) {
+                        Toast.error("Couldn't update photo", errorMessage(error, "Please try again."));
                     }
                 } else {
-                    Toast.error("Error", "Failed to upload image.");
+                    Toast.error("Upload failed", "We couldn't upload that image. Try a different photo.");
                 }
             }
         } catch (error) {
             console.error("Profile pic update error:", error);
-            Toast.error("Error", "An error occurred while updating profile picture.");
+            Toast.error("Couldn't update photo", errorMessage(error, "Please try again."));
         } finally {
             setIsUploadingPic(false);
         }
@@ -100,32 +98,25 @@ export default function SettingsMain() {
     const executeSignOut = async () => {
         Popup.setLoading(true);
         try {
-            // Unregister push token before signing out to prevent cross-account notification leakage
-            try {
-                const token = await getToken();
-                if (token) {
-                    await fetch(ApiRoutes.ClearPushToken.path, {
-                        method: ApiRoutes.ClearPushToken.method,
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                            "Content-Type": "application/json",
-                        },
-                    });
-                }
-            } catch (e) {
-                if (__DEV__) console.warn("Failed to unregister push token", e);
-            }
+            // Detach this device's push token first: on a shared device the token
+            // would otherwise stay registered and the next person to sign in would
+            // keep receiving the previous account's order notifications.
+            await clearPushToken();
 
             await signOut();
-            // HIGH-01: Clear all cached data to prevent cross-user data leakage
-            const { QueryClient } = require('@tanstack/react-query');
-            const queryClient = new QueryClient();
+
+            // Clear the *live* cache. This previously constructed a brand-new
+            // QueryClient and cleared that instead, so every cached order, address
+            // and profile field survived sign-out and was visible to the next
+            // account on the device.
             queryClient.clear();
+
             Popup.hide();
             router.replace("/(Auth)");
         } catch (error) {
             if (__DEV__) console.error("Sign out error", error);
             Popup.hide();
+            Toast.error("Sign out failed", errorMessage(error, "Please try again."));
         }
     };
 
@@ -144,33 +135,24 @@ export default function SettingsMain() {
     const executeDeleteAccount = async () => {
         Popup.setLoading(true);
         try {
-            const res = await fetch(ApiRoutes.DeleteAccount.path, {
-                method: ApiRoutes.DeleteAccount.method,
-                headers: {
-                    Authorization: `Bearer ${await getToken()}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ app_type: "customer", confirmation: "DELETE MY ACCOUNT" })
+            await api.del(ROUTES.DELETE_ACCOUNT, {
+                data: { app_type: "customer", confirmation: "DELETE MY ACCOUNT" },
             });
-
-            if (res.ok) {
-                Toast.success("Goodbye", "Account deleted successfully.");
-                await signOut();
-                Popup.hide();
-                router.replace("/(Auth)");
-            } else {
-                const data = await res.json();
-                Toast.error("Cannot Delete", data.detail || "You have active orders preventing deletion.");
-                Popup.hide();
-            }
+            Toast.success("Goodbye", "Account deleted successfully.");
+            await clearPushToken();
+            await signOut();
+            queryClient.clear();
+            Popup.hide();
+            router.replace("/(Auth)");
         } catch (error) {
-            Toast.error("Error", "Network error occurred.");
+            // The backend explains *why* (e.g. active orders block deletion) — show it.
+            Toast.error("Cannot delete account", errorMessage(error, "Please try again."));
             Popup.hide();
         }
     };
 
     const SettingItem = ({ title, iconName, onPress, danger = false }: any) => (
-        <TouchableOpacity 
+        <PressableScale 
             activeOpacity={0.7} 
             onPress={() => {
                 Haptics.selectionAsync();
@@ -188,7 +170,7 @@ export default function SettingsMain() {
                 </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
-        </TouchableOpacity>
+        </PressableScale>
     );
 
     return (
@@ -210,9 +192,9 @@ export default function SettingsMain() {
     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Settings
                 </Text>
@@ -243,7 +225,7 @@ export default function SettingsMain() {
                         </View>
                     )}
                 </View>
-                <TouchableOpacity 
+                <PressableScale 
                     onPress={handleUpdateProfilePic}
                     disabled={isUploadingPic}
                     activeOpacity={0.8}
@@ -257,7 +239,7 @@ export default function SettingsMain() {
                     }}
                 >
                     <Ionicons name="camera" size={16} color={BRAND.white} />
-                </TouchableOpacity>
+                </PressableScale>
                 </View>
                     <Text className={`text-2xl font-bold mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
                         {User?.full_name || user?.fullName || "Water Drinker"}
@@ -303,7 +285,7 @@ export default function SettingsMain() {
                         iconName="lock-closed-outline" 
                         onPress={() => router.push("/(screens)/settings/PrivacySecurity")} 
                     />
-                    <TouchableOpacity 
+                    <PressableScale 
                         activeOpacity={0.7} 
                         onPress={async () => {
                             Haptics.selectionAsync();
@@ -325,7 +307,7 @@ export default function SettingsMain() {
                         >
                             <View className={`w-4 h-4 rounded-full bg-white shadow-sm ${darkTheme ? "self-end" : "self-start"}`} />
                         </View>
-                    </TouchableOpacity>
+                    </PressableScale>
                 </View>
 
                 <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>

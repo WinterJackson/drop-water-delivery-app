@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect, useCallback } from "react";
-import { View, Text, ScrollView, RefreshControl, Alert, TextInput, Modal, StatusBar } from "react-native";
+import { View, Text, ScrollView, RefreshControl, TextInput, Modal, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,8 +11,14 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { format } from "date-fns";
 import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
-import { useWalletTransactions, useWalletWithdraw } from "@/hooks/queries/useWallet";
-import { ROUTES } from "@/API/routes/ApiRoutes";
+import { useWalletTransactions, useWalletWithdraw, useWalletTopUp } from "@/hooks/queries/useWallet";
+import { useUserDetails } from "@/hooks/queries/useUser";
+import { Toast } from "@/lib/toast";
+import { errorMessage } from "@/API/errors";
+
+/** Mirrors the server-side minimums so the UI rejects before the round trip. */
+const MIN_TOP_UP_KSH = 10;
+const MIN_WITHDRAWAL_KSH = 500;
 
 interface WalletData {
   bottle_purchased_at: string | null;
@@ -25,14 +31,22 @@ export default function BottleWallet() {
   const router = useRouter();
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
-  
-  const [wallet, setWallet] = useState<WalletData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Wallet figures come from the shared user query rather than a bespoke fetch,
+  // so a top-up or an order that spends credit updates this screen automatically.
+  const { data: user, isLoading: loading, refetch: refetchUser } = useUserDetails();
+  const wallet: WalletData | null = user
+    ? {
+        bottle_purchased_at: user.bottle_purchased_at ?? null,
+        bottle_refill_count: user.bottle_refill_count ?? 0,
+        wallet_balance: user.wallet_balance ?? 0,
+        phone_number: user.phone_number ?? "",
+      }
+    : null;
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: transactions, isLoading: isLoadingTx, refetch: refetchTx } = useWalletTransactions();
   const withdrawMutation = useWalletWithdraw();
+  const topUpMutation = useWalletTopUp();
 
   const [topUpAmount, setTopUpAmount] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -42,76 +56,46 @@ export default function BottleWallet() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isWithdrawModalVisible, setIsWithdrawModalVisible] = useState(false);
 
-  const fetchWallet = async () => {
-    const token = await getToken();
-    try {
-      const res = await fetch(ROUTES.GET_USER_DETAILS, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setWallet({
-          bottle_purchased_at: data.bottle_purchased_at || null,
-          bottle_refill_count: data.bottle_refill_count || 0,
-          wallet_balance: data.wallet_balance || 0,
-          phone_number: data.phone_number || "",
-        });
-      }
-    } catch (e) {
-      if (__DEV__) console.error("Failed to fetch wallet data", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchWallet(); }, []);
-
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchWallet();
-    await refetchTx();
+    await Promise.all([refetchUser(), refetchTx()]);
     setRefreshing(false);
-  }, []);
+  }, [refetchUser, refetchTx]);
+
+  /**
+   * Phone must reach the backend as 2547XXXXXXXX / 2541XXXXXXXX; accept the
+   * common local formats and normalise rather than rejecting them.
+   */
+  const toMsisdn = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    let digits = raw.replace(/[^0-9]/g, "");
+    if (digits.startsWith("254")) digits = digits.slice(3);
+    else if (digits.startsWith("0")) digits = digits.slice(1);
+    const full = `254${digits}`;
+    return /^254[17]\d{8}$/.test(full) ? full : null;
+  };
 
   const handleTopUp = async () => {
-    if (!topUpAmount || isNaN(Number(topUpAmount)) || Number(topUpAmount) < 10) {
-      Alert.alert("Invalid Amount", "Please enter a valid amount of at least KSH 10 to top up.");
+    const amount = Number(topUpAmount);
+    if (!topUpAmount || isNaN(amount) || amount < MIN_TOP_UP_KSH) {
+      Toast.error("Invalid amount", `Enter at least KSH ${MIN_TOP_UP_KSH} to top up.`);
       return;
     }
-    if (!phoneNumber) {
-      Alert.alert("Invalid Phone", "Please enter a valid M-Pesa phone number.");
+    const msisdn = toMsisdn(phoneNumber);
+    if (!msisdn) {
+      Toast.error("Invalid phone", "Enter a valid Safaricom number, e.g. 0712345678.");
       return;
     }
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsProcessingTopUp(true);
-      const token = await getToken();
-      const response = await fetch(ROUTES.WALLET_TOP_UP, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: Number(topUpAmount),
-          phone_number: phoneNumber,
-          user_type: "customer"
-        })
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (response.ok && !data?.error) {
-        Alert.alert("STK Push Sent", "Please check your phone and enter your M-Pesa PIN to complete the top up.");
-        setTopUpAmount("");
-        setIsTopUpModalVisible(false);
-      } else {
-        Alert.alert("Top Up Failed", data?.error || data?.detail || "An error occurred during top up.");
-      }
+      await topUpMutation.mutateAsync({ amount, phoneNumber: msisdn });
+      Toast.success("STK push sent", "Check your phone and enter your M-Pesa PIN to complete the top up.");
+      setTopUpAmount("");
+      setIsTopUpModalVisible(false);
     } catch (err) {
-      console.error(err);
-      Alert.alert("Error", "Could not process top up at this time.");
+      Toast.error("Top up failed", errorMessage(err, "Could not process the top up right now."));
     } finally {
       setIsProcessingTopUp(false);
       handleRefresh();
@@ -119,28 +103,28 @@ export default function BottleWallet() {
   };
 
   const handleWithdraw = async () => {
-    if (!withdrawAmount || isNaN(Number(withdrawAmount)) || Number(withdrawAmount) < 500) {
-      Alert.alert("Invalid Amount", "Please enter a valid amount of at least KSH 500 to withdraw.");
+    const amount = Number(withdrawAmount);
+    if (!withdrawAmount || isNaN(amount) || amount < MIN_WITHDRAWAL_KSH) {
+      Toast.error("Invalid amount", `Enter at least KSH ${MIN_WITHDRAWAL_KSH} to withdraw.`);
       return;
     }
-    if (!phoneNumber) {
-      Alert.alert("Invalid Phone", "Please enter a valid M-Pesa phone number.");
+    const msisdn = toMsisdn(phoneNumber);
+    if (!msisdn) {
+      Toast.error("Invalid phone", "Enter a valid Safaricom number, e.g. 0712345678.");
       return;
     }
 
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await withdrawMutation.mutateAsync({
-        amount: Number(withdrawAmount),
-        phoneNumber: phoneNumber,
-        userType: "customer",
-      });
-      Alert.alert("Withdrawal Successful", "Funds have been disbursed to your M-Pesa number.");
+      await withdrawMutation.mutateAsync({ amount, phoneNumber: msisdn });
+      // Safaricom has only queued the disbursement at this point; the B2C result
+      // callback settles it. Say "on its way", not "successful".
+      Toast.success("Withdrawal started", "Your funds are on their way to your M-Pesa number.");
       setWithdrawAmount("");
       setIsWithdrawModalVisible(false);
       handleRefresh();
-    } catch (err: any) {
-      Alert.alert("Withdrawal Failed", err.message || "An error occurred during withdrawal.");
+    } catch (err) {
+      Toast.error("Withdrawal failed", errorMessage(err, "Could not process the withdrawal right now."));
     }
   };
 
@@ -287,7 +271,11 @@ export default function BottleWallet() {
         ) : (
           <View className="mb-10 space-y-3">
             {transactions.slice(0, 5).map((tx: any) => {
-              const isDeduction = tx.transaction_type === "withdrawal" || tx.transaction_type === "payment";
+              // Direction comes from the signed amount. The old check compared
+              // against "payment", which is not a value the backend emits — the
+              // enum is `order_payment` — so wallet spends rendered as credits.
+              const txAmount = Number(tx.amount) || 0;
+              const isDeduction = txAmount < 0;
               return (
                 <View 
                   key={tx.id} 
@@ -312,7 +300,7 @@ export default function BottleWallet() {
                   </View>
                   <View className="items-end">
                     <Text className={`font-bold ${isDeduction ? "text-red-500" : "text-green-500"}`}>
-                      {isDeduction ? "-" : "+"}KSH {Number(tx.amount).toLocaleString()}
+                      {isDeduction ? "-" : "+"}KSH {Math.abs(txAmount).toLocaleString()}
                     </Text>
                     <View className={`px-2 py-0.5 mt-1 rounded text-[10px] ${tx.status === 'completed' ? 'bg-green-500/10' : tx.status === 'failed' ? 'bg-red-500/10' : 'bg-yellow-500/10'}`}>
                       <Text className={`text-[10px] uppercase font-bold ${tx.status === 'completed' ? 'text-green-600' : tx.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>{tx.status}</Text>

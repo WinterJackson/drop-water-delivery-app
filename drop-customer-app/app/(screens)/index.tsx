@@ -27,7 +27,9 @@ import {
 	Text,
 	TouchableWithoutFeedback,
 	View,
-	Image
+	Image,
+	Modal,
+	Linking
 } from "react-native";
 import { FlashList, ListRenderItem } from "@shopify/flash-list";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -122,7 +124,11 @@ export default function Home() {
 	const { width } = useWindowDimensions();
 	// <----------------STATES--------------->
 	// location
-	const { location: deviceLocation, requestLocation } = useLocation();
+	const { location: deviceLocation, showPrompt, requestLocation } = useLocation();
+	useEffect(() => {
+		if (!deviceLocation) requestLocation().catch(() => {});
+	}, []);
+
 	const { data: unreadData } = useUnreadNotificationCount();
 	const unreadCount = unreadData?.unread_count || 0;
 
@@ -153,7 +159,7 @@ export default function Home() {
 
 	// Random products (pagination)
 	const [page, setPage] = useState(1);
-	const { data: currentPageProducts = [], isFetching: isFetchingMore, refetch: refetchProducts } = usePaginatedProducts(page);
+	const { data: currentPageProducts = [], isFetching: isFetchingMore, refetch: refetchProducts } = usePaginatedProducts(page) as { data: any[]; isFetching: boolean; refetch: () => void };
 	const [paginatedProducts, setPaginatedProducts] = useState<any[]>([]);
 	const [hasMore, setHasMore] = useState(true);
 
@@ -264,7 +270,7 @@ export default function Home() {
 									<View className={`flex-row items-center px-2.5 py-1.5 rounded-full border ${darkTheme ? "bg-blue-500/20 border-blue-500/30" : "bg-blue-50 border-blue-200"}`}>
 										<Ionicons name="wallet-outline" size={14} color={BRAND.primary} />
 										<Text className="ml-1 font-bold text-xs" style={{ color: BRAND.primary }}>
-											KSh {User.wallet_balance.toLocaleString()}
+											KSh {(User.wallet_balance || 0).toLocaleString()}
 										</Text>
 									</View>
 								</PressableScale>
@@ -375,11 +381,16 @@ export default function Home() {
 									/>
 
 									{/* offers */}
+									{/* `Offers.tsx` was fully built and registered in the
+									    layout but nothing ever navigated to it — the home
+									    carousel showed a slice of the deals with no way
+									    through to the rest. */}
 									<HorizontalList
 										title="Offers and Deals"
 										type="product"
 										data={Offers}
 										loaded={OffersLoaded}
+										onSeeAll={() => router.push("/(screens)/Offers")}
 									/>
 
 									{/* top brands */}
@@ -437,6 +448,48 @@ export default function Home() {
 							) : null
 						}
 					/>
+
+					{/* Location permission prompt. Non-blocking by design: a denied
+					    permission must not lock the user out of the app — they can still
+					    set a delivery address by hand and order. */}
+					<Modal visible={showPrompt} transparent animationType="fade">
+						<View className="flex-1 justify-center items-center bg-black/60 px-5">
+							<View className={`w-full rounded-3xl p-6 ${darkTheme ? "bg-gray-900" : "bg-white"}`}>
+								<View className="items-center mb-4">
+									<View className="w-16 h-16 rounded-full bg-primary/20 items-center justify-center mb-4">
+										<Ionicons name="location" size={24} color={BRAND.primary} />
+									</View>
+									<Text className={`text-xl font-bold text-center mb-2 ${darkTheme ? "text-white" : "text-black"}`}>
+										Location Required
+									</Text>
+									<Text className={`text-center text-sm ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+										Drop uses your location to find vendors that deliver to you. You can also set a delivery address by hand.
+									</Text>
+								</View>
+
+								<PressableScale
+									onPress={() => Linking.openSettings()}
+									className="bg-primary py-3 rounded-xl items-center mb-3"
+								>
+									<Text className="text-white font-bold">Open Settings</Text>
+								</PressableScale>
+
+								<PressableScale
+									onPress={() => requestLocation()}
+									className={`py-3 rounded-xl items-center mb-3 ${darkTheme ? "bg-gray-800" : "bg-gray-100"}`}
+								>
+									<Text className={`font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>I've enabled it, try again</Text>
+								</PressableScale>
+
+								<PressableScale
+									onPress={() => router.push("/(screens)/LocationSearch" as any)}
+									className="py-3 rounded-xl items-center"
+								>
+									<Text className={`font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Enter address manually</Text>
+								</PressableScale>
+							</View>
+						</View>
+					</Modal>
 				</SafeAreaView>
 			</TouchableWithoutFeedback>
 		</>

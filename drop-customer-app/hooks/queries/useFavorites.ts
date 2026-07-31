@@ -1,7 +1,8 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toast } from '@/lib/toast';
+import { errorMessage } from '@/API/errors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface FavoriteItem {
@@ -18,53 +19,33 @@ export interface FavoriteItem {
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 export function useFavorites() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<FavoriteItem[], Error>({
         queryKey: ['customer', 'favorites'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_FAVORITES, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Favorites fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.get<FavoriteItem[]>(ROUTES.GET_FAVORITES),
     });
 }
 
 export function useAddFavorite() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (productId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.ADD_FAVORITE, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: productId }),
-            });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.detail || `Add favorite failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        mutationFn: (productId: string) => api.post(ROUTES.ADD_FAVORITE, { product_id: productId }),
         onMutate: async (productId) => {
             await queryClient.cancelQueries({ queryKey: ['customer', 'favorites'] });
             const previousFavorites = queryClient.getQueryData(['customer', 'favorites']);
             queryClient.setQueryData(['customer', 'favorites'], (old: any) => {
                 const newFavorites = old ? [...old] : [];
-                // Add a placeholder item
                 newFavorites.push({ id: `temp-${productId}`, product_id: productId });
                 return newFavorites;
             });
             return { previousFavorites };
         },
-        onError: (err, productId, context) => {
+        onError: (err, _productId, context) => {
             if (context?.previousFavorites) {
                 queryClient.setQueryData(['customer', 'favorites'], context.previousFavorites);
             }
+            Toast.error("Couldn't add favourite", errorMessage(err));
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['customer', 'favorites'] });
@@ -76,19 +57,10 @@ export function useAddFavorite() {
 }
 
 export function useRemoveFavorite() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (productId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.REMOVE_FAVORITE, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ product_id: productId }),
-            });
-            if (!res.ok) throw new Error(`Remove favorite failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (productId: string) => api.post(ROUTES.REMOVE_FAVORITE, { product_id: productId }),
         onMutate: async (productId) => {
             await queryClient.cancelQueries({ queryKey: ['customer', 'favorites'] });
             const previousFavorites = queryClient.getQueryData(['customer', 'favorites']);
@@ -98,10 +70,11 @@ export function useRemoveFavorite() {
             });
             return { previousFavorites };
         },
-        onError: (err, productId, context) => {
+        onError: (err, _productId, context) => {
             if (context?.previousFavorites) {
                 queryClient.setQueryData(['customer', 'favorites'], context.previousFavorites);
             }
+            Toast.error("Couldn't remove favourite", errorMessage(err));
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['customer', 'favorites'] });

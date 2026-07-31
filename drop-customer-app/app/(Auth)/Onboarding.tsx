@@ -18,6 +18,8 @@ import {
 } from "react-native";
 import { Toast } from "@/lib/toast";
 import { ROUTES } from "@/API/routes/ApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import { errorMessage } from "@/API/errors";
 import PressableScale from "@/components/ui/PressableScale";
 import { BRAND } from "@/constants/brandColors";
 import * as Location from 'expo-location';
@@ -28,6 +30,7 @@ export default function CustomerOnboarding() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const { getToken, isLoaded } = useAuth();
+    const api = useApiRequest();
     const { user } = useUser();
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -45,20 +48,14 @@ export default function CustomerOnboarding() {
         setLoading(true);
         setFetchError(false);
         try {
-                const token = await getToken();
-                const res = await fetch(ROUTES.GET_PROFILE_STATUS("customer"), {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-                        setMissingFields(data.missing_fields);
-                    } else {
-                        // Nothing missing, safe to route
-                        setReadyToRoute(true);
-                    }
+                const data = await api.get<{ exists: boolean; missing_fields?: string[] }>(
+                    ROUTES.GET_PROFILE_STATUS("customer")
+                );
+                if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
+                    setMissingFields(data.missing_fields ?? []);
                 } else {
-                    setFetchError(true);
+                    // Nothing missing, safe to route
+                    setReadyToRoute(true);
                 }
             } catch (error) {
                 if (__DEV__) console.error("Failed to check profile status", error);
@@ -85,7 +82,6 @@ export default function CustomerOnboarding() {
 
         setSubmitting(true);
         try {
-            const token = await getToken();
             const payload = {
                 // CRIT-04: clerk_id removed — backend derives identity from JWT sub claim
                 full_name: user?.fullName || "",
@@ -94,25 +90,15 @@ export default function CustomerOnboarding() {
                 profile_pic: user?.imageUrl || ""
             };
 
-            const res = await fetch(ROUTES.CREATE_USER, {
-                method: "POST",
-                headers: { 
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (res.ok) {
-                Toast.success("Success", "Profile updated successfully!");
-                queryClient.invalidateQueries({ queryKey: ['customer'] });
-                setReadyToRoute(true);
-            } else {
-                const errorData = await res.json();
-                Toast.error("Error", errorData?.detail || "Failed to update profile");
-            }
+            await api.post(ROUTES.CREATE_USER, payload);
+            Toast.success("Success", "Profile updated successfully!");
+            queryClient.invalidateQueries({ queryKey: ['customer'] });
+            queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
+            setReadyToRoute(true);
         } catch (error) {
-            Toast.error("Error", "Network error occurred");
+            // Show the backend's reason (duplicate email, invalid phone, …) rather
+            // than a blanket "network error" that is usually wrong.
+            Toast.error("Couldn't save profile", errorMessage(error, "Please try again."));
         } finally {
             setSubmitting(false);
         }

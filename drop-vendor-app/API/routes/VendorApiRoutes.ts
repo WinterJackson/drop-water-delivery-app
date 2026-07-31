@@ -88,16 +88,19 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/notifications/unread-count?user_type=vendor`,
     method: "GET",
   } as const satisfies ApiRoute,
+  // `user_type` is not cosmetic: the backend resolves the caller's row from the
+  // matching table, so without it these three ran against `customer` and either
+  // 404'd (no User row for a vendor's clerk_id) or silently matched nothing.
   MarkNotificationRead: {
-    path: `${BASE_URL}/api/notifications/read`,
+    path: `${BASE_URL}/api/notifications/read?user_type=vendor`,
     method: "POST",
   } as const satisfies ApiRoute,
   MarkAllNotificationsRead: {
-    path: `${BASE_URL}/api/notifications/read-all`,
+    path: `${BASE_URL}/api/notifications/read-all?user_type=vendor`,
     method: "POST",
   } as const satisfies ApiRoute,
   DeleteNotification: (id: string): ApiRoute => ({
-    path: `${BASE_URL}/api/notifications/${id}`,
+    path: `${BASE_URL}/api/notifications/${id}?user_type=vendor`,
     method: "DELETE",
   }),
   // --- Rider Management ---
@@ -113,6 +116,22 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/vendor/receive-bottles`,
     method: "POST",
   } as const satisfies ApiRoute,
+  /**
+   * Riders holding this vendor's empties, sourced from the bottle ledger.
+   *
+   * Not the same as the rider registry: radar dispatch lets a rider take an order
+   * from a vendor they never registered with, so they owe bottles while having no
+   * registry row at all. Reconciliation must read from here or those riders — and
+   * their bottles — stay invisible.
+   */
+  BottleDebtors: {
+    path: `${BASE_URL}/api/vendor/bottle-debtors`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  BottleLedger: (limit = 50, offset = 0): ApiRoute => ({
+    path: `${BASE_URL}/api/vendor/bottle-ledger?limit=${limit}&offset=${offset}`,
+    method: "GET",
+  }),
   // --- Account ---
   DeleteAccount: {
     path: `${BASE_URL}/api/auth/delete_account`,

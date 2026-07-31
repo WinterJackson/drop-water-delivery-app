@@ -1,13 +1,14 @@
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TouchableOpacity, Switch, Linking } from "react-native";
+import { View, Text, ScrollView, Switch, Linking } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 export default function PrivacySecurity() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -21,7 +22,7 @@ export default function PrivacySecurity() {
 
     useEffect(() => {
         if (User?.preferences && User.preferences.analytics !== undefined) {
-            setDataTracking(User.preferences.analytics);
+            setDataTracking(Boolean(User.preferences.analytics));
         }
     }, [User]);
 
@@ -36,15 +37,19 @@ export default function PrivacySecurity() {
         }
     };
 
+    // This used to close the popup and announce "Link Sent" without sending
+    // anything — the user waited for an email that was never requested. Hand off
+    // to the real Clerk reset flow instead, which sends the code and takes the
+    // new password.
     const handlePasswordChange = () => {
         Popup.show({
             title: "Change Password",
-            message: "To ensure maximum security, password resets are handled securely via your registered email. We will send a secure password modification link to your inbox.",
+            message: "For your security, a password change is confirmed by email. We'll take you to the reset screen, where a verification code is sent to your registered address.",
             cancelText: "Cancel",
-            confirmText: "Send Link",
+            confirmText: "Continue",
             onConfirm: () => {
                 Popup.hide();
-                Toast.success("Link Sent", "Check your email inbox for further instructions.");
+                router.push("/(Auth)/forgot-password/screen" as any);
             }
         });
     };
@@ -59,7 +64,7 @@ export default function PrivacySecurity() {
     };
 
     const ActionItem = ({ title, icon, description, onPress }: import("@/types/components").ActionItemProps) => (
-        <TouchableOpacity 
+        <PressableScale 
             activeOpacity={0.7} 
             onPress={onPress}
             className={`p-4 mb-4 rounded-xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}
@@ -76,7 +81,7 @@ export default function PrivacySecurity() {
                 </View>
             </View>
             <Text className={`text-xl ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>›</Text>
-        </TouchableOpacity>
+        </PressableScale>
     );
 
     const ToggleItem = ({ title, icon, description, value, onToggle }: import("@/types/components").ToggleItemProps) => (
@@ -114,9 +119,9 @@ export default function PrivacySecurity() {
                     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
                 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Privacy & Security
                 </Text>

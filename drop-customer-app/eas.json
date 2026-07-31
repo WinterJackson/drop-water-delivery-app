@@ -5,10 +5,12 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "environment": "preview",
       "android": {
         "buildType": "apk",
         "distribution": "internal"
@@ -26,21 +28,21 @@
         "distribution": "internal"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_BASE_URL" : "https://multivendor-water-delivery-app.onrender.com",
-        "EXPO_PUBLIC_AUTHORIZED_REDIRECT_URI" : "https://clerk.drop.com/v1/oauth_callback"
+        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com",
+        "EXPO_PUBLIC_AUTHORIZED_REDIRECT_URI": "https://clerk.drop.com/v1/oauth_callback"
       }
     },
     "preview4": {
       "distribution": "internal"
     },
     "production": {
+      "environment": "production",
       "android": {
         "buildType": "apk"
       },
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cGV0LWFpcmVkYWxlLTIyLmNsZXJrLmFjY291bnRzLmRldiQ",
-        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://multivendor-water-delivery-app.onrender.com",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyD9R6-hmSRZwjEuWj_8CPRzZipXtJ6MMAI"
+        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com"
       }
     }
   },

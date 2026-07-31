@@ -1,7 +1,8 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toast } from '@/lib/toast';
+import { errorMessage } from '@/API/errors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface VendorFavoriteItem {
@@ -20,39 +21,19 @@ export interface VendorFavoriteItem {
 
 /** Fetch all vendor favourites for the current user */
 export function useVendorFavorites() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<VendorFavoriteItem[], Error>({
         queryKey: ['vendor', 'favorites'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_VENDOR_FAVORITES, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Vendor favorites fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.get<VendorFavoriteItem[]>(ROUTES.GET_VENDOR_FAVORITES),
     });
 }
 
 /** Add a vendor to favourites */
 export function useAddVendorFavorite() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (vendorId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.ADD_VENDOR_FAVORITE, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vendor_id: vendorId }),
-            });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.detail || `Add vendor favorite failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        mutationFn: (vendorId: string) => api.post(ROUTES.ADD_VENDOR_FAVORITE, { vendor_id: vendorId }),
         onMutate: async (vendorId) => {
             await queryClient.cancelQueries({ queryKey: ['vendor', 'favorites'] });
             const previous = queryClient.getQueryData(['vendor', 'favorites']);
@@ -61,13 +42,18 @@ export function useAddVendorFavorite() {
                 arr.push({ id: `temp-${vendorId}`, vendor_id: vendorId });
                 return arr;
             });
+            // Keep the single-vendor check in step with the optimistic list, so the
+            // heart on the vendor screen fills immediately.
+            queryClient.setQueryData(['vendor', 'favorites', 'check', vendorId], { is_favorite: true });
             return { previous };
         },
-        onError: (_err, _vendorId, context) => {
+        onError: (err, _vendorId, context) => {
             if (context?.previous) queryClient.setQueryData(['vendor', 'favorites'], context.previous);
+            Toast.error("Couldn't add favourite", errorMessage(err));
         },
-        onSettled: () => {
+        onSettled: (_data, _err, vendorId) => {
             queryClient.invalidateQueries({ queryKey: ['vendor', 'favorites'] });
+            queryClient.invalidateQueries({ queryKey: ['vendor', 'favorites', 'check', vendorId] });
         },
         onSuccess: () => {
             Toast.success("Added to Favourites", "Vendor has been added to your favourites.");
@@ -77,19 +63,10 @@ export function useAddVendorFavorite() {
 
 /** Remove a vendor from favourites */
 export function useRemoveVendorFavorite() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (vendorId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.REMOVE_VENDOR_FAVORITE, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vendor_id: vendorId }),
-            });
-            if (!res.ok) throw new Error(`Remove vendor favorite failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (vendorId: string) => api.post(ROUTES.REMOVE_VENDOR_FAVORITE, { vendor_id: vendorId }),
         onMutate: async (vendorId) => {
             await queryClient.cancelQueries({ queryKey: ['vendor', 'favorites'] });
             const previous = queryClient.getQueryData(['vendor', 'favorites']);
@@ -97,13 +74,16 @@ export function useRemoveVendorFavorite() {
                 if (!old) return old;
                 return old.filter((fav: any) => fav.vendor_id !== vendorId);
             });
+            queryClient.setQueryData(['vendor', 'favorites', 'check', vendorId], { is_favorite: false });
             return { previous };
         },
-        onError: (_err, _vendorId, context) => {
+        onError: (err, _vendorId, context) => {
             if (context?.previous) queryClient.setQueryData(['vendor', 'favorites'], context.previous);
+            Toast.error("Couldn't remove favourite", errorMessage(err));
         },
-        onSettled: () => {
+        onSettled: (_data, _err, vendorId) => {
             queryClient.invalidateQueries({ queryKey: ['vendor', 'favorites'] });
+            queryClient.invalidateQueries({ queryKey: ['vendor', 'favorites', 'check', vendorId] });
         },
         onSuccess: () => {
             Toast.info("Removed from Favourites", "Vendor has been removed from your favourites.");
@@ -113,36 +93,22 @@ export function useRemoveVendorFavorite() {
 
 /** Check if a specific vendor is favourited */
 export function useCheckVendorFavorite(vendorId: string) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<{ is_favorite: boolean }, Error>({
         queryKey: ['vendor', 'favorites', 'check', vendorId],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.CHECK_VENDOR_FAVORITE(vendorId), {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(`Check vendor favorite failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.get<{ is_favorite: boolean }>(ROUTES.CHECK_VENDOR_FAVORITE(vendorId)),
         enabled: !!vendorId,
     });
 }
 
-/** Fetch the last order from a specific vendor */
+/** Fetch the last order from a specific vendor (for quick reorder) */
 export function useLastOrderFromVendor(vendorId: string) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<any, Error>({
         queryKey: ['vendor', 'lastOrder', vendorId],
         queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.LAST_ORDER_FROM_VENDOR(vendorId), {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(`Last order fetch failed: ${res.status}`);
-            const json = await res.json();
-            return json.order; // can be null
+            const json = await api.get<{ order: any }>(ROUTES.LAST_ORDER_FROM_VENDOR(vendorId));
+            return json?.order ?? null;
         },
         enabled: !!vendorId,
     });

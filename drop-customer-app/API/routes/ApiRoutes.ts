@@ -1,6 +1,15 @@
 const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "";
 
-// Legacy export to not instantly break files we haven't migrated to useQuery yet
+/**
+ * The single place backend paths are declared.
+ *
+ * `BackendAPI/tests/test_route_contract.py` parses this file and asserts every
+ * path resolves against the live FastAPI route table, so a typo here fails CI
+ * instead of shipping as a 404 on a user action. Five such 404s were found in the
+ * Phase 1 audit — including "Cancel Order", which could never have worked.
+ */
+
+// Legacy export kept for screens not yet migrated to the typed ROUTES table.
 export const ApiRoutes = {
     // Auth & Profile
     CreateNewUser: { path: `${BASE_URL}/api/auth/create_user`, method: "POST" },
@@ -34,12 +43,14 @@ export const ApiRoutes = {
     GetDetailedCart: { path: `${BASE_URL}/api/cart/get_detailed_cart`, method: "GET" },
     ChangeCartItemQuantity: { path: `${BASE_URL}/api/cart/change_cart_item_quantity`, method: "POST" },
     DeleteCartItem: { path: `${BASE_URL}/api/cart/delete_cart_item`, method: "POST" },
+    CartQuote: { path: `${BASE_URL}/api/cart/quote`, method: "POST" },
     Checkout: { path: `${BASE_URL}/api/cart/mpesa_payment`, method: "POST" },
     ConfirmPayment: { path: `${BASE_URL}/api/cart/confirm_payment`, method: "POST" },
 
     // Orders
     GetOrders: { path: `${BASE_URL}/api/cart/get_orders`, method: "GET" },
-    CancelOrder: { path: `${BASE_URL}/api/cart/orders`, method: "POST" },
+    // Order-scoped actions live under /api/cart/orders/{id}/… — see ROUTES below.
+    CancelOrder: (id: string) => ({ path: `${BASE_URL}/api/cart/orders/${id}/cancel`, method: "PUT" }),
 
     // Reviews
     SubmitReview: { path: `${BASE_URL}/api/reviews`, method: "POST" },
@@ -68,7 +79,7 @@ export const ApiRoutes = {
     UseSavedLocation: (id: string) => ({ path: `${BASE_URL}/api/auth/saved-locations/${id}/use`, method: "POST" }),
 };
 
-// New strictly typed routes for React Query
+// Strictly typed routes for React Query
 export const ROUTES = {
     // Auth
     CREATE_USER: `${BASE_URL}/api/auth/create_user`,
@@ -83,6 +94,7 @@ export const ROUTES = {
 
     // Vendors
     GET_VENDORS: `${BASE_URL}/api/vendors`,
+    GET_VENDOR_DIRECTORY: `${BASE_URL}/api/vendors/directory`,
     GET_NEARBY_VENDORS: `${BASE_URL}/api/nearby_vendors`,
     GET_TOP_RATED_VENDORS: `${BASE_URL}/api/top_rated_vendors`,
     GET_VENDOR_DETAILS: `${BASE_URL}/api/vendor_details_and_products`,
@@ -104,14 +116,25 @@ export const ROUTES = {
     GET_DETAILED_CART: `${BASE_URL}/api/cart/get_detailed_cart`,
     CHANGE_CART_QTY: `${BASE_URL}/api/cart/change_cart_item_quantity`,
     DELETE_CART_ITEM: `${BASE_URL}/api/cart/delete_cart_item`,
+    // Authoritative server-side price for the current cart. The client renders
+    // this verbatim rather than recomputing the total locally.
+    CART_QUOTE: `${BASE_URL}/api/cart/quote`,
     CHECKOUT: `${BASE_URL}/api/cart/mpesa_payment`,
     CONFIRM_PAYMENT: `${BASE_URL}/api/cart/confirm_payment`,
     GET_DELIVERY_FEE: `${BASE_URL}/api/delivery-fee`,
 
     // Orders
     GET_ORDERS: `${BASE_URL}/api/cart/get_orders`,
-    CANCEL_ORDER: `${BASE_URL}/api/cart/orders`,
+    GET_ACTIVE_ORDER: `${BASE_URL}/api/cart/orders/active`,
+    GET_LAST_COMPLETED_ORDER: `${BASE_URL}/api/cart/orders/last-completed`,
+    // These three were previously built inline as `/api/orders/{id}/…`, which the
+    // backend has never served — cancellation and mismatch resolution 404'd every
+    // time. The real prefix is /api/cart.
+    CANCEL_ORDER: (orderId: string) => `${BASE_URL}/api/cart/orders/${orderId}/cancel`,
+    RESOLVE_MISMATCH: (orderId: string) => `${BASE_URL}/api/cart/orders/${orderId}/resolve-mismatch`,
+    ORDER_TRACKING_LOGS: (orderId: string) => `${BASE_URL}/api/cart/orders/${orderId}/tracking-logs`,
     GET_PAYMENT_HISTORY: `${BASE_URL}/api/payments/history`,
+    ORDER_CONTACTS: (orderId: string) => `${BASE_URL}/api/contacts/${orderId}`,
 
     // Favourites
     GET_FAVORITES: `${BASE_URL}/api/favorites`,
@@ -128,9 +151,12 @@ export const ROUTES = {
     // Reviews
     SUBMIT_REVIEW: `${BASE_URL}/api/reviews`,
     TARGET_REVIEWS: (targetType: string, targetId: string) => `${BASE_URL}/api/reviews/target/${targetType}/${targetId}`,
+    RATING_SUMMARY: (targetType: string, targetId: string) => `${BASE_URL}/api/reviews/summary/${targetType}/${targetId}`,
 
     // Tracking
-    RIDER_LOCATION: (orderId: string) => `${BASE_URL}/api/rider/orders/${orderId}/rider-location`,
+    // Customer-scoped: the previous `/api/rider/...` path is guarded by
+    // `get_current_rider` and returned 403 for every customer.
+    RIDER_LOCATION: (orderId: string) => `${BASE_URL}/api/cart/orders/${orderId}/rider-location`,
 
     // Categories (Kenya market)
     GET_CATEGORIES: `${BASE_URL}/api/categories`,
@@ -141,7 +167,8 @@ export const ROUTES = {
     ADD_VENDOR_FAVORITE: `${BASE_URL}/api/vendor-favorites/add`,
     REMOVE_VENDOR_FAVORITE: `${BASE_URL}/api/vendor-favorites/remove`,
     CHECK_VENDOR_FAVORITE: (vendorId: string) => `${BASE_URL}/api/vendor-favorites/check/${vendorId}`,
-    LAST_ORDER_FROM_VENDOR: (vendorId: string) => `${BASE_URL}/api/vendor-favorites/last-order/${vendorId}`,
+    // Path segments were inverted (`/last-order/{id}` instead of `/{id}/last-order`).
+    LAST_ORDER_FROM_VENDOR: (vendorId: string) => `${BASE_URL}/api/vendor-favorites/${vendorId}/last-order`,
 
     // Saved Locations
     GET_SAVED_LOCATIONS: `${BASE_URL}/api/auth/saved-locations`,
@@ -154,6 +181,15 @@ export const ROUTES = {
     WALLET_TOP_UP: `${BASE_URL}/api/wallet/top-up`,
     WALLET_WITHDRAW: `${BASE_URL}/api/wallet/withdraw`,
     GET_TRANSACTIONS: `${BASE_URL}/api/wallet/transactions`,
+
+    // Maps — Google web services, proxied.
+    // The apps' Maps keys are SDK-restricted and cannot call Places; the server
+    // holds the only key that can. See docs/maps-architecture.md.
+    PLACES_AUTOCOMPLETE: `${BASE_URL}/api/maps/places/autocomplete`,
+    PLACE_DETAILS: `${BASE_URL}/api/maps/places/details`,
+
+    // Misc
+    APP_VERSION: `${BASE_URL}/api/app-version`,
 } as const;
 
 export default ApiRoutes;

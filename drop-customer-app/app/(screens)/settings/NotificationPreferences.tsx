@@ -1,13 +1,13 @@
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { TouchableOpacity } from "react-native";
 import { View, Text, ScrollView, Switch } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
 import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { Toast } from "@/lib/toast";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 export default function NotificationPreferences() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -79,9 +79,9 @@ export default function NotificationPreferences() {
                     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
                 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Notifications
                 </Text>

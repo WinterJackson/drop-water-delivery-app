@@ -36,10 +36,31 @@ Key Business Workflows:
 - Location tracking requires explicit permissions. Ensure `expo-location` permission requests are handled gracefully, explaining to the rider *why* location is needed.
 - Only broadcast WebSocket locations when an order is actively in progress to save battery and reduce server load.
 
-### 4. Image Uploads
+### 4. Maps keys and Google web services
+- The Maps key is **not** in `app.json`. `app.config.js` injects
+  `GOOGLE_MAPS_ANDROID_API_KEY` / `GOOGLE_MAPS_IOS_API_KEY` from the environment at
+  build time; both are restricted to this package/bundle and to the Maps SDK only.
+- Never read the key back at runtime — Expo scrubs it from the public manifest, so
+  `Constants.expoConfig?...googleMaps` is always `undefined`.
+- Never call a Google web service (Directions, Places, Geocoding) from the client.
+  Those keys cannot, and a key that could would be extractable from the binary.
+  Call the backend proxy instead. See `docs/maps-architecture.md`.
+
+### 5. Image Uploads
 - Proof of Delivery (POD) and Bottle Rejection evidence require photos.
 - Use `expo-image-picker` to take the photo, and `expo-image-manipulator` to aggressively compress the image (e.g., width 800, quality 0.7, WebP format).
 - Upload the compressed image using `SecureUpload` utility to `POST /api/rider/upload_proof`. This will return an S3 key which is then attached to the `CompleteDelivery` API call.
 
-### 5. Optimistic UI Updates
+### 6. Optimistic UI Updates
 - When transitioning order statuses (e.g., Accept, Pick Up, Complete), use React Query's `onMutate` to optimistically update the local cache, providing an instant, snappy feel to the rider. Always handle `onError` to rollback the cache if the network request fails.
+
+### Session teardown
+`hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
+state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:
+sessions also end without anyone tapping "Sign out" — every query signs the user
+out on a 401, and Clerk ends a revoked session on its own. Those routes left the
+cache fully populated for the next account on the device.
+
+`clearPushToken()` is the exception that must stay in the handlers: the endpoint
+is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
+device receiving the previous account's notifications.

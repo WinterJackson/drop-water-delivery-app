@@ -1,63 +1,47 @@
+import { retryTransientOnly } from '@/API/errors';
 import { ROUTES } from '@/API/routes/ApiRoutes';
+import { useApiRequest } from '@/API/useApiClient';
 import { useAuth } from '@clerk/clerk-expo';
+import type { BasicUser } from '@/types/models';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export function useUserDetails() {
-    const { getToken, isLoaded, isSignedIn } = useAuth();
-    return useQuery({
+    const { isLoaded, isSignedIn } = useAuth();
+    const api = useApiRequest();
+    return useQuery<BasicUser, Error>({
         queryKey: ['user', 'details'],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) throw new Error("No token found");
-            const res = await fetch(`${ROUTES.GET_USER_DETAILS}?t=${Date.now()}`, {
-                method: "GET",
-                headers: { 
-                    Authorization: `Bearer ${token}`,
-                    'Cache-Control': 'no-cache, no-store, must-revalidate'
-                }
-            });
-            if (!res.ok) throw new Error("Network error");
-            return res.json();
-        },
+        queryFn: () =>
+            api.get<BasicUser>(ROUTES.GET_USER_DETAILS, {
+                // Profile data drives checkout gating (location, wallet, debt), so
+                // never serve it from an intermediary cache.
+                headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+                params: { t: Date.now() },
+            }),
         enabled: isLoaded && isSignedIn,
-        retry: 2
+        retry: retryTransientOnly(2)
     });
 }
 
 export function useUpdateLocation() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (coords: { lat: number; lng: number }) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.UPDATE_LOCATION, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify(coords)
-            });
-            if (!res.ok) throw new Error("Location update failed");
-            return res.json();
-        },
+        mutationFn: (coords: { lat: number; lng: number }) => api.post(ROUTES.UPDATE_LOCATION, coords),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
+            // Delivery fee and serviceability depend on the destination.
+            queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
+            queryClient.invalidateQueries({ queryKey: ['delivery-fee'] });
+            queryClient.invalidateQueries({ queryKey: ['vendors'] });
         }
     });
 }
 
 export function useUpdateProfilePic() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (profile_pic: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.UPDATE_PROFILE_PIC, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ profile_pic })
-            });
-            if (!res.ok) throw new Error("Profile pic update failed");
-            return res.json();
-        },
+        mutationFn: (profile_pic: string) => api.post(ROUTES.UPDATE_PROFILE_PIC, { profile_pic }),
         onMutate: async (newProfilePic) => {
             await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
             const previousUser = queryClient.getQueryData(['user', 'details']);
@@ -67,7 +51,7 @@ export function useUpdateProfilePic() {
             });
             return { previousUser };
         },
-        onError: (err, newProfilePic, context) => {
+        onError: (_err, _newProfilePic, context) => {
             if (context?.previousUser) {
                 queryClient.setQueryData(['user', 'details'], context.previousUser);
             }
@@ -79,38 +63,18 @@ export function useUpdateProfilePic() {
 }
 
 export function useCreateUser() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useMutation({
-        mutationFn: async (userData: any) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.CREATE_USER, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify(userData)
-            });
-            if (!res.ok) throw new Error("User creation failed");
-            return res.json();
-        }
+        mutationFn: (userData: any) => api.post(ROUTES.CREATE_USER, userData),
     });
 }
 
 export function useUpdateUser() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (userData: { full_name?: string; phone_number?: string | null; preferences?: any; payment_methods?: any[]; floor_level?: number; has_elevator?: boolean }) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.UPDATE_USER, {
-                method: "PUT",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify(userData)
-            });
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.detail || "User update failed");
-            }
-            return res.json();
-        },
+        mutationFn: (userData: { full_name?: string; phone_number?: string | null; preferences?: any; payment_methods?: any[]; floor_level?: number; has_elevator?: boolean }) =>
+            api.put(ROUTES.UPDATE_USER, userData),
         onMutate: async (newUserData) => {
             await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
             const previousUser = queryClient.getQueryData(['user', 'details']);
@@ -120,13 +84,24 @@ export function useUpdateUser() {
             });
             return { previousUser };
         },
-        onError: (err, newUserData, context) => {
+        onError: (_err, _newUserData, context) => {
             if (context?.previousUser) {
                 queryClient.setQueryData(['user', 'details'], context.previousUser);
             }
         },
-        onSettled: () => {
+        onSettled: (_data, _err, variables) => {
             queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
+            // Floor level and elevator feed the staircase surcharge.
+            if (variables?.floor_level !== undefined || variables?.has_elevator !== undefined) {
+                queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
+            }
         }
+    });
+}
+
+export function useDeleteAccount() {
+    const api = useApiRequest();
+    return useMutation({
+        mutationFn: () => api.del(ROUTES.DELETE_ACCOUNT),
     });
 }

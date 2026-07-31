@@ -26,7 +26,7 @@ const RateOrder = () => {
 
     const { mutateAsync: mutateReview } = useSubmitReview();
 
-    const submitReview = async (targetType: string, targetId: string, rating: number) => {
+    const submitReview = async (targetType: "vendor" | "rider", targetId: string, rating: number) => {
         if (rating === 0) return true; // Skip if no rating selected
         if (!targetId) return true; // Safety check
         try {
@@ -63,7 +63,11 @@ const RateOrder = () => {
         setLoading(false);
         if (vendorSuccess && riderSuccess) {
             Toast.success("Thank you for your feedback!");
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            // React Query prefix-matches from the *start* of the key. Orders are
+            // cached under ['customer', 'orders', userId], so `['orders']` matched
+            // nothing and the list never refreshed — the rated order kept its
+            // "Rate Delivery" action and could be submitted again.
+            queryClient.invalidateQueries({ queryKey: ['customer', 'orders'] });
             router.back();
         } else {
             Toast.error("Failed to submit some reviews. Please try again.");

@@ -14,6 +14,7 @@ import * as Haptics from "expo-haptics";
 import { useRiderProfile, useRiderEarnings } from "@/hooks/queries/useRiderData";
 import { useWalletTransactions, useWalletWithdraw } from "@/hooks/queries/useWallet";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { useWalletSummary } from "@/hooks/queries/useWallet";
 
 export default function Cashout() {
   const router = useRouter();
@@ -34,7 +35,12 @@ export default function Cashout() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isWithdrawModalVisible, setIsWithdrawModalVisible] = useState(false);
 
-  const balance = rider?.wallet_balance || 0;
+  const { data: walletSummary, refetch: refetchSummary } = useWalletSummary();
+  const balance = walletSummary?.wallet_balance ?? rider?.wallet_balance ?? 0;
+  // Float committed to cash orders still being carried settles the vendor and
+  // platform cuts on delivery, so it is not withdrawable.
+  const committedFloat = walletSummary?.committed_cash_float ?? 0;
+  const availableToWithdraw = walletSummary?.available_for_withdrawal ?? balance;
   const freeCashoutThreshold = 1000;
   const progress = Math.min((balance / freeCashoutThreshold) * 100, 100);
 
@@ -42,6 +48,7 @@ export default function Cashout() {
     refetchProfile();
     refetchEarnings();
     refetchTx();
+    refetchSummary();
   };
 
   const handleTopUp = async () => {
@@ -142,11 +149,40 @@ export default function Cashout() {
         {/* Balance Card */}
         <View className="rounded-[24px] overflow-hidden mb-6" style={{ backgroundColor: BRAND.primary }}>
           <View className="px-6 pt-8 pb-10 items-center">
-            <Text className="text-white/80 font-medium text-base mb-2">Available Float Balance</Text>
+            <Text className="text-white/80 font-medium text-base mb-2">Float Balance</Text>
             {isLoading ? (
               <Skeleton width={180} height={48} borderRadius={8} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
             ) : (
               <Text className="text-white font-bold text-5xl tracking-tight">KSH {balance.toLocaleString()}</Text>
+            )}
+
+            {committedFloat > 0 && (
+              <View className="w-full mt-4 bg-white/10 rounded-2xl px-4 py-3">
+                <View className="flex-row justify-between mb-1">
+                  <Text className="text-white/80 text-sm">Held for cash orders</Text>
+                  <Text className="text-white font-semibold text-sm">
+                    KSH {committedFloat.toLocaleString()}
+                  </Text>
+                </View>
+                <View className="flex-row justify-between">
+                  <Text className="text-white/80 text-sm">Available to withdraw</Text>
+                  <Text className="text-white font-bold text-sm">
+                    KSH {availableToWithdraw.toLocaleString()}
+                  </Text>
+                </View>
+                <Text className="text-white/60 text-xs mt-2">
+                  Released as you deliver the cash orders you're carrying.
+                </Text>
+              </View>
+            )}
+
+            {walletSummary?.is_in_arrears && (
+              <View className="w-full mt-4 bg-red-500/25 rounded-2xl px-4 py-3">
+                <Text className="text-white font-bold text-sm mb-1">Balance overdrawn</Text>
+                <Text className="text-white/80 text-xs">
+                  Top up to clear this before you can accept further cash orders.
+                </Text>
+              </View>
             )}
             
             <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">

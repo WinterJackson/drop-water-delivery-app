@@ -1,9 +1,10 @@
 import React, { useContext } from "react";
-import { Modal, View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { Modal, View, Text, ActivityIndicator } from "react-native";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
 import * as Haptics from "expo-haptics";
 import { usePopupStore } from "@/stores/popupStore";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 export default function PopupModal() {
     const { visible, config, isLoading, hide } = usePopupStore();
@@ -63,7 +64,7 @@ export default function PopupModal() {
                     <View className="flex-row gap-4">
                         {!isAlertOnly && (
                             /* Cancel Button */
-                            <TouchableOpacity 
+                            <PressableScale 
                                 disabled={isLoading}
                                 onPress={handleCancel} 
                                 className={`flex-1 py-3.5 items-center rounded-xl border ${darkTheme ? "border-gray-700 bg-gray-800" : "border-gray-300 bg-white"}`}
@@ -71,11 +72,11 @@ export default function PopupModal() {
                                 <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
                                     {cancelText}
                                 </Text>
-                            </TouchableOpacity>
+                            </PressableScale>
                         )}
 
                         {/* Confirm / OK Button */}
-                        <TouchableOpacity 
+                        <PressableScale 
                             disabled={isLoading}
                             onPress={handleConfirm} 
                             className={`flex-1 py-3.5 items-center rounded-xl ${isDestructive ? "bg-red-500" : ""}`}
@@ -88,7 +89,7 @@ export default function PopupModal() {
                                     {confirmText}
                                 </Text>
                             )}
-                        </TouchableOpacity>
+                        </PressableScale>
                     </View>
                 </View>
             </View>

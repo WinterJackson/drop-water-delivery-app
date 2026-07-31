@@ -96,3 +96,42 @@ export const useWalletWithdraw = () => {
     },
   });
 };
+
+/**
+ * Balance split into what is spendable and what is committed as float to cash
+ * orders the rider is still carrying.
+ *
+ * Accepting a cash order commits `vendor_net + platform_total` from the rider's
+ * wallet, settled when they deliver. That money is not withdrawable in the
+ * meantime — showing only the raw balance made a refused withdrawal look
+ * arbitrary, and previously the platform allowed the withdrawal anyway and ate
+ * the shortfall.
+ */
+export interface RiderWalletSummary {
+    wallet_balance: number;
+    committed_cash_float: number;
+    available_for_withdrawal: number;
+    /** Negative balance: the rider owes the platform and cannot take cash orders. */
+    is_in_arrears: boolean;
+}
+
+export function useWalletSummary() {
+    const { getToken, signOut } = useAuth();
+    return useQuery<RiderWalletSummary, Error>({
+        queryKey: ['rider', 'wallet-summary'],
+        queryFn: async () => {
+            const token = await getToken();
+            const route = RiderApiRoutes.WalletSummary;
+            const res = await fetch(route.path, {
+                method: route.method,
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            });
+            if (res.status === 401) { await signOut(); throw new Error('401_UNAUTHORIZED'); }
+            if (!res.ok) throw new Error(`Wallet summary fetch failed: ${res.status}`);
+            return res.json();
+        },
+        staleTime: 1000 * 30,
+        retry: (failureCount, error) =>
+            error.message === '401_UNAUTHORIZED' ? false : failureCount < 2,
+    });
+}

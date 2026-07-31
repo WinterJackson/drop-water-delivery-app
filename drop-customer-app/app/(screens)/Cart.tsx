@@ -8,14 +8,14 @@ import {
 	Image,
 	ScrollView,
 	Dimensions,
-	TouchableOpacity,
+	
 	StatusBar,
 	ImageBackground,
 	Modal,
 	StyleSheet,
 	ActivityIndicator,
 } from "react-native";
-import React, { useContext, useEffect, useState, useRef, useCallback } from "react";
+import React, { useContext, useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { BRAND } from "@/constants/brandColors";
 import { randomUUID } from 'expo-crypto';
 //   import { StatusBar } from "expo-status-bar";
@@ -40,14 +40,27 @@ import images from "@/constants/images/images";
 import Context from "@/context/context";
 import { TextInput } from "react-native";
 import { ROUTES } from "@/API/routes/ApiRoutes";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { Toast } from "@/lib/toast";
 import { useUserDetails } from "@/hooks/queries/useUser";
-import { useDetailedCart, useDeliveryFee } from "@/hooks/queries/useCart";
+import { useDetailedCart, useDeliveryFee, useCartQuote } from "@/hooks/queries/useCart";
 import { RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
+import PressableScale from "@/components/ui/PressableScale";
 
 const { width, height } = Dimensions.get("screen");
+
+/**
+ * M-Pesa result codes that are final. Continuing to poll after one of these is
+ * pure noise — the customer has already cancelled, timed out, or failed the PIN.
+ */
+const TERMINAL_MPESA_CODES = new Set(["1", "1032", "1037", "2001"]);
+
+/** Widening poll schedule, in milliseconds. */
+const POLL_INTERVALS_MS = [3000, 3000, 5000, 5000, 8000];
+const POLL_CEILING_MS = 90_000;
 
 export default function Cart() {
 	// <--------------HOOKS---------------->
@@ -56,52 +69,75 @@ export default function Cart() {
 	const { data: User } = useUserDetails()
 	const {currentTheme} = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark"
-	const { getToken, signOut } = useAuth()
+	const api = useApiRequest()
 	const [deliveryType, setDeliveryType] = useState<'quick_swap' | 'keep_my_bottle'>('quick_swap');
 	
 	// <--------------REACT QUERY-------------->
 	const { data: Cart, isLoading: isCartLoading, refetch: refetchCart, isRefetching } = useDetailedCart();
-	
-	const total_quantity = Cart?.cart_item?.reduce((acc: number, item: any) => acc + item.quantity, 0) || 0;
-	let vehicle_class = "motorbike";
-	if (total_quantity > 20) vehicle_class = "truck";
-	else if (total_quantity > 4) vehicle_class = "tuktuk";
-	
-	const vendor_type = Cart?.cart_item?.[0]?.product?.vendor?.vendor_type || 'retail_refill';
 
+	const total_quantity = Cart?.total_quantity ?? Cart?.cart_item?.reduce((acc: number, item: any) => acc + item.quantity, 0) ?? 0;
+	const vendor_type = Cart?.vendor_type || 'retail_refill';
+
+	/**
+	 * The price shown to the customer is computed by the server and rendered
+	 * verbatim. This screen used to re-derive the whole total locally — service
+	 * fee, deposit, welcome discount, surcharges, wallet credit — and its formula
+	 * disagreed with both the amount M-Pesa charged and the amount written to the
+	 * order. Every figure below now comes from one place.
+	 */
+	const {
+		data: quote,
+		isLoading: isQuoteLoading,
+		error: quoteError,
+		refetch: refetchQuote,
+	} = useCartQuote(User?.lat, User?.lng, deliveryType, !!Cart?.cart_item?.length);
+
+	// Per-option fees, used only to label the delivery-type selector.
 	const { data: deliveryFeeData } = useDeliveryFee(
-		Cart?.cart_item?.[0]?.product?.vendor?.lat || User?.lat, 
-		Cart?.cart_item?.[0]?.product?.vendor?.lng || User?.lng,
-		User?.lat, 
-		User?.lng, 
+		Cart?.cart_item?.[0]?.product?.vendor?.lat ?? User?.lat ?? undefined,
+		Cart?.cart_item?.[0]?.product?.vendor?.lng ?? User?.lng ?? undefined,
+		User?.lat ?? undefined,
+		User?.lng ?? undefined,
 		vendor_type,
-		vehicle_class,
+		quote?.vehicle_class ?? 'motorbike',
 		deliveryType
 	);
-	
+
 	// <--------------STATES--------------->
 	const [ modalPage , setModalPage ]= useState(1)
 	const [CheckoutVisible, setCheckoutVisible] = useState(false)
-	const [CheckoutRequestID, setCheckoutRequestID] = useState(null)
-	
-	const [PhoneNumber, setPhoneNumber] = useState<string | null>(() => {
-		if (User?.phone) {
-			let cleaned = User.phone.replace(/[^0-9]/g, '');
-			if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
-			if (cleaned.startsWith('254')) cleaned = cleaned.substring(3);
-			return cleaned;
-		}
-		return null;
-	});
+	const [CheckoutRequestID, setCheckoutRequestID] = useState<string | null>(null)
+
+	const normalisePhone = (raw?: string | null) => {
+		if (!raw) return null;
+		let cleaned = raw.replace(/[^0-9]/g, '');
+		if (cleaned.startsWith('254')) cleaned = cleaned.substring(3);
+		if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
+		return cleaned;
+	};
+
+	/**
+	 * The number to bill, in preference order: the payment method the customer
+	 * marked default in Settings, then their profile number.
+	 *
+	 * Settings → Payment Methods wrote to `payment_methods` and nothing ever read
+	 * it back, so a customer who saved the M-Pesa line they actually pay with was
+	 * still billed on their profile number and had to retype it every checkout.
+	 */
+	const preferredPayoutPhone = useMemo(() => {
+		const methods = User?.payment_methods ?? [];
+		const preferred = methods.find((m) => m?.isDefault && m?.phone) ?? methods.find((m) => m?.phone);
+		return normalisePhone(preferred?.phone ?? User?.phone_number);
+	}, [User?.payment_methods, User?.phone_number]);
+
+	const [PhoneNumber, setPhoneNumber] = useState<string | null>(() => preferredPayoutPhone);
 
 	useEffect(() => {
-		if (User?.phone && !PhoneNumber) {
-			let cleaned = User.phone.replace(/[^0-9]/g, '');
-			if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
-			if (cleaned.startsWith('254')) cleaned = cleaned.substring(3);
-			setPhoneNumber(cleaned);
+		// Only fill a blank field — never overwrite a number the customer is typing.
+		if (preferredPayoutPhone && !PhoneNumber) {
+			setPhoneNumber(preferredPayoutPhone);
 		}
-	}, [User?.phone]);
+	}, [preferredPayoutPhone]);
 	const [PaymentLoading, setPaymentLoading] = useState(false)
 	const [ConfirmPaymentLoading, setConfirmPaymentLoading] = useState(false)
 	const [SuccessModal, setSuccessModal] =useState(false)
@@ -109,51 +145,43 @@ export default function Cart() {
 	const [ErrorModal, setErrorModal] =useState(false)
 	const [PaymentMethod, setPaymentMethod ] = useState<string | null>(null) // mpesa or card/stripe
 	const [idempotencyKey, setIdempotencyKey] = useState<string>(() => randomUUID())
+	const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
+	const [pollAttempts, setPollAttempts] = useState(0)
+	const [paymentTimedOut, setPaymentTimedOut] = useState(false)
 	const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-	const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+	const pollingIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// <-------------VARIABLES------------->
-	const deliveryFee = deliveryFeeData?.delivery_fee ?? deliveryFeeData?.fee ?? 50;
+	// Delivery-type selector labels only — the authoritative fee is quote.delivery_fee.
 	const quickSwapFee = deliveryFeeData?.quick_swap_fee ?? 50;
 	const keepMyBottleFee = deliveryFeeData?.keep_my_bottle_fee ?? 50;
 	const deliveryPremium = Math.max(0, keepMyBottleFee - quickSwapFee);
 
 	const CartLoaded = !isCartLoading;
-	
-	// --- Anti-Fraud Surcharges & Wallet ---
-	const payload_surcharge = total_quantity > 2 ? (total_quantity - 2) * 10.0 : 0;
-	const floor_level = User?.floor_level || 0;
-	const has_elevator = User?.has_elevator || false;
-	const staircase_surcharge = (floor_level > 2 && !has_elevator) ? (floor_level - 2) * 10.0 : 0;
-	const serviceFee = Cart?.service_fee ?? (vendor_type === "wholesale_b2b" ? 50.0 : 12.0);
-	const subtotal = Cart?.total_with_deposit ?? Cart?.total_amount ?? 0;
-	
-	// --- Bottle Deposit & Welcome Offer ---
-	let bottle_fee_total = 0.0;
-	let welcome_discount = 0.0;
-	const isFirstTimeUser = User && !User.has_used_welcome_offer;
 
-	if (deliveryType === 'keep_my_bottle' || isFirstTimeUser) {
-		let highest_bottle_price = 0.0;
-		Cart?.cart_item?.forEach((item: any) => {
-			const capacity = item?.product?.capacity || 0;
-			if (capacity === 20) {
-				bottle_fee_total += 300.0 * item.quantity;
-				highest_bottle_price = Math.max(highest_bottle_price, 300.0);
-			} else if (capacity === 10) {
-				bottle_fee_total += 150.0 * item.quantity;
-				highest_bottle_price = Math.max(highest_bottle_price, 150.0);
-			}
-		});
-		
-		if (isFirstTimeUser && highest_bottle_price > 0) {
-			welcome_discount = bottle_fee_total * 0.30;
-		}
-	}
-	
-	const pre_discount = subtotal + bottle_fee_total - welcome_discount + deliveryFee + serviceFee + payload_surcharge + staircase_surcharge;
-	const max_discount = Math.max(0, pre_discount - 1.0);
-	const wallet_discount = Math.min(User?.wallet_balance || 0, max_discount);
-	const finalTotal = pre_discount - wallet_discount;
+	// ── Every line item below is server-computed ──────────────────────────────
+	const subtotal = quote?.product_subtotal ?? Cart?.total_amount ?? 0;
+	const deliveryFee = quote?.delivery_fee ?? 0;
+	const serviceFee = quote?.service_fee ?? Cart?.service_fee ?? 0;
+	const surgeFee = quote?.surge_fee ?? 0;
+	const deliveryMarkup = quote?.delivery_markup ?? 0;
+	const payload_surcharge = quote?.payload_surcharge ?? 0;
+	const staircase_surcharge = quote?.staircase_surcharge ?? 0;
+	const bottle_fee_total = quote?.bottle_deposit ?? 0;
+	const welcome_discount = quote?.welcome_discount ?? 0;
+	const wallet_discount = quote?.wallet_discount ?? 0;
+	const finalTotal = quote?.total ?? 0;
+
+	// Platform rules, surfaced before checkout rather than as a 400 afterwards.
+	const moqShortfallKg = quote?.moq_kg
+		? Math.max(0, quote.moq_kg - (quote.total_weight_kg ?? 0))
+		: 0;
+	const isOutOfRange = quote ? quote.distance_km > quote.max_distance_km : false;
+	const checkoutBlockedReason = !User?.lat || !User?.lng || (User.lat === 0 && User.lng === 0)
+		? "Set your delivery location to see the total."
+		: quote && !quote.checkout_ready
+			? quote.warnings[0]
+			: null;
+	const canCheckout = !!quote?.checkout_ready && !isQuoteLoading && !checkoutBlockedReason;
 
 	// <-------------FUNCTIONS------------->
 	// API CALLS
@@ -166,145 +194,180 @@ export default function Cart() {
 			Toast.error("Missing Location", "Please set your delivery location on the map before checking out.");
 			return;
 		}
-		// CRIT-03: Validate phone number format before checkout
-		const fullPhone = PhoneNumber ? `254${PhoneNumber}` : null;
-		if (!fullPhone || fullPhone.length < 12 || fullPhone.length > 13) {
-			Toast.error("Invalid Phone", "Please enter a valid Kenyan phone number.");
+		if (!quote) {
+			Toast.error("Price unavailable", "We couldn't price your cart. Pull down to refresh and try again.");
 			return;
 		}
+		if (!quote.checkout_ready) {
+			setErrorMessage(quote.warnings[0] || "This order doesn't meet the delivery requirements yet.");
+			setErrorModal(true);
+			return;
+		}
+		// Server-side format is 2547XXXXXXXX / 2541XXXXXXXX.
+		const fullPhone = PhoneNumber ? `254${PhoneNumber}` : null;
+		if (!fullPhone || !/^254[17]\d{8}$/.test(fullPhone)) {
+			Toast.error("Invalid Phone", "Enter a valid Safaricom number, e.g. 712345678.");
+			return;
+		}
+
 		setPaymentLoading(true)
-		const token = await getToken()
-		// CRIT-01: Only send cart ID and phone — backend derives user from JWT token
-		// CRIT-04: Guard against NaN by defaulting to 0
+		// Only the cart id, destination and phone. The server prices the order —
+		// a client-supplied amount would be a price-manipulation vector.
 		const payload = {
-			phone : fullPhone,
-			amount : Math.ceil(finalTotal),
-			id : Cart?.id,
-			user_id: User?.id,
-			lat: User?.lat ?? 0,
-			lng: User?.lng ?? 0,
-			delivery_type: vendor_type === "wholesale_b2b" ? "standard" : deliveryType,
-			payment_method: PaymentMethod || "mpesa"
+			phone: fullPhone,
+			id: Cart?.id,
+			lat: User.lat,
+			lng: User.lng,
+			delivery_type: deliveryType,
+			payment_method: PaymentMethod || "mpesa",
 		}
 		try {
-			const apiCall = await fetch(ApiRoutes.Checkout.path, {
-				method : ApiRoutes.Checkout.method,
-				headers: {
-					"Authorization" : `Bearer ${token}`,
-					"Content-Type" : "application/json",
-					"Idempotency-Key" : idempotencyKey
-				},
-				body : JSON.stringify(payload)
-			})
-			const response = await apiCall.json()
-			if (!apiCall.ok) {
-				if (apiCall.status === 401) {
-					Toast.error("Session Expired", "Please log in again to continue.");
-					signOut();
-					router.replace("/(Auth)/sign-in/screen");
-				} else if (apiCall.status === 400) {
-					setErrorMessage(response?.detail || "Your delivery address exceeds the allowed distance. Please update your location.");
-					setErrorModal(true);
-					setCheckoutVisible(false);
-				} else {
-					Toast.error("Checkout Failed", response?.detail || "Please try again.");
-				}
-				setPaymentLoading(false);
-				return;
-			}
-			
+			const response = await api.post<{
+				payment_method: string;
+				CheckoutRequestID: string | null;
+				order_id: string;
+				amount: number;
+			}>(ROUTES.CHECKOUT, payload);
+
 			if (response.payment_method === "cash") {
-				// Cash orders are completed immediately without polling
-				fetch_cart()
+				// Cash orders are complete immediately — nothing to poll for.
+				await refetchCart()
 				fetchCart()
 				setPaymentLoading(false)
 				setCheckoutVisible(false)
 				router.push("/(screens)/order-confirmation")
 				return;
 			}
-			
+
 			setCheckoutRequestID(response.CheckoutRequestID)
-			fetch_cart()
+			setPendingOrderId(response.order_id)
+			setPollAttempts(0)
+			await refetchCart()
 			fetchCart()
 			setPaymentLoading(false)
 			nextPage()
 			setModalPage(3)
 		} catch (error: unknown) {
-			if (__DEV__) console.error("Checkout error:", (error as Error)?.message);
-			Toast.error("Network Error", "Could not reach payment server.");
 			setPaymentLoading(false)
+			const status = error instanceof ApiError ? error.status : 0;
+			const message = errorMessage(error, "Could not reach the payment server.");
+
+			if (status === 401) {
+				// The client already signed out; just route back to sign-in.
+				Toast.error("Session Expired", "Please log in again to continue.");
+				router.replace("/(Auth)/sign-in/screen");
+				return;
+			}
+			// 400 (distance/stock/MOQ), 402 (debt), 409 (locked cart or orphaned
+			// payment) all carry an actionable backend message — show it as-is.
+			if (status === 400 || status === 402 || status === 409) {
+				setErrorMessage(message);
+				setErrorModal(true);
+				setCheckoutVisible(false);
+				return;
+			}
+			Toast.error("Checkout Failed", message);
 		}
 	}
 
-	// CRIT-02: isManualConfirm flag distinguishes manual confirm from auto-poll
-	const confirmTransaction = async (isManualConfirm = false) => {
+	/**
+	 * Poll Safaricom for the outcome of the STK push.
+	 *
+	 * `isManualConfirm` distinguishes the customer tapping "I've paid" from the
+	 * background poll. Terminal M-Pesa result codes stop the loop immediately —
+	 * previously the app kept polling for the full 60 s after the customer had
+	 * already cancelled the prompt or entered a wrong PIN.
+	 */
+	const confirmTransaction = useCallback(async (isManualConfirm = false) => {
+		if (!CheckoutRequestID) return;
 		setConfirmPaymentLoading(true)
-		const token = await getToken()
-		const payload = {
-			CheckoutRequestID
-		}
+
+		const stopPolling = () => {
+			if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
+			if (pollingIntervalRef.current) clearTimeout(pollingIntervalRef.current);
+			pollingTimeoutRef.current = null;
+			pollingIntervalRef.current = null;
+		};
+
 		try {
-			const apiCall = await fetch( ApiRoutes.ConfirmPayment.path, {
-				method : ApiRoutes.ConfirmPayment.method,
-				headers : {
-					"Authorization" : `Bearer ${token}`,
-					"Content-Type" : "application/json"
-				},
-				body : JSON.stringify(payload)
-			})
-			const response = await apiCall.json()
-			if(response.code == "0"){
-				// SUCCESS: Clear polling, close checkout, show success
-				if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
-				if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+			const response = await api.post<{ code?: string; message?: string }>(
+				ROUTES.CONFIRM_PAYMENT,
+				{ CheckoutRequestID }
+			);
+
+			if (response?.code === "0") {
+				stopPolling();
 				setCheckoutVisible(false)
 				setIdempotencyKey(randomUUID());
 				setConfirmPaymentLoading(false)
+				setCheckoutRequestID(null)
+				setPendingOrderId(null)
+				await refetchCart()
+				fetchCart()
 				router.push("/(screens)/order-confirmation")
-			} else {
-				// PENDING/FAIL from auto-poll: only stop polling on manual confirm
-				if (isManualConfirm) {
-					if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
-					if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-					setCheckoutVisible(false)
-					setErrorMessage(response.message || "Payment not confirmed. Please check your M-Pesa messages.")
-					setErrorModal(true)
-				}
-				// Auto-poll: let the interval continue retrying
-				setConfirmPaymentLoading(false)
+				return;
 			}
-		} catch (error: unknown) {
-			if (__DEV__) console.error("Confirm error:", (error as Error)?.message);
+
+			// Terminal failures — no amount of further polling changes these.
+			if (response?.code && TERMINAL_MPESA_CODES.has(response.code)) {
+				stopPolling();
+				setCheckoutVisible(false)
+				setErrorMessage(response.message || "The payment was not completed.")
+				setErrorModal(true)
+				setConfirmPaymentLoading(false)
+				return;
+			}
+
 			if (isManualConfirm) {
-				Toast.error("Verification Failed", "Could not verify payment.");
-				if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
-				if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+				stopPolling();
+				setCheckoutVisible(false)
+				setErrorMessage(response?.message || "Payment not confirmed yet. Check your M-Pesa messages and try again.")
+				setErrorModal(true)
+			}
+			setConfirmPaymentLoading(false)
+		} catch (error: unknown) {
+			if (isManualConfirm) {
+				stopPolling();
+				Toast.error("Verification Failed", errorMessage(error, "Could not verify your payment."));
 			}
 			setConfirmPaymentLoading(false)
 		}
-	}
+	}, [CheckoutRequestID, api, fetchCart, refetchCart, router])
 
-	// CRIT-05: Auto-poll M-Pesa confirmation with 60s timeout
+	// Auto-poll the payment with a widening interval (3s → 5s → 8s, capped) and a
+	// 90s ceiling. A fixed 5s poll was both chattier than necessary early on and
+	// gave up while Safaricom was still processing.
 	useEffect(() => {
 		if (!CheckoutRequestID || modalPage !== 3) return;
 
-		// Poll every 5 seconds
-		pollingIntervalRef.current = setInterval(() => {
-			confirmTransaction();
-		}, 5000);
+		let cancelled = false;
+		let attempt = 0;
 
-		// Timeout after 60 seconds
+		const scheduleNext = () => {
+			if (cancelled) return;
+			const delay = POLL_INTERVALS_MS[Math.min(attempt, POLL_INTERVALS_MS.length - 1)];
+			pollingIntervalRef.current = setTimeout(async () => {
+				attempt += 1;
+				setPollAttempts(attempt);
+				await confirmTransaction();
+				scheduleNext();
+			}, delay);
+		};
+		scheduleNext();
+
 		pollingTimeoutRef.current = setTimeout(() => {
-			if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+			cancelled = true;
+			if (pollingIntervalRef.current) clearTimeout(pollingIntervalRef.current);
 			setConfirmPaymentLoading(false);
-			Toast.error("Payment Timeout", "We couldn't verify your payment. Check your M-Pesa messages and try confirming again.");
-		}, 60000);
+			setPaymentTimedOut(true);
+		}, POLL_CEILING_MS);
 
 		return () => {
-			if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+			cancelled = true;
+			if (pollingIntervalRef.current) clearTimeout(pollingIntervalRef.current);
 			if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
 		};
-	}, [CheckoutRequestID, modalPage]);
+	}, [CheckoutRequestID, modalPage, confirmTransaction]);
 
 
 
@@ -372,13 +435,13 @@ export default function Cart() {
 							...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
 						}}
 					>
-						<TouchableOpacity
+						<PressableScale
 							className="mr-4 z-10"
 							onPress={() => router.back()}
 							activeOpacity={0.6}
 						>
 							<BackButtonMinimal/>
-						</TouchableOpacity>
+						</PressableScale>
 						<Text className={`text-xl font-bold tracking-tight ${darkTheme?"text-white":"text-black"}`}>Your Cart</Text>
 					</View>
 					</View>
@@ -430,11 +493,11 @@ export default function Cart() {
 									</View>
 
 									{/* Delivery Type Selection */}
-									{CartLoaded && Cart?.cart_item?.length > 0 && vendor_type !== 'wholesale_b2b' && (
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && vendor_type !== 'wholesale_b2b' && (
 										<View className={`w-full gap-3 p-5 rounded-[24px] mt-2 mb-2 ${darkTheme ? "bg-[#1B1F24]" : "bg-white border border-gray-100"}`}>
 											<Text className={`text-lg font-bold ${darkTheme ? 'text-white' : 'text-black'}`}>Delivery Option</Text>
 											
-											<TouchableOpacity 
+											<PressableScale 
 												activeOpacity={0.7}
 												onPress={() => setDeliveryType('quick_swap')}
 												className={`w-full p-4 rounded-xl border-2 mb-2 ${deliveryType === 'quick_swap' ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#0e0e0e]' : 'border-gray-200 bg-white')}`}
@@ -448,9 +511,9 @@ export default function Cart() {
 														{deliveryType === 'quick_swap' && <View className="w-3 h-3 rounded-full bg-primary" />}
 													</View>
 												</View>
-											</TouchableOpacity>
+											</PressableScale>
 
-											<TouchableOpacity 
+											<PressableScale 
 												activeOpacity={0.7}
 												onPress={() => setDeliveryType('keep_my_bottle')}
 												className={`w-full p-4 rounded-xl border-2 ${deliveryType === 'keep_my_bottle' ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#0e0e0e]' : 'border-gray-200 bg-white')}`}
@@ -464,13 +527,13 @@ export default function Cart() {
 														{deliveryType === 'keep_my_bottle' && <View className="w-3 h-3 rounded-full bg-primary" />}
 													</View>
 												</View>
-											</TouchableOpacity>
+											</PressableScale>
 										</View>
 									)}
 
 									{/* Total */}
 									{
-										CartLoaded && Cart?.cart_item?.length > 0 && (
+										CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && (
 											<View className={`w-full gap-3 p-5 rounded-[24px] mt-2 mb-4 ${darkTheme ? "bg-[#1B1F24]" : "bg-white border border-gray-100"}`}>
 												<View className="flex-row justify-between items-center">
 													<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -533,6 +596,56 @@ export default function Cart() {
 														KSH {serviceFee.toFixed(2)}
 													</Text>
 												</View>
+
+												{/* Peak-hour surcharge. Previously charged silently. */}
+												{surgeFee > 0 && (
+													<View className="flex-row justify-between items-center pt-2">
+														<View className="flex-row items-center gap-1">
+															<Ionicons name="trending-up" size={16} color={BRAND.primary} />
+															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+																Peak Hour Surcharge
+															</Text>
+														</View>
+														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															KSH {surgeFee.toFixed(2)}
+														</Text>
+													</View>
+												)}
+												{deliveryMarkup > 0 && (
+													<View className="flex-row justify-between items-center pt-2">
+														<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+															Logistics Handling
+														</Text>
+														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															KSH {deliveryMarkup.toFixed(2)}
+														</Text>
+													</View>
+												)}
+												{bottle_fee_total > 0 && (
+													<View className="flex-row justify-between items-center pt-2">
+														<View className="flex-col">
+															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+																Bottle Deposit
+															</Text>
+															<Text className={`text-xs ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+																Refundable when you return the bottle
+															</Text>
+														</View>
+														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															KSH {bottle_fee_total.toFixed(2)}
+														</Text>
+													</View>
+												)}
+												{welcome_discount > 0 && (
+													<View className="flex-row justify-between items-center pt-2">
+														<Text className="text-base font-medium" style={{ color: BRAND.primary }}>
+															Welcome Offer (30% off deposit)
+														</Text>
+														<Text className="text-lg font-semibold" style={{ color: BRAND.primary }}>
+															- KSH {welcome_discount.toFixed(2)}
+														</Text>
+													</View>
+												)}
 												
 												{/* --- Surcharges --- */}
 												{payload_surcharge > 0 && (
@@ -552,7 +665,7 @@ export default function Cart() {
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-row items-center gap-1">
 															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
-																Staircase Surcharge (Floor {floor_level})
+																Staircase Surcharge (Floor {User?.floor_level ?? 0})
 															</Text>
 															{/* Info Icon placeholder */}
 														</View>
@@ -589,19 +702,65 @@ export default function Cart() {
 										)
 									}
 
-									{/* Place Order Button */}
-									{CartLoaded && Cart?.cart_item?.length > 0 && (
-										<TouchableOpacity 
-											className="w-full mt-2" 
-											activeOpacity={0.7}
-											onPress={() => setCheckoutVisible(true)}
-										>
-											<View className={`w-full py-4 rounded-full flex-row items-center justify-center bg-primary`}>
-												<Text className={`text-xl font-bold tracking-tight text-white`}>
-													Checkout • KSH {finalTotal.toFixed(2)}
+									{/* Platform rules, surfaced before checkout rather than as an error after it */}
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && moqShortfallKg > 0 && (
+										<View className={`w-full mt-2 p-4 rounded-2xl border ${darkTheme ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
+											<View className="flex-row items-center gap-2">
+												<Ionicons name="scale-outline" size={18} color="#d97706" />
+												<Text className={`flex-1 text-sm font-medium ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
+													Add {moqShortfallKg.toFixed(0)} kg more to meet the {quote?.moq_kg?.toFixed(0)} kg wholesale minimum
+													({(quote?.total_weight_kg ?? 0).toFixed(0)} / {quote?.moq_kg?.toFixed(0)} kg).
 												</Text>
 											</View>
-										</TouchableOpacity>
+										</View>
+									)}
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && isOutOfRange && (
+										<View className={`w-full mt-2 p-4 rounded-2xl border ${darkTheme ? 'bg-red-500/10 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
+											<View className="flex-row items-center gap-2">
+												<Ionicons name="location-outline" size={18} color="#ef4444" />
+												<Text className={`flex-1 text-sm font-medium ${darkTheme ? 'text-red-300' : 'text-red-700'}`}>
+													This vendor is {quote?.distance_km.toFixed(1)} km away — beyond the {quote?.max_distance_km.toFixed(0)} km limit.
+													Choose a closer vendor or update your delivery location.
+												</Text>
+											</View>
+										</View>
+									)}
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && quoteError && (
+										<PressableScale className="w-full mt-2" onPress={() => refetchQuote()}>
+											<View className={`w-full p-4 rounded-2xl border ${darkTheme ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+												<Text className={`text-sm font-medium text-center ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
+													{errorMessage(quoteError, "Couldn't calculate your total.")} Tap to retry.
+												</Text>
+											</View>
+										</PressableScale>
+									)}
+
+									{/* Place Order Button */}
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && (
+										<PressableScale
+											className="w-full mt-2"
+											activeOpacity={0.7}
+											disabled={!canCheckout}
+											onPress={() => {
+												if (!canCheckout) {
+													Toast.info("Not ready yet", checkoutBlockedReason || "Please resolve the items above first.");
+													return;
+												}
+												setCheckoutVisible(true);
+											}}
+										>
+											<View
+												className={`w-full py-4 rounded-full flex-row items-center justify-center ${canCheckout ? 'bg-primary' : (darkTheme ? 'bg-gray-700' : 'bg-gray-300')}`}
+											>
+												{isQuoteLoading ? (
+													<ActivityIndicator color="white" />
+												) : (
+													<Text className={`text-xl font-bold tracking-tight ${canCheckout ? 'text-white' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`}>
+														{canCheckout ? `Checkout • KSH ${finalTotal.toFixed(2)}` : (checkoutBlockedReason || "Checkout unavailable")}
+													</Text>
+												)}
+											</View>
+										</PressableScale>
 									)}
 								</View>
 							)}
@@ -622,7 +781,7 @@ export default function Cart() {
 					initialPage()
 				}}
 			>
-				<TouchableOpacity 
+				<PressableScale 
 					className={`flex-1 w-full justify-end bg-black/40`}
 					activeOpacity={1}
 					onPress={() => {
@@ -631,7 +790,7 @@ export default function Cart() {
 						initialPage()
 					}}
 				>
-					<TouchableOpacity 
+					<PressableScale 
 						activeOpacity={1} 
 						className={`min-w-full ${darkTheme?"bg-black":"bg-white"} rounded-t-2xl pb-4 border-t ${darkTheme ? 'border-white/10' : 'border-gray-200'}`}
 						onPress={(e) => e.stopPropagation()}
@@ -680,7 +839,7 @@ export default function Cart() {
 													</View>
 													<View className="flex-row justify-center gap-4 px-4 mt-2">
 														{/* M-PESA */}
-														<TouchableOpacity
+														<PressableScale
 															activeOpacity={0.6}
 															className="flex-1 h-[60px] justify-center items-center max-w-[160px]"
 															onPress={()=> {
@@ -692,10 +851,10 @@ export default function Cart() {
 															<View className={`w-full h-full justify-center items-center rounded-2xl bg-green-700`}>
 																<Image source={images.mpesa_logo} className="h-[40px] w-[90px]" resizeMode="contain" />
 															</View>
-														</TouchableOpacity>
+														</PressableScale>
 
 														{/* Cash on Delivery */}
-														<TouchableOpacity
+														<PressableScale
 															activeOpacity={0.6}
 															className="flex-1 h-[60px] justify-center items-center max-w-[160px]"
 															onPress={() => {
@@ -708,7 +867,7 @@ export default function Cart() {
 																<Ionicons name="cash-outline" size={24} color={BRAND.primary} />
 																<Text className={`font-bold mt-1 text-xs ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>Cash on Delivery</Text>
 															</View>
-														</TouchableOpacity>
+														</PressableScale>
 													</View>
 													</View>
 
@@ -756,7 +915,7 @@ export default function Cart() {
 																	</Text>
 																</View>
 																<View className={` flex-row justify-center gap-3`}>
-																	<TouchableOpacity
+																	<PressableScale
 																		disabled={!PhoneNumber || PhoneNumber.length < 8 || PaymentLoading}
 																		activeOpacity={0.6}
 																		onPress={()=>{
@@ -765,8 +924,8 @@ export default function Cart() {
 																		}}
 																	>
 																		<BackButtonMinimal />
-																	</TouchableOpacity>
-																	<TouchableOpacity
+																	</PressableScale>
+																	<PressableScale
 																		disabled={!PhoneNumber || PhoneNumber.length < 8 || PaymentLoading}
 																		activeOpacity={0.6}
 																		onPress={()=>{
@@ -783,7 +942,7 @@ export default function Cart() {
 																				<Text className={`font-bold text-xl ${darkTheme?"":"text-white"}`}>Continue</Text>
 																			)}
 																		</View>
-																	</TouchableOpacity>
+																	</PressableScale>
 																</View>
 															</View>
 														)
@@ -802,7 +961,7 @@ export default function Cart() {
 																</Text>
 																
 																<View className={` flex-row justify-center gap-3 w-full`}>
-																	<TouchableOpacity
+																	<PressableScale
 																		disabled={PaymentLoading}
 																		activeOpacity={0.6}
 																		onPress={()=>{
@@ -811,8 +970,8 @@ export default function Cart() {
 																		}}
 																	>
 																		<BackButtonMinimal />
-																	</TouchableOpacity>
-																	<TouchableOpacity
+																	</PressableScale>
+																	<PressableScale
 																		disabled={PaymentLoading}
 																		activeOpacity={0.6}
 																		onPress={()=>{
@@ -827,7 +986,7 @@ export default function Cart() {
 																				<Text className={`font-bold text-lg text-white`}>Place Order</Text>
 																			)}
 																		</View>
-																	</TouchableOpacity>
+																	</PressableScale>
 																</View>
 															</View>
 														)
@@ -841,13 +1000,53 @@ export default function Cart() {
 												>
 													<View className={`w-full items-center gap-5 py-3`}>
 														<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>Confirmation</Text>
-														<Text className={`text-base text-center px-4 ${darkTheme?"text-gray-300":"text-gray-600"}`}>Please press Confirm once you have completed the M-PESA transaction on your phone.</Text>
-														<TouchableOpacity
-															disabled={CheckoutRequestID === null || PaymentLoading || ConfirmPaymentLoading}
+														{paymentTimedOut ? (
+															// The customer is never stranded: after the polling window closes
+															// the order still exists and can be checked again or opened in
+															// Orders. Previously this was a dead end with only a toast.
+															<>
+																<Text className={`text-base text-center px-4 ${darkTheme?"text-gray-300":"text-gray-600"}`}>
+																	We haven&apos;t received confirmation from M-PESA yet. Your order is saved — check your
+																	M-PESA messages, then try again.
+																</Text>
+																<PressableScale
+																	activeOpacity={0.6}
+																	onPress={() => {
+																		setPaymentTimedOut(false);
+																		setPollAttempts(0);
+																		confirmTransaction(true);
+																	}}
+																>
+																	<View className={`h-[40px] min-w-[200px] items-center justify-center px-6 rounded-full bg-green-500`}>
+																		<Text className="font-bold text-lg text-white">Check again</Text>
+																	</View>
+																</PressableScale>
+																<PressableScale
+																	activeOpacity={0.6}
+																	onPress={() => {
+																		setCheckoutVisible(false);
+																		setPaymentTimedOut(false);
+																		router.push(pendingOrderId
+																			? `/(screens)/OrderDetail?orderId=${pendingOrderId}`
+																			: "/(screens)/Orders");
+																	}}
+																>
+																	<Text className={`text-base font-medium underline ${darkTheme?"text-gray-300":"text-gray-600"}`}>
+																		View my order
+																	</Text>
+																</PressableScale>
+															</>
+														) : (
+															<Text className={`text-base text-center px-4 ${darkTheme?"text-gray-300":"text-gray-600"}`}>
+																{pollAttempts > 0
+																	? "Waiting for M-PESA to confirm your payment…"
+																	: "Enter your M-PESA PIN on your phone. We'll confirm automatically."}
+															</Text>
+														)}
+														<PressableScale
+															disabled={CheckoutRequestID === null || PaymentLoading || ConfirmPaymentLoading || paymentTimedOut}
 															activeOpacity={0.6}
 															onPress={()=>{
-																// Checkout()
-																// nextPage()
 																confirmTransaction(true)
 															}}
 														>
@@ -860,14 +1059,14 @@ export default function Cart() {
 																	<Text className={`font-bold text-xl ${darkTheme?"":"text-white"}`}>Confirm</Text>
 																)}
 															</View>
-														</TouchableOpacity>
+														</PressableScale>
 													</View>
 												</View>
 											</Animated.View>
 								</View>
 								<View className="w-full flex-row items-center justify-center">
 									{/* buttons */}
-									{/* <TouchableOpacity
+									{/* <PressableScale
 										activeOpacity={0.6}
 										onPress={()=> {
 											nextPage()
@@ -876,11 +1075,11 @@ export default function Cart() {
 										<View className={`rounded-full px-6 py-2 bg-blue-500`}>
 											<Text className={`font-bold text-xl ${darkTheme?"text-black":"text-white"}`}>Next</Text>
 										</View>
-									</TouchableOpacity> */}
+									</PressableScale> */}
 								</View>
 							</ScrollView>
-					</TouchableOpacity>
-				</TouchableOpacity>
+					</PressableScale>
+				</PressableScale>
 			</Modal>
 
 			{/* <------------------------------SUCCESS MODAL------------------------------> */}
@@ -892,22 +1091,22 @@ export default function Cart() {
 						</View>
 						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>Transaction was completed successfully.</Text>
 						<View className={`gap-4 flex-row `}>
-							<TouchableOpacity
+							<PressableScale
 								activeOpacity={0.6}
 								onPress={()=>{
 									router.push("/(screens)")
 								}}
 							>
 								<Button style={`rounded-full ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Continue Shopping "} textStyle={`font-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
-							</TouchableOpacity>
-							<TouchableOpacity
+							</PressableScale>
+							<PressableScale
 								activeOpacity={0.6}
 								onPress={()=>{
 									router.push("/(screens)/Orders")
 								}}
 							>
 								<Button style={"bg-primary rounded-full"} label={"See Order "} textStyle={`font-semibold text-lg text-white`}/>
-							</TouchableOpacity>
+							</PressableScale>
 							
 						</View>
 					</View>
@@ -924,7 +1123,7 @@ export default function Cart() {
 						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>{ErrorMessage}</Text>
 						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}></Text>
 						<View className={`gap-4 flex-row `}>
-							<TouchableOpacity
+							<PressableScale
 								activeOpacity={0.6}
 								onPress={()=>{
 									// router.push("/(screens)")
@@ -932,8 +1131,8 @@ export default function Cart() {
 								}}
 							>
 								<Button style={`rounded-full px-5 ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Cancel"} textStyle={`font-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
-							</TouchableOpacity>
-							<TouchableOpacity
+							</PressableScale>
+							<PressableScale
 								activeOpacity={0.6}
 								onPress={()=>{
 									setErrorModal(false);
@@ -942,7 +1141,7 @@ export default function Cart() {
 								}}
 							>
 								<Button style={"bg-primary rounded-full px-5"} label={"Re-try"} textStyle={`font-semibold text-lg text-white`}/>
-							</TouchableOpacity>
+							</PressableScale>
 							
 						</View>
 					</View>

@@ -1,7 +1,7 @@
 import React, { useContext, useCallback, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, StatusBar, TouchableOpacity, RefreshControl, Dimensions, Image } from "react-native";
+import { View, Text, StatusBar, RefreshControl, Dimensions, Image } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -94,9 +94,9 @@ export default function Offers() {
     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Offers & Deals
                 </Text>

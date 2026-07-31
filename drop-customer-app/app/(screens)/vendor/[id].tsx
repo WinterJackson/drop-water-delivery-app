@@ -15,7 +15,8 @@ import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useVendorDetails } from "@/hooks/queries/useProducts";
 import { useUserDetails } from "@/hooks/queries/useUser";
-import { useAddToCart } from "@/hooks/queries/useCart";
+import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
+import { errorMessage } from "@/API/errors";
 import { useVendorFavorites, useAddVendorFavorite, useRemoveVendorFavorite } from "@/hooks/queries/useVendorFavorites";
 import { useAuth } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
@@ -93,10 +94,13 @@ const VendorDetails = (props: Props) => {
 			fetchCart();
 			Toast.success("Added to Cart", `${productName} added to your cart`);
 		} catch (e: unknown) {
-			if ((e as {type?: string})?.type === "vendor_conflict") {
+			// The vendor name lives on `ApiError.detail`, not on the error itself:
+			// the old read produced "Your cart has items from undefined."
+			if (isVendorConflict(e)) {
+				const { existingVendor } = vendorConflictInfo(e);
 				Popup.show({
 					title: "Replace Cart?",
-					message: `Your cart has items from ${(e as {existing_vendor?: string}).existing_vendor}. Adding this will replace your current cart.`,
+					message: `Your cart has items from ${existingVendor}. Adding this will replace your current cart.`,
 					cancelText: "Cancel",
 					confirmText: "Replace",
 					isDestructive: true,
@@ -107,7 +111,7 @@ const VendorDetails = (props: Props) => {
 				});
 			} else {
 				if (__DEV__) console.error("Quick add to cart failed:", e);
-				Toast.error("Error", "Failed to add to cart");
+				Toast.error("Failed to add", errorMessage(e, "Could not add item to cart."));
 			}
 		}
 	};

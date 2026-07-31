@@ -10,6 +10,7 @@ import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import { useContext } from "react";
 import { PressableScale } from "@/components/ui/PressableScale";
 import {
+    ActivityIndicator,
     Dimensions,
     StatusBar,
     View,
@@ -29,7 +30,7 @@ const Layout = () => {
 	const darkTheme = currentTheme === "dark"  
   const router = useRouter();
   const path = usePathname();
-  const { isSignedIn, getToken, signOut } = useAuth()
+  const { isSignedIn, isLoaded, getToken, signOut } = useAuth()
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   
@@ -57,6 +58,20 @@ const Layout = () => {
   
 
   
+  // Nothing in this group may mount until Clerk has resolved. Every query below
+  // fires on mount, and while `isLoaded` is false `getToken()` yields nothing —
+  // so a deep link straight into this group (the app registers the
+  // `drop-customer` scheme) sent a burst of token-less requests, each 401'd, and
+  // the 401 interceptor signs the user out. A valid session was destroyed by the
+  // act of opening a link.
+  if (!isLoaded) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: darkTheme ? BRAND.bgDark : BRAND.bgLight }}>
+        <ActivityIndicator size="large" color={BRAND.primary} />
+      </View>
+    );
+  }
+
   if (isSignedIn === false) {
     return <Redirect href={'/(Auth)'} />
   }

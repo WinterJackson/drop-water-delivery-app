@@ -10,7 +10,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
-import { useVendorRiders } from "@/hooks/queries/useVendorRiders";
+import { useBottleDebtors, type BottleDebtor } from "@/hooks/queries/useBottleDebtors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import Toast from "react-native-toast-message";
 
@@ -20,7 +20,7 @@ export default function BottleReconciliation() {
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
   
-  const { data: riders = [], isLoading, refetch, isRefetching } = useVendorRiders();
+  const { data: debtors = [], isLoading, refetch, isRefetching } = useBottleDebtors();
 
   const [selectedRider, setSelectedRider] = useState<any>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -28,10 +28,11 @@ export default function BottleReconciliation() {
   const [input20L, setInput20L] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Only show riders who actually owe bottles
-  const ridersWithDebt = riders.filter((r: any) => 
-    (r.pending_10L_empties > 0 || r.pending_20L_empties > 0) && r.status === "approved"
-  );
+  // The endpoint already returns only riders with a positive balance, and it
+  // reads the ledger rather than the registry — so riders who took a radar order
+  // without ever registering with this vendor are included. Filtering on
+  // registry status here is what previously hid them and their bottles.
+  const ridersWithDebt: BottleDebtor[] = debtors;
 
   const openReceiveModal = (rider: any) => {
     setSelectedRider(rider);
@@ -70,7 +71,7 @@ export default function BottleReconciliation() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          rider_id: selectedRider.deliverer_id,
+          rider_id: selectedRider.rider_id,
           received_10L: recv10,
           received_20L: recv20
         })
@@ -117,10 +118,10 @@ export default function BottleReconciliation() {
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={BRAND.primary} />}
       >
         <Text className={`text-sm mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-          Manage physical inventory (empties) owed by your assigned gig-riders. When they return empties from Quick Swap orders, log them here to clear their debt.
+          Empties owed to you by riders who delivered your Quick Swap orders. Log what they physically hand back to clear their balance — every entry is recorded against the order it came from.
         </Text>
 
-        {isLoading && !riders.length ? (
+        {isLoading && !debtors.length ? (
           <View>
              <Skeleton width="100%" height={200} borderRadius={24} style={{ marginBottom: 16 }} />
              <Skeleton width="100%" height={200} borderRadius={24} />
@@ -134,9 +135,9 @@ export default function BottleReconciliation() {
             <Text className={`text-center mt-2 px-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No riders currently owe you any empty bottles.</Text>
           </View>
         ) : (
-          ridersWithDebt.map((rider: any) => (
+          ridersWithDebt.map((rider: BottleDebtor & { profile_pic?: string }) => (
             <View 
-              key={rider.deliverer_id} 
+              key={rider.rider_id} 
               className={`p-5 rounded-3xl mb-4 border ${darkTheme ? "bg-surface-container border-transparent" : "bg-white border-gray-100"}`}
               style={darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
             >

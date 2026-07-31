@@ -17,11 +17,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useDashboard } from "@/hooks/queries/useDashboard";
 import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 export default function OwnerProfile() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { signOut, getToken } = useAuth();
+  const { clearPushToken } = usePushNotifications();
   const { user } = useUser();
   const { data: dashboard } = useDashboard();
   const { data: vendorProfile } = useVendorProfile();
@@ -66,10 +68,13 @@ export default function OwnerProfile() {
       cancelText: "Cancel",
       confirmText: "Sign Out",
       isDestructive: true,
-      onConfirm: () => {
+      onConfirm: async () => {
           Popup.hide();
+          // Detach the push token first — the endpoint is authenticated, so it
+          // cannot be done once the session is gone.
+          await clearPushToken();
           queryClient.clear();
-          signOut();
+          await signOut();
       }
     });
   };

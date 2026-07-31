@@ -18,6 +18,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
+import { useSessionCleanup } from "@/hooks/useSessionCleanup";
 import { initDB } from "../config/database";
 import ThemeContextProvider from "../context/ThemeContext";
 import "../global.css";
@@ -49,6 +50,17 @@ if (__DEV__ && !clerkPublishableKey) {
         "[Clerk] EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is missing. Set it in .env for auth to work.",
     );
 }
+
+/**
+ * Erases the previous rider's cached data whenever a session ends — including
+ * the sign-outs nobody taps, such as the 401 handler in every rider query and a
+ * session revoked by Clerk. Clears the on-disk offline manifest too. Must live
+ * inside both providers.
+ */
+const SessionCleanup = () => {
+    useSessionCleanup();
+    return null;
+};
 
 export default function Layout() {
     const colorScheme = useColorScheme();
@@ -99,6 +111,7 @@ export default function Layout() {
                     tokenCache={tokenCache}
                 >
                     <QueryClientProvider client={queryClient}>
+                        <SessionCleanup />
                         <ThemeProvider
                             value={
                                 colorScheme === "dark"

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/API/errors";
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth } from "@clerk/clerk-expo";
@@ -46,7 +47,7 @@ const CartItem = ({ data, func }: Props) => {
 			if (func) func();
 		} catch (error: any) {
 			setChangeQuantity(false);
-            Toast.error("Update Failed", error?.response?.data?.detail || "Could not update quantity.");
+            Toast.error("Update Failed", errorMessage(error, "Could not update quantity."));
 		}
 	};
 
@@ -58,7 +59,7 @@ const CartItem = ({ data, func }: Props) => {
 			});
 			if (func) func();
 		} catch (error: any) {
-			Toast.error("Delete Failed", error?.response?.data?.detail || "Could not delete item.");
+			Toast.error("Delete Failed", errorMessage(error, "Could not delete item."));
 		}
 	};
 

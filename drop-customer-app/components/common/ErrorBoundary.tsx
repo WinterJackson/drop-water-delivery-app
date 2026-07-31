@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { ERROR_BOUNDARY, BRAND } from '@/constants/brandColors';
 import { UIThemeContext } from '@/context/ThemeContext';
+import { captureError } from '@/utils/sentry';
 
 const ErrorFallbackUI = ({ error, resetCount, maxResets, onReset }: any) => {
   const { currentTheme } = React.useContext(UIThemeContext);
@@ -57,11 +58,15 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[FATAL_CRASH] Caught error:', (error as Error).message, info.componentStack);
-    if (__DEV__) {
-      // Dev only actions if necessary
+    // The boundary swallows the crash, so without this the one class of error
+    // that actually breaks a screen is the only class Sentry never sees.
+    // No-ops when EXPO_PUBLIC_SENTRY_DSN is unset (initSentry skips init).
+    if (!__DEV__) {
+      captureError(error, {
+        componentStack: info.componentStack,
+        resetCount: this.state.resetCount,
+      });
     }
-    // TODO: In production, report to Sentry/Crashlytics:
-    // Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
   }
 
   handleReset = () => {

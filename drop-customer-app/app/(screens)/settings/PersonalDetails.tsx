@@ -1,7 +1,6 @@
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { TouchableOpacity } from "react-native";
 import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Stack, useRouter } from "expo-router";
@@ -97,9 +96,9 @@ export default function PersonalDetails() {
     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Personal Details
                 </Text>
@@ -120,9 +119,9 @@ export default function PersonalDetails() {
                 
                 <View className={`flex-row justify-between items-center mb-5 px-4 py-3 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
                     <Text className={`text-base font-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Has Elevator</Text>
-                    <TouchableOpacity onPress={() => setHasElevator(!hasElevator)} className={`w-14 h-8 rounded-full justify-center px-1 ${hasElevator ? "bg-sky-500" : (darkTheme ? "bg-gray-700" : "bg-gray-300")}`}>
+                    <PressableScale onPress={() => setHasElevator(!hasElevator)} className={`w-14 h-8 rounded-full justify-center px-1 ${hasElevator ? "bg-sky-500" : (darkTheme ? "bg-gray-700" : "bg-gray-300")}`}>
                         <Animated.View className="w-6 h-6 rounded-full bg-white" style={elevatorToggleStyle} />
-                    </TouchableOpacity>
+                    </PressableScale>
                 </View>
 
                 <PressableScale

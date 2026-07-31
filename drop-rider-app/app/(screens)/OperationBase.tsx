@@ -405,7 +405,6 @@ export default function OperationBase() {
 
           <View className="flex-1 pointer-events-auto">
             <PlacesAutocomplete
-              apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""}
               placeholder="Search location..."
               darkTheme={darkTheme}
               onPress={(data, details) => {

@@ -34,10 +34,34 @@ Key Business Workflows:
 - Use WebSockets (`/ws/orders/vendor/{vendor_id}`) to listen for status changes.
 - Upon receiving a WS event, trigger `queryClient.invalidateQueries({ queryKey: ["vendorOrders"] })` to fetch the latest state rather than manually mutating the local cache (to prevent desyncs).
 
-### 4. Image Handling
+### 4. Maps keys and Google web services
+- The Maps key is **not** in `app.json`. `app.config.js` injects
+  `GOOGLE_MAPS_ANDROID_API_KEY` / `GOOGLE_MAPS_IOS_API_KEY` from the environment at
+  build time; both are restricted to `com.drop.vendor` and to the Maps SDK only.
+- Never read the key back at runtime — Expo scrubs it from the public manifest, so
+  `Constants.expoConfig?...googleMaps` is always `undefined`.
+- Never call a Google web service (Directions, Places, Geocoding) from the client.
+  Those keys cannot, and a key that could would be extractable from the binary.
+  Call the backend proxy instead. See `docs/maps-architecture.md`.
+- Getting device coordinates: `getLastKnownPositionAsync()` first, then
+  `getCurrentPositionAsync({ accuracy: Balanced })`. A bare `getCurrentPositionAsync({})`
+  defaults to the highest accuracy and can block for 30s on a cold GPS fix.
+
+### 5. Image Handling
 - Vendors upload Profile Pictures and Product Images.
 - Use `expo-image-manipulator` to aggressively compress images (WebP format, width 800px) before sending to the backend to save bandwidth and S3 storage costs.
 
-### 5. Access Control
+### 6. Access Control
 - Check the current user's role. A user might be a `Store Owner` or `Staff`.
 - `Staff` accounts should have the "Wallet" and "Withdraw" UI elements hidden or disabled.
+
+### Session teardown
+`hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
+state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:
+sessions also end without anyone tapping "Sign out" — every query signs the user
+out on a 401, and Clerk ends a revoked session on its own. Those routes left the
+cache fully populated for the next account on the device.
+
+`clearPushToken()` is the exception that must stay in the handlers: the endpoint
+is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
+device receiving the previous account's notifications.

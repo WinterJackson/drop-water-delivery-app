@@ -17,6 +17,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import * as ImagePicker from 'expo-image-picker';
 import { useQueryClient } from "@tanstack/react-query";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
@@ -28,6 +29,7 @@ export default function Profile() {
   const darkTheme = currentTheme === "dark";
   const { user } = useUser();
   const { getToken, signOut } = useAuth();
+  const { clearPushToken } = usePushNotifications();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -93,7 +95,16 @@ export default function Profile() {
           onConfirm: async () => {
               Popup.setLoading(true);
               try {
+                  // Before `signOut()` — the endpoint is authenticated. On a
+                  // shared till device the token would otherwise stay registered
+                  // and the next person would keep receiving this store's
+                  // incoming-order notifications.
+                  await clearPushToken();
                   await signOut();
+                  // Orders, products, wallet and staff records all sat in the
+                  // cache and survived sign-out, so the next account to sign in
+                  // on this device rendered the previous store's data.
+                  queryClient.clear();
                   Popup.hide();
                   router.replace("/(Auth)");
               } catch (error) {
@@ -127,7 +138,9 @@ export default function Profile() {
                   if (res.ok) {
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                       Toast.success("Goodbye", "Store deleted successfully.");
+                      await clearPushToken();
                       await signOut();
+                      queryClient.clear();
                       Popup.hide();
                       router.replace("/(Auth)");
                   } else {

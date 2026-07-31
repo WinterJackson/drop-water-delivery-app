@@ -1,7 +1,9 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
+import { useApiRequest } from '@/API/useApiClient';
 import { useAuth } from '@clerk/clerk-expo';
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import NetInfo from '@react-native-community/netinfo';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface RiderLocation {
@@ -12,49 +14,55 @@ export interface RiderLocation {
     is_available: boolean;
 }
 
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || '';
+const WS_BASE_URL = (
+    process.env.EXPO_PUBLIC_WS_BASE_URL ||
+    (process.env.EXPO_PUBLIC_BACKEND_BASE_URL || '').replace(/^http/, 'ws')
+);
 
 /**
- * WebSocket-first rider tracking with REST polling fallback.
- * 
- * Strategy:
- * 1. Opens a WebSocket to `/ws/track/{orderId}` for real-time GPS.
- * 2. Falls back to REST polling if WS fails to connect after 3 attempts.
- * 3. Follows drop-realtime-patterns: WS events invalidate React Query cache.
- * 4. Properly cleans up on unmount per react-native-best-practices.
- * 
+ * Live rider tracking: WebSocket first, REST polling as a fallback.
+ *
+ * The single source of truth for customer-side tracking. `Map/[id].tsx` used to
+ * open its own socket, which could never work — it omitted the `?token=` query
+ * parameter (the server closes unauthenticated sockets with 1008) and read
+ * `data.lat` when the server sends `{location: {lat, lng}}`.
+ *
  * @param orderId - The order to track
- * @param enabled - Only track when order is in active transit
+ * @param enabled - Only track while the order is in transit
  * @param pollingIntervalMs - REST fallback interval (default 8s)
  */
 export function useRiderTracking(orderId: string | null, enabled = true, pollingIntervalMs = 8000) {
     const { getToken } = useAuth();
-    const queryClient = useQueryClient();
+    const api = useApiRequest();
     const [data, setData] = useState<RiderLocation | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
+    const [isLive, setIsLive] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const wsFailCountRef = useRef(0);
     const isMountedRef = useRef(true);
+    const appStateRef = useRef(AppState.currentState);
     const MAX_WS_FAILURES = 3;
+    // Clerk session tokens live about a minute and the server enforces `exp` on
+    // open sockets. Without an in-band refresh the tracking map would tear down
+    // and rebuild its connection every minute, flicking "Live" off each time.
+    const AUTH_REFRESH_INTERVAL_MS = 30_000;
+    const authTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Stable refs so the connect callback never needs to be rebuilt.
+    const apiRef = useRef(api);
+    const getTokenRef = useRef(getToken);
+    useEffect(() => { apiRef.current = api; }, [api]);
+    useEffect(() => { getTokenRef.current = getToken; }, [getToken]);
 
     // ── REST Polling Fallback ──────────────────────────────────────────────
     const fetchViaRest = useCallback(async () => {
         if (!orderId) return;
         try {
-            const token = await getToken();
-            const res = await fetch(ROUTES.RIDER_LOCATION(orderId), {
-                method: 'GET',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            });
-            if (!res.ok) throw new Error(`Tracking fetch failed: ${res.status}`);
-            const location = await res.json();
+            const location = await apiRef.current.get<RiderLocation>(ROUTES.RIDER_LOCATION(orderId));
             if (isMountedRef.current) {
                 setData(location);
                 setIsLoading(false);
@@ -66,15 +74,14 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
                 setIsLoading(false);
             }
         }
-    }, [orderId, getToken]);
+    }, [orderId]);
 
-    const startPolling = useCallback(() => {
-        // Immediate first fetch
-        fetchViaRest();
-        // Schedule interval
-        if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-        pollTimerRef.current = setInterval(fetchViaRest, pollingIntervalMs);
-    }, [fetchViaRest, pollingIntervalMs]);
+    const stopAuthRefresh = useCallback(() => {
+        if (authTimerRef.current) {
+            clearInterval(authTimerRef.current);
+            authTimerRef.current = null;
+        }
+    }, []);
 
     const stopPolling = useCallback(() => {
         if (pollTimerRef.current) {
@@ -83,40 +90,78 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
         }
     }, []);
 
+    const startPolling = useCallback(() => {
+        fetchViaRest();
+        stopPolling();
+        pollTimerRef.current = setInterval(fetchViaRest, pollingIntervalMs);
+    }, [fetchViaRest, pollingIntervalMs, stopPolling]);
+
+    const closeSocket = useCallback(() => {
+        stopAuthRefresh();
+        const ws = wsRef.current;
+        wsRef.current = null;
+        if (ws) {
+            // Detach handlers before closing so `onclose` cannot schedule a zombie
+            // reconnect for a socket we are deliberately discarding.
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onerror = null;
+            ws.onclose = null;
+            try { ws.close(); } catch { /* already closed */ }
+        }
+        setIsLive(false);
+    }, []);
+
     // ── WebSocket Connection ──────────────────────────────────────────────
     const connectWs = useCallback(async () => {
-        if (!orderId || !enabled) return;
-        
-        try {
-            const token = await getToken();
-            const wsBaseUrl = BASE_URL.replace('http', 'ws');
-            const wsUrl = `${wsBaseUrl}/ws/track/${orderId}?token=${token}`;
+        if (!orderId || !enabled || !isMountedRef.current) return;
+        if (wsRef.current?.readyState === WebSocket.OPEN) return;
+        if (appStateRef.current.match(/inactive|background/)) return;
 
-            const ws = new WebSocket(wsUrl);
+        try {
+            const token = await getTokenRef.current();
+            if (!token || !isMountedRef.current) return;
+
+            // The token is mandatory: the server closes unauthenticated tracking
+            // sockets with code 1008.
+            const ws = new WebSocket(`${WS_BASE_URL}/ws/track/${orderId}?token=${token}`);
 
             ws.onopen = () => {
                 if (__DEV__) console.log(`[WS Tracker] Connected for order ${orderId}`);
                 wsFailCountRef.current = 0;
-                // Stop polling once WS is live
+                if (isMountedRef.current) setIsLive(true);
                 stopPolling();
+                stopAuthRefresh();
+                authTimerRef.current = setInterval(async () => {
+                    if (ws.readyState !== WebSocket.OPEN) { stopAuthRefresh(); return; }
+                    try {
+                        const fresh = await getTokenRef.current();
+                        if (fresh) ws.send(JSON.stringify({ action: 'auth_refresh', token: fresh }));
+                    } catch {
+                        // Not fatal — expiry closes the socket and the existing
+                        // reconnect path reopens it with a new token.
+                    }
+                }, AUTH_REFRESH_INTERVAL_MS);
             };
 
             ws.onmessage = (event) => {
                 try {
                     const payload = JSON.parse(event.data);
-                    const location = payload.location || payload;
-                    if (isMountedRef.current && location.lat != null && location.lng != null) {
-                        setData(prev => ({
+                    if (payload?.action === 'heartbeat') return;
+
+                    // Accept both shapes: `{location: {lat, lng}}` from the relay and
+                    // a flat `{lat, lng}` from older senders.
+                    const location = payload.location ?? payload;
+                    if (isMountedRef.current && location?.lat != null && location?.lng != null) {
+                        setData((prev) => ({
                             rider_id: location.rider_id || payload.rider_id || prev?.rider_id || '',
                             rider_name: location.rider_name || prev?.rider_name || 'Rider',
-                            lat: location.lat,
-                            lng: location.lng,
+                            lat: Number(location.lat),
+                            lng: Number(location.lng),
                             is_available: true,
                         }));
                         setIsLoading(false);
                         setError(null);
-                        // Drop realtime pattern: invalidate cache so other components see fresh data
-                        queryClient.invalidateQueries({ queryKey: ['customer', 'rider-location', orderId] });
                     }
                 } catch (parseErr) {
                     if (__DEV__) console.warn('[WS Tracker] Parse error:', parseErr);
@@ -125,19 +170,20 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
 
             ws.onclose = () => {
                 if (__DEV__) console.log('[WS Tracker] Disconnected');
+                stopAuthRefresh();
                 wsRef.current = null;
+                if (isMountedRef.current) setIsLive(false);
                 wsFailCountRef.current++;
 
-                if (isMountedRef.current && enabled) {
-                    if (wsFailCountRef.current >= MAX_WS_FAILURES) {
-                        // Fall back to REST polling after repeated failures
-                        if (__DEV__) console.log('[WS Tracker] Max failures reached, falling back to REST polling');
-                        startPolling();
-                    } else {
-                        // Exponential backoff reconnect
-                        const delay = Math.min(1000 * Math.pow(2, wsFailCountRef.current), 10000);
-                        reconnectTimerRef.current = setTimeout(connectWs, delay);
-                    }
+                if (!isMountedRef.current || !enabled) return;
+                if (appStateRef.current.match(/inactive|background/)) return;
+
+                if (wsFailCountRef.current >= MAX_WS_FAILURES) {
+                    if (__DEV__) console.log('[WS Tracker] Falling back to REST polling');
+                    startPolling();
+                } else {
+                    const delay = Math.min(1000 * Math.pow(2, wsFailCountRef.current), 10000);
+                    reconnectTimerRef.current = setTimeout(connectWs, delay);
                 }
             };
 
@@ -148,10 +194,9 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
             wsRef.current = ws;
         } catch (e) {
             if (__DEV__) console.warn('[WS Tracker] Connection setup failed:', e);
-            // Immediately fall back if we can't even build the URL
             startPolling();
         }
-    }, [orderId, enabled, getToken, stopPolling, startPolling, queryClient]);
+    }, [orderId, enabled, stopPolling, startPolling, stopAuthRefresh]);
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
     useEffect(() => {
@@ -160,31 +205,59 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
         if (!orderId || !enabled) {
             setData(null);
             setIsLoading(false);
+            setIsLive(false);
             return;
         }
 
         setIsLoading(true);
         wsFailCountRef.current = 0;
 
-        // Start with REST to get initial data immediately
+        // REST first so the marker appears immediately, then upgrade to the socket.
         fetchViaRest();
-        // Then attempt WebSocket for real-time
         connectWs();
 
-        return () => {
-            // Strict cleanup per react-native-best-practices
-            isMountedRef.current = false;
-            if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
+        // Reconnect the moment connectivity returns rather than waiting out the
+        // exponential backoff — a lift or a tunnel otherwise froze the map for up
+        // to ten seconds after the network was already back.
+        const netInfoUnsubscribe = NetInfo.addEventListener((state) => {
+            if (!isMountedRef.current || !enabled) return;
+            if (state.isConnected && !wsRef.current) {
+                wsFailCountRef.current = 0;
+                if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+                connectWs();
             }
+        });
+
+        // Drop the socket while backgrounded to save battery, restore on return.
+        const handleAppState = (nextState: AppStateStatus) => {
+            const wasBackgrounded = appStateRef.current.match(/inactive|background/);
+            appStateRef.current = nextState;
+
+            if (wasBackgrounded && nextState === 'active') {
+                wsFailCountRef.current = 0;
+                fetchViaRest();
+                connectWs();
+            } else if (nextState.match(/inactive|background/)) {
+                if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+                stopPolling();
+                closeSocket();
+            }
+        };
+        const appStateSubscription = AppState.addEventListener('change', handleAppState);
+
+        return () => {
+            isMountedRef.current = false;
+            netInfoUnsubscribe();
+            appStateSubscription.remove();
+            closeSocket();
             stopPolling();
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
             }
         };
-    }, [orderId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [orderId, enabled]);
 
-    return { data, isLoading, error };
+    return { data, isLoading, error, isLive };
 }

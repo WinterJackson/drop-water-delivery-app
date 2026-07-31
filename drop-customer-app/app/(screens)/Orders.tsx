@@ -3,7 +3,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OrderCardSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useOrders } from "@/hooks/queries/useOrders";
+import { useOrders, isAwaitingPayment, matchesOrderFilter, ORDER_STATUS_GROUPS, type Order, type OrderFilter } from "@/hooks/queries/useOrders";
 import useWebSocket from "@/hooks/useWebSocket";
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
@@ -16,12 +16,12 @@ import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 const FlashList = OriginalFlashList as any;
 
-const filterOptions = ["All", "In Transit", "Pending", "Delivered", "Cancelled"];
+const filterOptions = ["All", ...(Object.keys(ORDER_STATUS_GROUPS) as OrderFilter[])] as const;
 
 const Orders = () => {
 	const router = useRouter();
 	const [showFilter, setShowFilter] = useState(false);
-	const [selectedFilter, setSelectedFilter] = useState("All");
+	const [selectedFilter, setSelectedFilter] = useState<OrderFilter | "All">("All");
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
 	const insets = useSafeAreaInsets();
@@ -36,18 +36,9 @@ const Orders = () => {
 	// MEMOIZE heavy array filtering to prevent full re-renders on layout passes
 	const filteredOrders = useMemo(() => {
 		if (!Orders) return [];
-		return Orders.filter((o: any) => {
-			if (selectedFilter === "All") return true;
-			if (selectedFilter === "In Transit")
-				return o.order_status === "picked_up" || o.order_status === "mismatch_pending";
-			if (selectedFilter === "Delivered")
-				return o.order_status === "delivered";
-			if (selectedFilter === "Pending")
-				return o.order_status === "pending" || o.order_status === "unassigned";
-			if (selectedFilter === "Cancelled")
-				return o.order_status === "cancelled" || o.order_status === "rejected";
-			return true;
-		});
+		// Grouping lives in the hook so every screen filters the same way and no
+		// status can fall between two filters — see ORDER_STATUS_GROUPS.
+		return Orders.filter((o: any) => matchesOrderFilter(o.order_status, selectedFilter));
 	}, [Orders, selectedFilter]);
 
 	// FIX-RERENDER-01: Stabilize the WebSocket callback with useCallback so it
@@ -62,6 +53,37 @@ const Orders = () => {
 	// The hook internally ignores heartbeats so refetch() is only called
 	// on actual order status changes.
 	const { connected } = useWebSocket('customer', userId || "", handleOrderUpdate);
+
+	// Orders whose M-Pesa payment was started but never confirmed. The customer
+	// may have backgrounded the app mid-payment, so give them a way back in.
+	const awaitingPayment = useMemo(
+		() => (Orders as Order[]).filter(isAwaitingPayment),
+		[Orders]
+	);
+
+	const awaitingPaymentBanner = useCallback(() => {
+		if (awaitingPayment.length === 0) return null;
+		const order = awaitingPayment[0];
+		return (
+			<PressableScale
+				onPress={() => router.push(`/(screens)/OrderDetail?orderId=${order.id}`)}
+				className="mb-3"
+			>
+				<View className={`w-full p-4 rounded-2xl border flex-row items-center gap-3 ${darkTheme ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
+					<Ionicons name="time-outline" size={20} color="#d97706" />
+					<View className="flex-1">
+						<Text className={`text-sm font-bold ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
+							Payment not confirmed
+						</Text>
+						<Text className={`text-xs mt-0.5 ${darkTheme ? 'text-amber-400/80' : 'text-amber-700'}`}>
+							Order #{String(order.id).slice(0, 8).toUpperCase()} is waiting for M-PESA. Tap to review.
+						</Text>
+					</View>
+					<Ionicons name="chevron-forward" size={18} color={darkTheme ? "#fbbf24" : "#b45309"} />
+				</View>
+			</PressableScale>
+		);
+	}, [awaitingPayment, darkTheme, router]);
 
 	// <-------------FUNCTIONS------------->
 	const onRefreshOrders = useCallback(async () => {
@@ -225,6 +247,7 @@ const Orders = () => {
 										showsVerticalScrollIndicator={false}
 										refreshControl={refreshControl}
 										ListEmptyComponent={listEmptyComponent}
+										ListHeaderComponent={awaitingPaymentBanner}
 										keyExtractor={keyExtractor}
 										renderItem={renderItem}
 									/>

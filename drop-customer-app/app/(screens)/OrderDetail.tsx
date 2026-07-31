@@ -6,6 +6,8 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { useOrders, useActiveOrder, useCancelOrder, useResolveMismatch, Order, useOrderTrackingLogs } from "@/hooks/queries/useOrders";
 import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts";
 import { Toast } from "@/lib/toast";
+import { Popup } from "@/lib/popup";
+import { errorMessage } from "@/API/errors";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useContext, useMemo, useState, useRef, useEffect } from "react";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -18,8 +20,7 @@ import {
     Platform,
     Dimensions,
     Modal,
-    Linking,
-    Alert
+    Linking
 } from "react-native";
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
 
@@ -89,27 +90,28 @@ export default function OrderDetail() {
             ? "Are you sure you want to cancel this order? Since the vendor has already accepted it, a KSH 50 cancellation penalty will apply to your account."
             : "Are you sure you want to cancel this order? This action cannot be undone.";
             
-        Alert.alert(
-            "Cancel Order",
+        // Themed confirmation via the app's own Popup, not a native Alert:
+        // native alerts ignore dark mode and the brand palette.
+        Popup.show({
+            title: "Cancel Order",
             message,
-            [
-                { text: "No, Keep It", style: "cancel" },
-                {
-                    text: "Yes, Cancel",
-                    style: "destructive",
-                    onPress: () => {
-                        cancelOrderMutation(order.id, {
-                            onSuccess: () => {
-                                Toast.success("Success", "Order cancelled successfully");
-                            },
-                            onError: (error: Error) => {
-                                Toast.error("Error", (error as Error).message || "Failed to cancel order");
-                            }
-                        });
+            cancelText: "No, Keep It",
+            confirmText: "Yes, Cancel",
+            isDestructive: true,
+            onConfirm: () => {
+                Popup.setLoading(true);
+                cancelOrderMutation(order.id, {
+                    onSuccess: () => {
+                        Popup.hide();
+                        Toast.success("Order cancelled", "Your order has been cancelled.");
+                    },
+                    onError: (error: Error) => {
+                        Popup.hide();
+                        Toast.error("Couldn't cancel order", errorMessage(error, "Please try again."));
                     }
-                }
-            ]
-        );
+                });
+            }
+        });
     };
 
     const { data: orders = [], isLoading: ordersLoading, isFetching: ordersFetching } = useOrders();

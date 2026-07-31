@@ -15,21 +15,25 @@ import {
 	Text,
 	FlatList
 } from "react-native";
-import { useAddToCart } from "@/hooks/queries/useCart";
+import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
 import { estimateDeliveryTime } from "@/utils/distance";
 import { Skeleton, SkeletonText, SkeletonAvatar } from "../ui/Skeleton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
 import { Popup } from "@/lib/popup";
+import { Toast } from "@/lib/toast";
+import { errorMessage } from "@/API/errors";
 
 type Props = {
 	title: string;
+	/** Optional right-hand action in the section header. */
+	onSeeAll?: () => void;
 	type?: string;
 	data: any[];
 	loaded?: boolean;
 };
 
-const HorizontalList = ({ title, type, data, loaded }: Props) => {
+const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 	const { width, height } = useWindowDimensions();
 	const w = Math.ceil(width);
 	const h = Math.ceil(height);
@@ -56,10 +60,13 @@ const HorizontalList = ({ title, type, data, loaded }: Props) => {
 				setClickedItemId(null);
 			},
 			onError: (error: Error) => {
-				if ((error as {type?: string})?.type === "vendor_conflict") {
+				// The vendor name lives on `ApiError.detail`; reading it off the
+				// error itself rendered "Your cart has items from undefined."
+				if (isVendorConflict(error)) {
+					const { existingVendor } = vendorConflictInfo(error);
 					Popup.show({
 						title: "Replace Cart?",
-						message: `Your cart has items from ${(error as {existing_vendor?: string}).existing_vendor}. Adding this will replace your current cart.`,
+						message: `Your cart has items from ${existingVendor}. Adding this will replace your current cart.`,
 						cancelText: "Cancel",
 						confirmText: "Replace",
 						isDestructive: true,
@@ -68,7 +75,12 @@ const HorizontalList = ({ title, type, data, loaded }: Props) => {
 							AddToCart(id, true);
 						}
 					});
+					return;
 				}
+				// Every other failure used to be swallowed entirely: tapping "add"
+				// on a sold-out item from the home screen did nothing at all, with
+				// no explanation. This is the app's busiest add-to-cart surface.
+				Toast.error("Couldn't add to cart", errorMessage(error, "Please try again."));
 			}
 		});
 	}
@@ -125,6 +137,11 @@ const HorizontalList = ({ title, type, data, loaded }: Props) => {
 		<View className={`  ${darkTheme ? "" : ""} shadow-2x`}>
 			<View className="px-5 py-3 justify-between flex-row items-center">
 				<Text className={` text-xl font-semibold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+				{onSeeAll && (
+					<PressableScale onPress={onSeeAll} hitSlop={8}>
+						<Text className="text-sm font-semibold" style={{ color: BRAND.primary }}>See all</Text>
+					</PressableScale>
+				)}
 			</View>
 			<View style={{ height: w * 0.52, width: '100%', marginTop: 5 }}>
 				<FlatList
@@ -222,7 +239,7 @@ const HorizontalList = ({ title, type, data, loaded }: Props) => {
 										<View className="flex-row gap-3 justify-between items-center mt-1">
 											<View className="flex-row gap-1 items-center">
 												<Ionicons name="bicycle" size={14} color={BRAND.primary} />
-												<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat, User?.lng)}</Text>
+												<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
 											</View>
 											<Text className={`text-xs font-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
 												⭐ {Number(item.rating).toFixed(1)}

@@ -58,6 +58,10 @@ import { BRAND } from "@/constants/brandColors";
 
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useOrders } from "@/hooks/queries/useOrders";
+import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
+import { useApiRequest } from "@/API/useApiClient";
+import { ROUTES } from "@/API/routes/ApiRoutes";
+import { errorMessage } from "@/API/errors";
 import { useUserDetails } from "@/hooks/queries/useUser";
 import { useAllVendors } from "@/hooks/queries/useVendors";
 import { useSavedLocations, useCreateSavedLocation, useSelectSavedLocation } from "@/hooks/queries/useSavedLocations";
@@ -74,10 +78,8 @@ import {
     Gesture,
     GestureDetector,
 } from "react-native-gesture-handler";
-import Constants from 'expo-constants';
 import { Ionicons } from "@expo/vector-icons";
 
-const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.ios?.config?.googleMapsApiKey || Constants.expoConfig?.android?.config?.googleMaps?.apiKey || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 
 
 
@@ -514,6 +516,7 @@ export default function Maps() {
 	// <------------------------HOOKS------------------------->
 	const router = useRouter();
 	const { getToken } = useAuth();
+	const api = useApiRequest();
 	const queryClient = useQueryClient();
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
@@ -650,60 +653,49 @@ const initialRegion: import("@/types/models").MapRegion = {
 				}
 			}
 
-			const token = await getToken();
-			const payload = {
+			await api.post(ROUTES.UPDATE_LOCATION, {
 				lat: currentMapCenter.latitude,
 				lng: currentMapCenter.longitude,
 				location_address: addressStr,
 				floor_level: parseInt(floorLevel) || 0,
-				has_elevator: hasElevator
-			};
-
-			const response = await fetch(ApiRoutes.UpdateUserLocation.path, {
-				method: 'POST',
-				headers: {
-					'Authorization': `Bearer ${token}`,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(payload)
+				has_elevator: hasElevator,
 			});
 
-			if (response.ok) {
-				// Auto-save to saved locations for quick reuse
-				try {
-					await createSavedLocation.mutateAsync({
-						address: addressStr,
-						lat: currentMapCenter.latitude,
-						lng: currentMapCenter.longitude,
-						floor_level: parseInt(floorLevel) || 0,
-						has_elevator: hasElevator
-					} as any);
-				} catch {
-					// Silent — max locations reached or duplicate is fine
-				}
-
-				Toast.success("Location Updated", `Delivering to ${addressStr}`);
-				// Optimistically update the UI cache (flat shape matches BasicUser from API)
-				await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
-				queryClient.setQueryData(['user', 'details'], (old: import("@/types/models").BasicUser | undefined) => {
-					if (!old) return old;
-					return {
-						...old,
-						lat: currentMapCenter.latitude,
-						lng: currentMapCenter.longitude,
-						location_address: addressStr,
-						floor_level: parseInt(floorLevel) || 0,
-						has_elevator: hasElevator,
-					};
-				});
-				queryClient.invalidateQueries({ queryKey: ['user', 'details'] }); // Refetch to sync with server
-				router.back();
-			} else {
-				Toast.error("Error", "Could not save location");
+			// Auto-save to saved locations for quick reuse
+			try {
+				await createSavedLocation.mutateAsync({
+					address: addressStr,
+					lat: currentMapCenter.latitude,
+					lng: currentMapCenter.longitude,
+					floor_level: parseInt(floorLevel) || 0,
+					has_elevator: hasElevator
+				} as any);
+			} catch {
+				// Silent — max locations reached or duplicate is fine
 			}
+
+			Toast.success("Location Updated", `Delivering to ${addressStr}`);
+			// Optimistically update the UI cache (flat shape matches BasicUser from API)
+			await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
+			queryClient.setQueryData(['user', 'details'], (old: import("@/types/models").BasicUser | undefined) => {
+				if (!old) return old;
+				return {
+					...old,
+					lat: currentMapCenter.latitude,
+					lng: currentMapCenter.longitude,
+					location_address: addressStr,
+					floor_level: parseInt(floorLevel) || 0,
+					has_elevator: hasElevator,
+				};
+			});
+			queryClient.invalidateQueries({ queryKey: ['user', 'details'] }); // Refetch to sync with server
+			// The delivery fee depends on this address, so any cached quote is stale.
+			queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
+			queryClient.invalidateQueries({ queryKey: ['delivery-fee'] });
+			router.back();
 		} catch (error) {
 			if (__DEV__) console.error("Error confirming location", error);
-			Toast.error("Error", "Could not save location");
+			Toast.error("Couldn't save location", errorMessage(error, "Please try again."));
 		} finally {
 			setIsConfirmingLocation(false);
 		}
@@ -884,42 +876,40 @@ const initialRegion: import("@/types/models").MapRegion = {
 		getCurrentLocation();
 	}, []);
 
-	// WebSocket connection for live rider tracking
+	/**
+	 * Live rider tracking.
+	 *
+	 * This screen used to open its own WebSocket, which could never have worked:
+	 * the URL carried no `?token=` (the server closes unauthenticated tracking
+	 * sockets with 1008) and the handler read `data.lat` while the server sends
+	 * `{location: {lat, lng}}`. `useRiderTracking` is the one implementation that
+	 * authenticates, handles both payload shapes, falls back to REST polling, and
+	 * reconnects when connectivity returns.
+	 */
+	const trackedOrderId = activeSession?.order_id || activeSession?.id || null;
+	const { data: riderLocation } = useRiderTracking(
+		trackedOrderId,
+		!!trackedOrderId && ShowFloatingOrder,
+	);
+
+	// Follow the rider on the map as coordinates arrive.
 	useEffect(() => {
-		let ws: WebSocket | null = null;
-		if (activeSession && ShowFloatingOrder) {
-			const wsUrl = `${ApiRoutes.GetOrders.path.replace("http", "ws").replace("/get_orders", "")}/ws/track/${activeSession.order_id || activeSession.id}`;
-			ws = new WebSocket(wsUrl);
-			ws.onmessage = (event) => {
-				try {
-					const data = JSON.parse(event.data);
-					if (data.lat && data.lng) {
-						setRiderCoordinates({ lat: data.lat, lng: data.lng });
-						if (Platform.OS !== 'web') {
-							if (mapRef.current) {
-								mapRef.current.animateCamera({
-									center: { latitude: data.lat, longitude: data.lng },
-									pitch: 45,
-									heading: 0,
-									altitude: 1000,
-									zoom: 16
-								}, { duration: 1500 });
-							}
-							if (trackingMarkerRef.current?.animateMarkerToCoordinate) {
-								trackingMarkerRef.current.animateMarkerToCoordinate(
-									{ latitude: data.lat, longitude: data.lng },
-									1500
-								);
-							}
-						}
-					}
-				} catch (e) { if (__DEV__) console.error("Caught Unhandled Exception:", e); }
-			};
-		}
-		return () => {
-			if (ws) ws.close();
-		};
-	}, [activeSession, ShowFloatingOrder]);
+		if (!riderLocation?.lat || !riderLocation?.lng) return;
+
+		const lat = Number(riderLocation.lat);
+		const lng = Number(riderLocation.lng);
+		setRiderCoordinates({ lat, lng });
+
+		if (Platform.OS === 'web') return;
+		mapRef.current?.animateCamera(
+			{ center: { latitude: lat, longitude: lng }, pitch: 45, heading: 0, altitude: 1000, zoom: 16 },
+			{ duration: 1500 },
+		);
+		trackingMarkerRef.current?.animateMarkerToCoordinate?.(
+			{ latitude: lat, longitude: lng },
+			1500,
+		);
+	}, [riderLocation?.lat, riderLocation?.lng]);
 
 	const renderRiderMarker = useCallback(() => {
 		if (!riderCoordinates) return null;

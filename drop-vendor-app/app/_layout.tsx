@@ -13,6 +13,7 @@ import { useColorScheme, LogBox, AppState, AppStateStatus, Platform } from "reac
 import { configureReanimatedLogger, ReanimatedLogLevel } from 'react-native-reanimated';
 import { useFonts } from 'expo-font';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
+import { useSessionCleanup } from '@/hooks/useSessionCleanup';
 import ThemeContextProvider, { UIThemeContext } from "../context/ThemeContext";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import "../global.css";
@@ -42,6 +43,16 @@ const queryClient = new QueryClient({
 
 SplashScreen.preventAutoHideAsync();
 
+/**
+ * Erases the previous store's cached data whenever a session ends — including
+ * the sign-outs nobody taps, such as the 401 handler in every vendor query and a
+ * session revoked by Clerk. Must live inside both providers.
+ */
+const SessionCleanup = () => {
+  useSessionCleanup();
+  return null;
+};
+
 const RootAppNavigation = () => {
   const { currentTheme } = React.useContext(UIThemeContext);
   const isDark = currentTheme === 'dark';
@@ -50,6 +61,7 @@ const RootAppNavigation = () => {
     <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
       <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
         <QueryClientProvider client={queryClient}>
+          <SessionCleanup />
           <BottomSheetModalProvider>
             <ErrorBoundary>
               <Stack screenOptions={{ 

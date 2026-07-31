@@ -18,7 +18,31 @@ import {
 	type ViewStyle,
 } from "react-native";
 import { Toast } from "@/lib/toast";
+import { useAuth } from "@clerk/clerk-expo";
+import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { BRAND } from "@/constants/brandColors";
+
+/**
+ * Opaque per-search token. Google bills the keystrokes plus the one Details
+ * call as a single session when they share one, instead of charging each
+ * keystroke separately.
+ *
+ * Deliberately not `uuid`/`crypto.getRandomValues` — those throw on React
+ * Native without a polyfill, which is what the original component was working
+ * around. Collision resistance is irrelevant here: the token only has to be
+ * unique per in-flight search on one device.
+ */
+const makeSessionToken = () =>
+	`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+
+/** "country:ke" (the Google Places `components` syntax) -> "ke". */
+const countryFromComponents = (components?: string): string | null => {
+	const match = /country:([a-zA-Z]{2})/.exec(components ?? "");
+	return match ? match[1].toLowerCase() : null;
+};
+
+const AUTOCOMPLETE_URL = RiderApiRoutes.PlacesAutocomplete.path;
+const DETAILS_URL = RiderApiRoutes.PlaceDetails.path;
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -42,7 +66,6 @@ interface PlaceDetails {
 
 interface PlacesAutocompleteProps {
 	/** Google Maps API key */
-	apiKey: string;
 	/** Placeholder text for the input */
 	placeholder?: string;
 	/** Called when the user selects a place */
@@ -76,7 +99,6 @@ interface PlacesAutocompleteProps {
 // Component
 // ────────────────────────────────────────────────────────────
 export default function PlacesAutocomplete({
-	apiKey,
 	placeholder = "Search for a location...",
 	onPress,
 	language = "en",
@@ -92,6 +114,8 @@ export default function PlacesAutocomplete({
 	const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
 	const [showList, setShowList] = useState(false);
 	const [loading, setLoading] = useState(false);
+	const { getToken } = useAuth();
+	const sessionToken = useRef(makeSessionToken());
 	const abortRef = useRef<AbortController | null>(null);
 	const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -120,67 +144,41 @@ export default function PlacesAutocomplete({
 			setLoading(true);
 
 			try {
-				// 🔴 PRODUCTION GOOGLE MAPS MODE 
-				/*
+				const token = await getToken();
+				if (!token) {
+					setPredictions([]);
+					setShowList(false);
+					return;
+				}
+
 				const params = new URLSearchParams({
 					input,
-					key: apiKey,
-					language,
+					session_token: sessionToken.current,
 				});
-				if (components) params.append("components", components);
+				const country = countryFromComponents(components);
+				if (country) params.append("country", country);
 
-				const res = await fetch(
-					`https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`,
-					{ signal: controller.signal }
-				);
-				const json = await res.json();
+				const res = await fetch(`${AUTOCOMPLETE_URL}?${params.toString()}`, {
+					headers: { Authorization: `Bearer ${token}` },
+					signal: controller.signal,
+				});
 
-				if (json.status && json.status !== "OK" && json.status !== "ZERO_RESULTS") {
-					console.warn("Places API Error:", json.status, json.error_message);
-					if (json.status === "REQUEST_DENIED") {
-						Toast.error("API Error", "Google Maps API request denied. Please check your API key and ensure Billing is enabled on Google Cloud.");
+				if (!res.ok) {
+					// 503 means the server has no Maps key, or Google has cut us
+					// off for quota — both are operator problems the user cannot
+					// act on, so say something true and short rather than nothing.
+					if (res.status === 503) {
+						Toast.error("Search unavailable", "Address search is temporarily unavailable. Enter your location on the map instead.");
 					}
-				}
-
-				if (json.predictions) {
-					setPredictions(json.predictions);
-					setShowList(json.predictions.length > 0);
-				} else {
 					setPredictions([]);
 					setShowList(false);
+					return;
 				}
-				*/
 
-				// 🟢 FREE OPEN SOURCE MVP MODE 
-				const bboxParam = components && components.includes("country:ke") ? "&bbox=33.9,-4.7,41.9,5.5" : "";
-				const res = await fetch(
-					`https://photon.komoot.io/api/?q=${encodeURIComponent(input)}&limit=5${bboxParam}`,
-					{ signal: controller.signal }
-				);
 				const json = await res.json();
-
-				if (json.features) {
-					const mapped = json.features.map((feature: any, index: number) => {
-						const props = feature.properties;
-						const description = [props.name, props.street, props.city, props.state, props.country]
-							.filter(Boolean)
-							.join(", ");
-						return {
-							// Encode description into place_id to recover it in fetchPlaceDetails
-							place_id: `${feature.geometry.coordinates[1]},${feature.geometry.coordinates[0]}_${index}_${encodeURIComponent(description)}`,
-							description: description || "Unknown Location",
-							structured_formatting: {
-								main_text: props.name || props.street || "Unknown",
-								secondary_text: [props.city, props.state, props.country].filter(Boolean).join(", "),
-							}
-						};
-					});
-					setPredictions(mapped);
-					setShowList(mapped.length > 0);
-				} else {
-					setPredictions([]);
-					setShowList(false);
-				}
+				const results: PlacePrediction[] = json?.predictions ?? [];
+				setPredictions(results);
+				setShowList(results.length > 0);
 			} catch (e: unknown) {
 				if ((e as Error).name !== "AbortError") {
 					console.warn("PlacesAutocomplete: prediction fetch failed", e);
@@ -189,7 +187,7 @@ export default function PlacesAutocomplete({
 				setLoading(false);
 			}
 		},
-		[apiKey, language, components, minLength]
+		[getToken, components, minLength]
 	);
 
 	// ── Debounced input handler ──────────────────────────────
@@ -208,43 +206,31 @@ export default function PlacesAutocomplete({
 	const fetchPlaceDetails = useCallback(
 		async (placeId: string): Promise<PlaceDetails | null> => {
 			try {
-				// 🔴 PRODUCTION GOOGLE MAPS MODE 
-				/*
+				const token = await getToken();
+				if (!token) return null;
+
 				const params = new URLSearchParams({
 					place_id: placeId,
-					key: apiKey,
-					language,
+					session_token: sessionToken.current,
 				});
-				const res = await fetch(
-					`https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`
-				);
-				const json = await res.json();
-				if (json.result) return json.result as PlaceDetails;
-				*/
 
-				// 🟢 FREE OPEN SOURCE MVP MODE 
-				const parts = placeId.split("_");
-				const coords = parts[0];
-				const addressPart = parts[2];
-				
-				if (coords) {
-					const [lat, lng] = coords.split(",");
-					if (lat && lng) {
-						return {
-							geometry: {
-								location: { lat: parseFloat(lat), lng: parseFloat(lng) }
-							},
-							formatted_address: addressPart ? decodeURIComponent(addressPart) : undefined,
-						};
-					}
-				}
+				const res = await fetch(`${DETAILS_URL}?${params.toString()}`, {
+					headers: { Authorization: `Bearer ${token}` },
+				});
+
+				// The session ends when a prediction is resolved. Rotating here is
+				// what makes Google bill the whole search as one session instead
+				// of one charge per keystroke.
+				sessionToken.current = makeSessionToken();
+
+				if (!res.ok) return null;
+				return (await res.json()) as PlaceDetails;
 			} catch (e) {
 				console.warn("PlacesAutocomplete: details fetch failed", e);
+				return null;
 			}
-			return null;
 		},
-
-		[apiKey, language]
+		[getToken]
 	);
 
 	// ── Row press handler ────────────────────────────────────

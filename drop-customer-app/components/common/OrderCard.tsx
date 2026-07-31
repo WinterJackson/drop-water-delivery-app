@@ -1,6 +1,6 @@
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAddToCart } from "@/hooks/queries/useCart";
-import { useCancelOrder } from "@/hooks/queries/useOrders";
+import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
+import { useCancelOrder, matchesOrderFilter, CANCELLABLE_ORDER_STATUSES } from "@/hooks/queries/useOrders";
 import { useAuth } from "@clerk/clerk-expo";
 import { format, parseISO } from 'date-fns';
 import { useRouter } from "expo-router";
@@ -8,6 +8,7 @@ import React, { useContext, useState, useMemo } from "react";
 import { Image, Text, View } from "react-native";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
+import { errorMessage } from "@/API/errors";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,7 +17,6 @@ type Props = {
   order: any;
 };
 
-import { Alert } from "react-native";
 
 // FIX-RERENDER-08: Extract LiveETA into its own React.memo component.
 const LiveETA = React.memo(({ createdAt, status, deliveryTime }: { createdAt: string, status: string, deliveryTime?: number }) => {
@@ -75,11 +75,16 @@ const OrderCard = React.memo(({ order }: Props) => {
 
   // FIX-RERENDER-11: Compute action as a memoized value
   const action = useMemo(() => {
-    // Treat picked_up and mismatch_pending as tracking states
-    if (["picked_up", "mismatch_pending", "pending_review"].includes(order.order_status)) return 'Track Order';
+    // Cancellation first: `accepted` is both cancellable and in progress, and the
+    // backend allows exactly pending/unassigned/accepted (a late cancel on
+    // `accepted` carries a fee), so offering Cancel there is the useful action.
+    if (CANCELLABLE_ORDER_STATUSES.includes(order.order_status)) return 'Cancel Order';
+    // Anything else still in flight is trackable. This used to name statuses
+    // inline and omitted `preparing` and `ready`, so an order being packed showed
+    // no action at all — the customer could not open its tracking view from here.
+    if (matchesOrderFilter(order.order_status, 'In Transit')) return 'Track Order';
     if (order.order_status === "delivered" && !order.is_rated) return 'Rate Delivery';
     if (order.order_status === "cancelled") return 'Re-Order';
-    if (order.order_status === "pending" || order.order_status === "unassigned" || order.order_status === "accepted") return 'Cancel Order';
     return '';
   }, [order.order_status, order.is_rated]);
 
@@ -98,23 +103,26 @@ const OrderCard = React.memo(({ order }: Props) => {
       ? "Are you sure you want to cancel this order? Since the vendor has already accepted it, a KSH 50 cancellation penalty will apply to your account."
       : "Are you sure you want to cancel this order? This action cannot be undone.";
       
-    Alert.alert(
-      "Cancel Order",
+    Popup.show({
+      title: "Cancel Order",
       message,
-      [
-        { text: "No, Keep It", style: "cancel" },
-        {
-          text: "Yes, Cancel",
-          style: "destructive",
-          onPress: () => {
-            cancelOrderMutation(orderId, {
-              onSuccess: () => Toast.success("Success", "Order cancelled successfully"),
-              onError: (error: Error) => Toast.error("Error", (error as Error).message || "Failed to cancel order")
-            });
+      cancelText: "No, Keep It",
+      confirmText: "Yes, Cancel",
+      isDestructive: true,
+      onConfirm: () => {
+        Popup.setLoading(true);
+        cancelOrderMutation(orderId, {
+          onSuccess: () => {
+            Popup.hide();
+            Toast.success("Order cancelled", "Your order has been cancelled.");
+          },
+          onError: (error: Error) => {
+            Popup.hide();
+            Toast.error("Couldn't cancel order", errorMessage(error, "Please try again."));
           }
-        }
-      ]
-    );
+        });
+      }
+    });
   };
 
   const handleReorder = async (forceReplace = false) => {
@@ -133,10 +141,13 @@ const OrderCard = React.memo(({ order }: Props) => {
       Toast.success("Cart Updated", "Items accurately re-added to your cart!");
       router.push("/(screens)/Cart");
     } catch (e: unknown) {
-      if ((e as {type?: string})?.type === "vendor_conflict") {
+      // The vendor name is on `ApiError.detail`, not on the error itself — the
+      // old read rendered "Your cart has items from undefined."
+      if (isVendorConflict(e)) {
+        const { existingVendor } = vendorConflictInfo(e);
         Popup.show({
           title: "Replace Cart?",
-          message: `Your cart has items from ${(e as {existing_vendor?: string}).existing_vendor}. Re-ordering will replace your current cart.`,
+          message: `Your cart has items from ${existingVendor}. Re-ordering will replace your current cart.`,
           cancelText: "Cancel",
           confirmText: "Replace & Reorder",
           isDestructive: true,
@@ -146,8 +157,10 @@ const OrderCard = React.memo(({ order }: Props) => {
           }
         });
       } else {
-        console.error(e);
-        Toast.error("Notice", "Some items may no longer be available in stock.");
+        if (__DEV__) console.error(e);
+        // The backend names the actual blocker (out of stock, MOQ, vendor
+        // closed); the fixed "may no longer be available" hid all of them.
+        Toast.error("Couldn't re-order", errorMessage(e, "Some items may no longer be available."));
       }
     } finally {
       setReorderLoading(false);

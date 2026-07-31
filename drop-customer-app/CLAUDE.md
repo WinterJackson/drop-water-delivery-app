@@ -36,13 +36,59 @@ Key Business Workflows:
 
 ### 3. Data Fetching (TanStack Query)
 - All data fetching must use Custom Hooks located in `hooks/queries/`.
-- Never use raw `useEffect` + `fetch` for data loading in components.
+- Those hooks must go through `useApiRequest()` (from `API/useApiClient.ts`), never
+  raw `fetch`. It injects the Clerk JWT, signs the user out on a 401, and converts
+  every failure into an `ApiError` whose `message` is the backend's own `detail`.
+  The only legitimate raw `fetch` calls are to third-party APIs (Google Places,
+  Cloudinary).
+- Every backend path lives in `API/routes/ApiRoutes.ts`. Never build one inline:
+  `BackendAPI/tests/test_route_contract.py` parses that file and fails CI if a path
+  does not resolve, which is how five 404-ing endpoints were caught.
 - Rely on React Query's caching and refetching mechanisms. Use `queryClient.invalidateQueries` after mutations.
+
+### 3a. Prices come from the server
+Never compute an order total on the client. `useCartQuote()` returns the
+authoritative, itemised breakdown from `POST /api/cart/quote`; render those
+numbers verbatim. A local copy of the pricing formula is how the displayed price,
+the amount charged, and the amount recorded on the order came to disagree.
+
+### 3b. Maps keys and Google web services
+- The Maps key is **not** in `app.json`. `app.config.js` injects
+  `GOOGLE_MAPS_ANDROID_API_KEY` / `GOOGLE_MAPS_IOS_API_KEY` from the environment at
+  build time; both are restricted to this package/bundle and to the Maps SDK only.
+- Never read the key back at runtime — Expo scrubs it from the public manifest, so
+  `Constants.expoConfig?...googleMaps` is always `undefined`.
+- Never call a Google web service (Directions, Places, Geocoding) from the client.
+  Those keys cannot, and a key that could would be extractable from the binary.
+  Call the backend proxy instead. See `docs/maps-architecture.md`.
 
 ### 4. Null Safety & Error Handling
 - Always use optional chaining (`?.`) when rendering API data.
 - Numbers/Prices should be formatted safely. e.g., `(item.price || 0).toLocaleString()`.
-- Use the central `Toast` component (`lib/toast.ts`) for user feedback on success or failure. Do not use native `Alert` for standard interactions.
+- Use the central `Toast` component (`lib/toast.ts`) for user feedback, and
+  `Popup` (`lib/popup.ts`) for confirmations — both are theme-aware. Native
+  `Alert` is reserved for the blocking forced-update prompt in `utils/appUpdate.ts`.
+- Surface the backend's message: `Toast.error("…", errorMessage(err))` using
+  `errorMessage` from `API/errors.ts`. Never show a bare status code.
+
+### 4a. Errors thrown by the API client
+`useApiRequest` normalises **every** failure into an `ApiError` — a plain `Error`
+subclass with `status`, `detail`, `type` and a presentable `message`. It has no
+`.response`, so `error.response.data.type` is always `undefined`. Reading it that
+way silently disabled the vendor-conflict prompt on the product page and hid
+every backend message behind a generic fallback.
+
+- Branch on the error with the helpers, never on its shape:
+  `isVendorConflict(err)` / `vendorConflictInfo(err)` from `hooks/queries/useCart`.
+- Surface the message with `errorMessage(err, fallback)`.
+- `retry` uses `retryTransientOnly(n)` from `API/errors`: a 4xx is a refusal, not
+  a dropped packet, and retrying a 401 fires the sign-out handler once per attempt.
+
+### 4b. Order statuses live in one place
+`ORDER_STATUS_GROUPS` / `matchesOrderFilter` / `CANCELLABLE_ORDER_STATUSES` in
+`hooks/queries/useOrders` are the only place statuses are grouped. Screens that
+listed them inline drifted: the Orders filters covered neither `preparing` nor
+`ready`, so an order being packed matched no filter and showed no action.
 
 ### 5. Authentication Flow
 - Clerk handles session state.
@@ -53,3 +99,14 @@ Key Business Workflows:
 - Prefer functional components with `React.memo` if they receive complex props in lists.
 - Avoid large monolithic screens. Break down `app/(screens)/xxx.tsx` into smaller chunks in `components/`.
 - Touchables: Prefer using `PressableScale` over standard `TouchableOpacity` to provide a premium, animated tactile feel.
+
+### Session teardown
+`hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
+state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:
+sessions also end without anyone tapping "Sign out" — every query signs the user
+out on a 401, and Clerk ends a revoked session on its own. Those routes left the
+cache fully populated for the next account on the device.
+
+`clearPushToken()` is the exception that must stay in the handlers: the endpoint
+is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
+device receiving the previous account's notifications.

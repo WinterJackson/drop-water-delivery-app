@@ -41,6 +41,15 @@ const useWebSocket = (
   const attemptRef = useRef(0);
   const MAX_RECONNECT_ATTEMPTS = 10;
 
+/**
+ * Clerk session tokens live about a minute, and the server now enforces `exp` on
+ * open sockets. Reconnecting every time one lapses would rebuild every socket on
+ * the platform once a minute, so instead we hand the server a fresh token on the
+ * live connection and it extends the session in place.
+ */
+const AUTH_REFRESH_INTERVAL_MS = 30_000;
+
+
   // Guard to prevent connecting after unmount
   const mountedRef = useRef(true);
 
@@ -48,6 +57,30 @@ const useWebSocket = (
   const BASE_URL = useRef(
     process.env.EXPO_PUBLIC_WS_BASE_URL || VendorApiRoutes.GetOrders.path.split('/api/')[0].replace('http', 'ws')
   ).current;
+
+
+  // Push a fresh token onto the live socket so the server can extend the session
+  // without a reconnect. Cleared whenever the socket goes away.
+  const authTimerRef = useRef<any | null>(null);
+  const stopAuthRefresh = useCallback(() => {
+    if (authTimerRef.current) {
+      clearInterval(authTimerRef.current);
+      authTimerRef.current = null;
+    }
+  }, []);
+  const startAuthRefresh = useCallback((ws: WebSocket) => {
+    stopAuthRefresh();
+    authTimerRef.current = setInterval(async () => {
+      if (ws.readyState !== WebSocket.OPEN) { stopAuthRefresh(); return; }
+      try {
+        const fresh = await getTokenRef.current();
+        if (fresh) ws.send(JSON.stringify({ action: 'auth_refresh', token: fresh }));
+      } catch {
+        // A failed mint is not fatal: the server closes on expiry and the
+        // existing reconnect path takes over with a new token.
+      }
+    }, AUTH_REFRESH_INTERVAL_MS);
+  }, [stopAuthRefresh]);
 
   // FIX-WS-RERENDER-02: `connect` has ZERO external dependencies — all values read from refs.
   // This means useCallback never produces a new reference, so the useEffect never re-fires.
@@ -74,6 +107,7 @@ const useWebSocket = (
       setConnected(true);
       attemptRef.current = 0; // Reset backoff on success
       ws.send(JSON.stringify({ action: 'join-entity-room' }));
+      startAuthRefresh(ws);
     };
 
     ws.onmessage = (event) => {
@@ -90,6 +124,7 @@ const useWebSocket = (
     };
 
     ws.onclose = () => {
+      stopAuthRefresh();
       if (__DEV__) console.log('WebSocket disconnected');
       setConnected(false);
       wsRef.current = null;

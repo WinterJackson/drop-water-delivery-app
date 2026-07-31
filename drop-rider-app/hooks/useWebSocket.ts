@@ -12,6 +12,13 @@ export interface OrderUpdate {
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 
+/**
+ * Clerk session tokens live about a minute, and the server enforces `exp` on open
+ * sockets. Reconnecting on every lapse would rebuild every socket on the platform
+ * once a minute, so the client hands the server a fresh token in-band instead.
+ */
+const AUTH_REFRESH_INTERVAL_MS = 30_000;
+
 const useWebSocket = (
   entityType: string,
   entityId: string,
@@ -49,6 +56,16 @@ const useWebSocket = (
     process.env.EXPO_PUBLIC_WS_BASE_URL || RiderApiRoutes.GetOrders().path.split('/api/')[0].replace('http', 'ws')
   ).current;
 
+  // Push a fresh token onto the live socket so the server can extend the session
+  // without a reconnect. Cleared whenever the socket goes away.
+  const authTimerRef = useRef<any | null>(null);
+  const stopAuthRefresh = useCallback(() => {
+    if (authTimerRef.current) {
+      clearInterval(authTimerRef.current);
+      authTimerRef.current = null;
+    }
+  }, []);
+
   // FIX-WS-RERENDER-02: `connect` has ZERO external dependencies — all values read from refs.
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -75,6 +92,16 @@ const useWebSocket = (
       setConnected(true);
       attemptRef.current = 0; // Reset backoff on success
       ws.send(JSON.stringify({ action: 'join-entity-room' }));
+      stopAuthRefresh();
+      authTimerRef.current = setInterval(async () => {
+        if (ws.readyState !== WebSocket.OPEN) { stopAuthRefresh(); return; }
+        try {
+          const fresh = await getTokenRef.current();
+          if (fresh) ws.send(JSON.stringify({ action: 'auth_refresh', token: fresh }));
+        } catch {
+          // Not fatal — expiry closes the socket and the reconnect path reopens it.
+        }
+      }, AUTH_REFRESH_INTERVAL_MS);
     };
 
     ws.onmessage = (event) => {
@@ -91,6 +118,7 @@ const useWebSocket = (
     };
 
     ws.onclose = (event) => {
+      stopAuthRefresh();
       if (__DEV__) console.log('WebSocket disconnected', event?.code, event?.reason);
       setConnected(false);
       wsRef.current = null;

@@ -1,6 +1,5 @@
-import { ROUTES } from '@/API/routes/ApiRoutes';
-import { ApiRoutes } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { ApiRoutes, ROUTES } from '@/API/routes/ApiRoutes';
+import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,38 +26,32 @@ export interface CreateSavedLocationPayload {
 
 /** Fetch all saved locations for the current user */
 export function useSavedLocations() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<SavedLocation[], Error>({
         queryKey: ['customer', 'savedLocations'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_SAVED_LOCATIONS, {
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Saved locations fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.get<SavedLocation[]>(ROUTES.GET_SAVED_LOCATIONS),
     });
 }
 
 /** Create a new saved location */
 export function useCreateSavedLocation() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (data: CreateSavedLocationPayload) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.CREATE_SAVED_LOCATION, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.detail || `Create location failed: ${res.status}`);
-            }
-            return res.json();
+        mutationFn: (data: CreateSavedLocationPayload) => api.post(ROUTES.CREATE_SAVED_LOCATION, data),
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: ['customer', 'savedLocations'] });
         },
+    });
+}
+
+/** Update an existing saved location */
+export function useUpdateSavedLocation() {
+    const api = useApiRequest();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, ...data }: CreateSavedLocationPayload & { id: string }) =>
+            api.put(ROUTES.UPDATE_SAVED_LOCATION(id), data),
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['customer', 'savedLocations'] });
         },
@@ -67,18 +60,10 @@ export function useCreateSavedLocation() {
 
 /** Delete a saved location */
 export function useDeleteSavedLocation() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (locationId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.DELETE_SAVED_LOCATION(locationId), {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Delete location failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (locationId: string) => api.del(ROUTES.DELETE_SAVED_LOCATION(locationId)),
         onMutate: async (locationId) => {
             await queryClient.cancelQueries({ queryKey: ['customer', 'savedLocations'] });
             const prev = queryClient.getQueryData(['customer', 'savedLocations']);
@@ -97,18 +82,10 @@ export function useDeleteSavedLocation() {
 }
 
 export function useRevokeLocation() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ApiRoutes.RevokeUserLocation.path, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(`Revoke location failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: () => api.post(ApiRoutes.RevokeUserLocation.path),
         onMutate: async () => {
             // Cancel any outgoing user detail refetches
             await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
@@ -135,9 +112,10 @@ export function useRevokeLocation() {
             }
         },
         onSettled: () => {
-            // Background sync — don't await, let React Query handle it
             queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
             queryClient.invalidateQueries({ queryKey: ['customer', 'savedLocations'] });
+            // The delivery quote depends on the destination, so it is stale now.
+            queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
         },
     });
 }
@@ -145,18 +123,10 @@ export function useRevokeLocation() {
 /** Select a saved location as the active delivery address.
  *  This syncs lat/lng/address to the User profile on the backend. */
 export function useSelectSavedLocation() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (locationId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.USE_SAVED_LOCATION(locationId), {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Use location failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (locationId: string) => api.post(ROUTES.USE_SAVED_LOCATION(locationId)),
         onMutate: async (locationId: string) => {
             // Cancel any outgoing refetches so they don't overwrite our optimistic update
             await queryClient.cancelQueries({ queryKey: ['user', 'details'] });
@@ -190,9 +160,10 @@ export function useSelectSavedLocation() {
             }
         },
         onSettled: () => {
-            // Background sync — don't await, let React Query handle it
             queryClient.invalidateQueries({ queryKey: ['customer', 'savedLocations'] });
             queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
+            // Changing the delivery address changes the delivery fee.
+            queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
         },
     });
 }

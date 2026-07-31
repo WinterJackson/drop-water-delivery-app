@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogBox, Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
@@ -127,5 +127,27 @@ export function usePushNotifications(queryPrefix: string = 'rider') {
         };
     }, [isSignedIn]);
 
-    return { expoPushToken, notification };
+    /**
+     * Detach this device's push token from the rider account.
+     *
+     * Must run *before* `signOut()` — the endpoint is authenticated, so there is
+     * no way to do it afterwards. Skipping it leaves the token registered against
+     * the account, and on a shared device the next rider to sign in keeps
+     * receiving the previous rider's delivery-request notifications.
+     */
+    const clearPushToken = useCallback(async () => {
+        try {
+            const authToken = await getToken();
+            if (!authToken) return;
+            await fetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${authToken}` },
+            });
+            setExpoPushToken('');
+        } catch (e) {
+            if (__DEV__) console.warn('Push token de-registration failed:', e);
+        }
+    }, [getToken]);
+
+    return { expoPushToken, notification, clearPushToken };
 }

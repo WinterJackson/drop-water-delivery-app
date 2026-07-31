@@ -1,5 +1,5 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,75 +15,83 @@ export interface NotificationItem {
     created_at: string | null;
 }
 
+const NOTIFICATIONS_KEY = ['customer', 'notifications'];
+const UNREAD_KEY = ['customer', 'notifications', 'unread-count'];
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 export function useNotifications() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<NotificationItem[], Error>({
-        queryKey: ['customer', 'notifications'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_NOTIFICATIONS, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Notifications fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryKey: NOTIFICATIONS_KEY,
+        queryFn: () => api.get<NotificationItem[]>(ROUTES.GET_NOTIFICATIONS),
     });
 }
 
 export function useMarkNotificationRead() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (notificationId: string) => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.MARK_READ, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ notification_id: notificationId }),
-            });
-            if (!res.ok) throw new Error(`Mark read failed: ${res.status}`);
-            return res.json();
+        mutationFn: (notificationId: string) =>
+            api.post(ROUTES.MARK_READ, { notification_id: notificationId }),
+        onMutate: async (notificationId) => {
+            // Optimistic: the badge should drop the instant the row is tapped.
+            await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_KEY });
+            const previous = queryClient.getQueryData<NotificationItem[]>(NOTIFICATIONS_KEY);
+            queryClient.setQueryData<NotificationItem[]>(NOTIFICATIONS_KEY, (old) =>
+                old?.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
+            );
+            return { previous };
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['customer', 'notifications'] });
+        onError: (_err, _id, context) => {
+            if (context?.previous) queryClient.setQueryData(NOTIFICATIONS_KEY, context.previous);
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
+            queryClient.invalidateQueries({ queryKey: UNREAD_KEY });
         },
     });
 }
 
 export function useMarkAllNotificationsRead() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.MARK_ALL_READ, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Mark all read failed: ${res.status}`);
-            return res.json();
+        mutationFn: () => api.post(ROUTES.MARK_ALL_READ),
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
+            queryClient.invalidateQueries({ queryKey: UNREAD_KEY });
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['customer', 'notifications'] });
+    });
+}
+
+export function useDeleteNotification() {
+    const api = useApiRequest();
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (notificationId: string) => api.del(ROUTES.DELETE_NOTIFICATION(notificationId)),
+        onMutate: async (notificationId) => {
+            await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_KEY });
+            const previous = queryClient.getQueryData<NotificationItem[]>(NOTIFICATIONS_KEY);
+            queryClient.setQueryData<NotificationItem[]>(NOTIFICATIONS_KEY, (old) =>
+                old?.filter((n) => n.id !== notificationId)
+            );
+            return { previous };
+        },
+        onError: (_err, _id, context) => {
+            if (context?.previous) queryClient.setQueryData(NOTIFICATIONS_KEY, context.previous);
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
+            queryClient.invalidateQueries({ queryKey: UNREAD_KEY });
         },
     });
 }
 
 export function useUnreadNotificationCount() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<{ unread_count: number }, Error>({
-        queryKey: ['customer', 'notifications', 'unread-count'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.UNREAD_COUNT, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (!res.ok) throw new Error(`Unread count failed: ${res.status}`);
-            return res.json();
-        },
+        queryKey: UNREAD_KEY,
+        queryFn: () => api.get<{ unread_count: number }>(ROUTES.UNREAD_COUNT),
         staleTime: 1000 * 60,
     });
 }

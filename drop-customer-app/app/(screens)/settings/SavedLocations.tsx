@@ -1,7 +1,8 @@
+import { errorMessage } from "@/API/errors";
 import React, { useContext } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TouchableOpacity } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -45,7 +46,7 @@ export default function SavedLocations() {
             queryClient.invalidateQueries({ queryKey: ['user', 'details'] });
             Toast.success("Location Updated", `Delivering to ${loc.address}`);
         } catch (e: unknown) {
-            Toast.error("Error", (e as Error).message || "Could not select location");
+            Toast.error("Couldn't use location", errorMessage(e, "Could not select location."));
         }
     };
 
@@ -64,8 +65,8 @@ export default function SavedLocations() {
                         await revokeLocation.mutateAsync();
                     }
                     Toast.success("Deleted", "Location removed.");
-                } catch {
-                    Toast.error("Error", "Could not delete location.");
+                } catch (e: unknown) {
+                    Toast.error("Couldn't delete location", errorMessage(e, "Please try again."));
                 } finally {
                     Popup.hide();
                 }
@@ -97,9 +98,9 @@ export default function SavedLocations() {
     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Saved Locations
                 </Text>
@@ -155,13 +156,13 @@ export default function SavedLocations() {
                                         <Text numberOfLines={2} className={`text-sm font-medium ${darkTheme ? "text-white" : "text-gray-900"}`}>{loc.address}</Text>
                                         <Text className={`text-xs mt-0.5 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>Used {loc.use_count} time{loc.use_count !== 1 ? "s" : ""}</Text>
                                     </View>
-                                    <TouchableOpacity
+                                    <PressableScale
                                         onPress={() => handleDelete(loc)}
                                         className="ml-2 p-2"
                                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                     >
                                         <Text className="text-red-400 text-xs font-semibold">Remove</Text>
-                                    </TouchableOpacity>
+                                    </PressableScale>
                                 </View>
                             </PressableScale>
                         ))}

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/API/errors";
 import React, { useContext } from 'react';
 import { View, Text, ScrollView, StatusBar } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -55,7 +56,7 @@ export default function RepeatOrderScreen() {
       }
     } catch (e: unknown) {
       if (__DEV__) console.error('Repeat order failed:', e);
-      Toast.error('Error', 'Failed to add items to cart. Please try again.');
+      Toast.error('Could not re-order', errorMessage(e, 'Failed to add items to cart. Please try again.'));
     }
   };
 

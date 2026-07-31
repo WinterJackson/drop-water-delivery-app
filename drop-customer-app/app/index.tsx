@@ -1,16 +1,13 @@
 import React, { useContext, useEffect, useState } from "react";
-import { View, Text, Image } from "react-native";
-import { StatusBar } from "expo-status-bar";
-import Modal from "react-native-modal";
-import * as Location from "expo-location";
 import { Redirect, useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
 
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
-import { PressableScale } from "@/components/ui/PressableScale";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useUpdateLocation } from "@/hooks/queries/useUser";
+import { useLocation } from "@/hooks/useLocation";
 import { ROUTES } from "@/API/routes/ApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -19,40 +16,21 @@ export default function Index() {
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
 	const { getToken, isSignedIn, isLoaded } = useAuth();
+	const api = useApiRequest();
 
 	// ── State ──
 	const [splashComplete, setSplashComplete] = useState(false);
-	const [ShowLocationPrompt, setShowLocationPrompt] = useState(false);
-	const [LocationFinal, setLocation] = useState<Location.LocationObject | null>(null);
 	const [isVerifyingProfile, setIsVerifyingProfile] = useState(false);
 	const [readyToRoute, setReadyToRoute] = useState<"onboarding" | "main" | null>(null);
 
-	// ── Location update ──
+	// ── Location ──
+	// Shared store, not a private copy. The local implementation this replaced
+	// returned silently when the permission was denied, so it never surfaced a
+	// prompt and never obtained coordinates — discovery then had nothing to
+	// query with. The store distinguishes "permission denied" (showPrompt) from
+	// a transient GPS failure, and the screens render the prompt.
+	const { location: deviceLocation, requestLocation } = useLocation();
 	const { mutateAsync: mutateLocation } = useUpdateLocation();
-
-	const updateUserLocation = async () => {
-		if (!LocationFinal) return;
-		try {
-			await mutateLocation({
-				lat: LocationFinal.coords.latitude,
-				lng: LocationFinal.coords.longitude,
-			});
-		} catch (error) {
-			// Silent — location update is non-blocking
-		}
-	};
-
-	async function getCurrentLocation() {
-		setShowLocationPrompt(false);
-		try {
-			let { status } = await Location.requestForegroundPermissionsAsync();
-			if (status !== "granted") return;
-			let location = await Location.getCurrentPositionAsync({});
-			setLocation(location);
-		} catch (error: unknown) {
-			setShowLocationPrompt(true);
-		}
-	}
 
 	// Fire location + update AFTER splash completes and user is signed in
 	useEffect(() => {
@@ -60,20 +38,13 @@ export default function Index() {
 			if (!isSignedIn) return;
 			setIsVerifyingProfile(true);
 			try {
-				const token = await getToken();
-				const res = await fetch(ROUTES.GET_PROFILE_STATUS("customer"), {
-					headers: { Authorization: `Bearer ${token}` }
-				});
-				if (res.ok) {
-					const data = await res.json();
-					if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-						setReadyToRoute("onboarding");
-					} else {
-						setReadyToRoute("main");
-					}
-				} else {
-					// Backend returned error - safer to route to onboarding where user creation happens
+				const data = await api.get<{ exists: boolean; missing_fields?: string[] }>(
+					ROUTES.GET_PROFILE_STATUS("customer")
+				);
+				if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
 					setReadyToRoute("onboarding");
+				} else {
+					setReadyToRoute("main");
 				}
 			} catch (e) {
 				// Network failure - safer to route to onboarding where user creation happens
@@ -86,16 +57,20 @@ export default function Index() {
 		if (splashComplete && isLoaded) {
 			if (isSignedIn) {
 				verifyOnboardingAndProceed();
-				getCurrentLocation().catch(() => {});
+				requestLocation().catch(() => {});
 			}
 		}
 	}, [splashComplete, isLoaded, isSignedIn]);
 
+	// Push fresh coordinates to the backend whenever the store resolves them.
+	// Non-blocking: a failure here must never gate routing into the app.
 	useEffect(() => {
-		if (LocationFinal != null) {
-			updateUserLocation().catch(() => {});
-		}
-	}, [LocationFinal]);
+		if (!deviceLocation) return;
+		mutateLocation({
+			lat: deviceLocation.coords.latitude,
+			lng: deviceLocation.coords.longitude,
+		}).catch(() => {});
+	}, [deviceLocation]);
 
 	// ── Splash gate ──
 	// Show splash until both the animation completes AND Clerk auth resolves.
@@ -113,58 +88,9 @@ export default function Index() {
 		);
 	}
 
-	// ── Location permission modal (functional, shows after splash) ──
-	if (ShowLocationPrompt) {
-		return (
-			<>
-				<StatusBar
-					style={darkTheme ? "light" : "dark"}
-					backgroundColor={darkTheme ? "black" : "#f0f0f0"}
-				/>
-				<View
-					className={`flex-1 ${darkTheme ? "bg-black" : "bg-[#f0f0f0]"} w-full items-center justify-center`}
-				>
-					<Modal isVisible={ShowLocationPrompt}>
-						<View className="items-center">
-							<View className="bg-white w-[80%] gap-6 max-w-[300px] rounded-3xl p-6">
-								<View className="flex-row gap-3">
-									<Ionicons name="locate" size={24} color={BRAND.primary} />
-									<Text className="font-semibold text-2xl text-blue-500">
-										Location Access
-									</Text>
-								</View>
-								<View>
-									<Text>
-										This app requires access to your current location for it to
-										work properly.
-									</Text>
-									<Text>
-										Please grant permission to access your location in order to
-										proceed
-									</Text>
-									<Text>
-										If you have allowed location permission and are still getting
-										this prompt it might be a Network issue so Please check your
-										Network settings
-									</Text>
-								</View>
-								<PressableScale
-									activeOpacity={0.8}
-									onPress={() => getCurrentLocation()}
-								>
-									<View className="bg-blue-500 p-3 px-6 rounded-xl items-center">
-										<Text className="text-white font-bold">
-											Allow Location Access
-										</Text>
-									</View>
-								</PressableScale>
-							</View>
-						</View>
-					</Modal>
-				</View>
-			</>
-		);
-	}
+	// A denied permission is no longer a dead end here: routing continues and the
+	// home screen renders the store-driven prompt (Open Settings / retry / set the
+	// address by hand), so the user can still reach the app and shop.
 
 	// ── Route to correct destination ──
 	if (isSignedIn) {

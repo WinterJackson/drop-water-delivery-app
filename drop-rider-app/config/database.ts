@@ -211,3 +211,23 @@ export const removeQueuedAction = async (id: string) => {
         if (__DEV__) console.warn('[removeQueuedAction] SQLite failed:', e);
     }
 }
+
+/**
+ * Wipe every cached row belonging to the signed-out rider.
+ *
+ * `orders` holds customer delivery addresses and phone numbers, and unlike the
+ * React Query cache it is on disk — it outlived sign-out entirely, so the next
+ * rider to use a shared device inherited the previous rider's manifest. Queued
+ * offline actions go too: they carry the old rider's credentials-scoped intent
+ * and replaying them under a new session would attribute the work to the wrong
+ * person.
+ */
+export const clearOfflineData = async () => {
+    const db = await getDB();
+    if (!db) return;
+    try {
+        await db.execAsync('DELETE FROM orders; DELETE FROM offline_actions;');
+    } catch (e) {
+        if (__DEV__) console.warn('[clearOfflineData] SQLite failed:', e);
+    }
+}

@@ -21,21 +21,13 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.drop.rider",
-      "config": {
-        "googleMapsApiKey": "AIzaSyD9R6-hmSRZwjEuWj_8CPRzZipXtJ6MMAI"
-      }
+      "bundleIdentifier": "com.drop.rider"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/app-icon.png"
       },
       "package": "com.drop.rider",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyD9R6-hmSRZwjEuWj_8CPRzZipXtJ6MMAI"
-        }
-      },
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -68,9 +60,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "4c349b3b-a9eb-45ae-94e3-0aa6583e84ed"
+        "projectId": "eb6b1701-7d26-4b84-b956-004b2d49354b"
       }
     },
-    "owner": "l-bonez"
+    "owner": "wj-kuzzi"
   }
 }

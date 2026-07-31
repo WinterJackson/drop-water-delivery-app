@@ -138,6 +138,64 @@ const RiderApiRoutes = {
     path: `${BASE_URL}/api/rider/apply-vendor`,
     method: "POST",
   } as const satisfies ApiRoute,
+  /**
+   * Balance, float committed to open cash orders, and what may actually be
+   * withdrawn. `wallet_balance` alone is misleading: a rider carrying cash orders
+   * holds money that settles the vendor and platform cuts on delivery.
+   */
+  WalletSummary: {
+    path: `${BASE_URL}/api/rider/wallet-summary`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  // --- Bottle debt ---
+  /** Empties this rider is holding, grouped by vendor. */
+  BottleDebt: {
+    path: `${BASE_URL}/api/rider/bottle-debt`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  /** This rider's bottle movement history (accruals and confirmed returns). */
+  BottleLedger: (limit = 50, offset = 0): ApiRoute => ({
+    path: `${BASE_URL}/api/rider/bottle-ledger?limit=${limit}&offset=${offset}`,
+    method: "GET",
+  }),
+  // --- Maps ---
+  /**
+   * Road route between two points, proxied by the backend.
+   *
+   * Never call Google Directions from the client: the shipped Maps key is
+   * restricted to the Maps SDK for this package, so a direct call is rejected,
+   * and a key that *would* work from JS could be lifted straight out of the APK.
+   * The server holds an IP-restricted key and caches identical legs.
+   */
+  Directions: (
+    originLat: number,
+    originLng: number,
+    destLat: number,
+    destLng: number,
+    mode: "driving" | "walking" | "bicycling" | "two_wheeler" = "driving"
+  ): ApiRoute => {
+    const params = new URLSearchParams({
+      origin_lat: String(originLat),
+      origin_lng: String(originLng),
+      dest_lat: String(destLat),
+      dest_lng: String(destLng),
+      mode,
+    });
+    return {
+      path: `${BASE_URL}/api/maps/directions?${params.toString()}`,
+      method: "GET",
+    };
+  },
+  // Maps — Google web services, proxied. The app's Maps key is SDK-restricted
+  // and cannot call Places; the server holds the only key that can.
+  PlacesAutocomplete: {
+    path: `${BASE_URL}/api/maps/places/autocomplete`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  PlaceDetails: {
+    path: `${BASE_URL}/api/maps/places/details`,
+    method: "GET",
+  } as const satisfies ApiRoute,
   // --- Account ---
   DeleteAccount: {
     path: `${BASE_URL}/api/auth/delete_account`,

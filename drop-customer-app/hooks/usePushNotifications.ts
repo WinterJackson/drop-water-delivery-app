@@ -1,8 +1,10 @@
+import { ROUTES } from '@/API/routes/ApiRoutes';
+import { useApiRequest } from '@/API/useApiClient';
 import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogBox, Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
@@ -86,24 +88,45 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
     const [notification, setNotification] = useState<any>(undefined);
     const notificationListener = useRef<any>(null);
     const responseListener = useRef<any>(null);
-    const { getToken, isSignedIn } = useAuth();
+    const { isSignedIn } = useAuth();
+    const api = useApiRequest();
     const router = useRouter();
     const queryClient = useQueryClient();
+
+    // Kept in a ref so the effect below depends only on `isSignedIn`; `api` is a
+    // new object whenever Clerk's auth context re-renders.
+    const apiRef = useRef(api);
+    useEffect(() => { apiRef.current = api; }, [api]);
 
     useEffect(() => {
         if (!isSignedIn || !Notifications) return;
 
+        let cancelled = false;
+
+        // A cold-start response is replayed on every mount of this hook, so guard
+        // against navigating to the same notification twice in one session.
+        const handled = new Set<string>();
+        const openFromNotification = (response: any) => {
+            const url = response?.notification?.request?.content?.data?.url;
+            if (!url) return;
+            const id = response?.notification?.request?.identifier ?? String(url);
+            if (handled.has(id)) return;
+            handled.add(id);
+            router.push(url as any);
+        };
+
         registerForPushNotificationsAsync().then(async (token) => {
-            if (token) {
-                setExpoPushToken(token);
-                const authToken = await getToken();
-                try {
-                    await fetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-                        body: JSON.stringify({ push_token: token, app_type: 'customer' }),
-                    });
-                } catch (e) { if (__DEV__) console.error("Push token registration failed:", e); }
+            if (!token || cancelled) return;
+            setExpoPushToken(token);
+            try {
+                // Endpoint comes from the shared route table, not a hand-built
+                // string, so it is covered by the route-contract test.
+                await apiRef.current.post(ROUTES.REGISTER_PUSH_TOKEN, {
+                    push_token: token,
+                    app_type: 'customer',
+                });
+            } catch (e) {
+                if (__DEV__) console.error("Push token registration failed:", e);
             }
         });
 
@@ -112,20 +135,52 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             queryClient.invalidateQueries({ queryKey: [queryPrefix, 'notifications'] });
             queryClient.invalidateQueries({ queryKey: [queryPrefix, 'notifications', 'unread-count'] });
-        });
 
-        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: import("axios").AxiosResponse) => {
-            const data = (response as any).notification.request.content.data;
-            if (data?.url) {
-                router.push(data.url as any);
+            // Order pushes mean the order state changed; refresh the lists that
+            // render it so the app agrees with the notification the user just saw.
+            const type = notif?.request?.content?.data?.type;
+            if (!type || String(type).includes('order') || String(type).includes('delivery')) {
+                queryClient.invalidateQueries({ queryKey: [queryPrefix, 'orders'] });
             }
         });
 
+        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
+            openFromNotification(response);
+        });
+
+        // The listener above only fires while it is mounted, so a notification
+        // tapped while the app was *killed* was delivered to nobody and the tap
+        // just opened the home screen. This replays the response that launched
+        // the app — the cold-start case is the common one for an order update
+        // that arrives hours after the user last opened Drop.
+        Notifications.getLastNotificationResponseAsync?.()
+            .then((response: any) => {
+                if (!cancelled) openFromNotification(response);
+            })
+            .catch(() => {});
+
         return () => {
+            cancelled = true;
             notificationListener.current?.remove();
             responseListener.current?.remove();
         };
     }, [isSignedIn]);
 
-    return { expoPushToken, notification };
+    /**
+     * Detach this device's push token from the account.
+     *
+     * Must run before sign-out: on a shared device the token otherwise stays
+     * registered and the next person to sign in keeps receiving the previous
+     * account's order notifications.
+     */
+    const clearPushToken = useCallback(async () => {
+        try {
+            await apiRef.current.del(ROUTES.CLEAR_PUSH_TOKEN);
+            setExpoPushToken('');
+        } catch (e) {
+            if (__DEV__) console.warn('Push token de-registration failed:', e);
+        }
+    }, []);
+
+    return { expoPushToken, notification, clearPushToken };
 }

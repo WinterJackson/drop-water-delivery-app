@@ -117,20 +117,41 @@ export default function MyMap() {
     }, [vendorProfile?.delivery_radius]);
 
     useEffect(() => {
+        let cancelled = false;
+
         const fetchDeviceLocation = async () => {
             try {
                 const { status } = await Location.requestForegroundPermissionsAsync();
-                if (status === "granted") {
-                    const loc = await Location.getCurrentPositionAsync({});
-                    setCurrentLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+                if (status !== "granted") return;
+
+                // Last known first: it returns instantly from the OS cache.
+                // A bare getCurrentPositionAsync({}) defaults to the highest
+                // accuracy and can block for 10-30s waiting on a cold GPS fix,
+                // holding the map skeleton on screen the whole time — matching
+                // the fallback chain StoreProfile and Onboarding already use.
+                let loc = await Location.getLastKnownPositionAsync();
+                if (!loc) {
+                    loc = await Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.Balanced,
+                    });
+                }
+                if (loc && !cancelled) {
+                    setCurrentLocation({
+                        latitude: loc.coords.latitude,
+                        longitude: loc.coords.longitude,
+                    });
                 }
             } catch (e) {
                 if (__DEV__) console.log("Location skipped:", e);
             } finally {
-                setDeviceLocationLoading(false);
+                if (!cancelled) setDeviceLocationLoading(false);
             }
         };
         fetchDeviceLocation();
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     const safeCenter = useMemo(() => {

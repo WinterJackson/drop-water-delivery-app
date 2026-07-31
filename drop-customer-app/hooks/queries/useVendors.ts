@@ -1,122 +1,84 @@
+import { retryTransientOnly } from '@/API/errors';
 import { ROUTES } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { useApiRequest } from '@/API/useApiClient';
 import { useQuery } from '@tanstack/react-query';
 
+/**
+ * Vendor discovery.
+ *
+ * `/api/vendors` returns a `{data, total, …}` envelope while the proximity
+ * endpoints return bare arrays, so every hook normalises with `unwrap`.
+ */
+function unwrap<T = any>(payload: any): T[] {
+    if (Array.isArray(payload)) return payload as T[];
+    if (payload && Array.isArray(payload.data)) return payload.data as T[];
+    return [];
+}
+
+const DISCOVERY_STALE_TIME = 5 * 60 * 1000;
+
 export function useAllVendors() {
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'all'],
-        queryFn: async () => {
-            const res = await fetch(ROUTES.GET_VENDORS, { method: "GET" });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
-        staleTime: 5 * 60 * 1000
+        queryFn: async () => unwrap(await api.get(ROUTES.GET_VENDORS)),
+        staleTime: DISCOVERY_STALE_TIME,
     });
 }
 
 export function useNearByVendors() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'nearby'],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) return [];
-            const res = await fetch(ROUTES.GET_NEARBY_VENDORS, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
-        staleTime: 5 * 60 * 1000,
-        retry: 3
+        queryFn: async () => unwrap(await api.get(ROUTES.GET_NEARBY_VENDORS)),
+        staleTime: DISCOVERY_STALE_TIME,
+        retry: retryTransientOnly(2),
     });
 }
 
 export function useTopRatedVendors() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'topRated'],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) return [];
-            const res = await fetch(ROUTES.GET_TOP_RATED_VENDORS, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
-        staleTime: 5 * 60 * 1000,
-        retry: 3
+        queryFn: async () => unwrap(await api.get(ROUTES.GET_TOP_RATED_VENDORS)),
+        staleTime: DISCOVERY_STALE_TIME,
+        retry: retryTransientOnly(2),
     });
 }
 
 export function useVendorsByType(type: string) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'type', type],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) return [];
-            const res = await fetch(ROUTES.GET_VENDORS_BY_TYPE, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ vendor_type: type })
-            });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
+        queryFn: async () => unwrap(await api.post(ROUTES.GET_VENDORS_BY_TYPE, { vendor_type: type })),
         enabled: !!type,
-        staleTime: 5 * 60 * 1000
+        staleTime: DISCOVERY_STALE_TIME,
     });
 }
 
 export function useTopBrandsVendors() {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'topBrands'],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) return [];
-            const res = await fetch(ROUTES.GET_TOP_BRAND_VENDORS, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
-        staleTime: 5 * 60 * 1000
+        queryFn: async () => unwrap(await api.get(ROUTES.GET_TOP_BRAND_VENDORS)),
+        staleTime: DISCOVERY_STALE_TIME,
     });
 }
+
 export function useVendorDirectory(searchQuery: string = '', filter: string = 'all') {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'directory', searchQuery, filter],
-        queryFn: async () => {
-            const token = await getToken();
-            if (!token) return [];
-            
-            const params = new URLSearchParams();
-            if (searchQuery) params.append('search_query', searchQuery);
-            if (filter) params.append('vendor_type', filter);
-            
-            const url = `${ROUTES.GET_VENDORS}/directory?${params.toString()}`;
-            
-            const res = await fetch(url, {
-                method: "GET",
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Network error");
-            const json = await res.json();
-            return json.data || json;
-        },
-        staleTime: 5 * 60 * 1000,
-        retry: 3
+        queryFn: async () =>
+            unwrap(
+                await api.get(ROUTES.GET_VENDOR_DIRECTORY, {
+                    params: {
+                        ...(searchQuery ? { search_query: searchQuery } : {}),
+                        ...(filter ? { vendor_type: filter } : {}),
+                    },
+                })
+            ),
+        staleTime: DISCOVERY_STALE_TIME,
+        retry: retryTransientOnly(2),
     });
 }

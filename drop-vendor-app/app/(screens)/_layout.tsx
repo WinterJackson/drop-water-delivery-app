@@ -2,7 +2,8 @@ import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
-import { Stack, usePathname, useRouter } from "expo-router";
+import { useAuth } from "@clerk/clerk-expo";
+import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import { useContext } from "react";
 import { View, Dimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +17,7 @@ const { width } = Dimensions.get("window");
 export default function ScreensLayout() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
+  const { isSignedIn } = useAuth();
 
   // NOTIF-02 FIX: Register push notifications for the vendor app
   usePushNotifications('vendor');
@@ -23,7 +25,7 @@ export default function ScreensLayout() {
   const router = useRouter();
   const path = usePathname();
   const insets = useSafeAreaInsets();
-  
+
   const active = (pathname: string) => pathname === path;
 
   const { data: orders = [] } = useVendorOrders();
@@ -33,6 +35,16 @@ export default function ScreensLayout() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(route);
   };
+
+  // The customer and rider apps both gate this group; the vendor app did not, so
+  // a deep link — or simply staying put after a session ended — rendered the
+  // whole store dashboard shell with no session behind it. `=== false` rather
+  // than `!isSignedIn`: the value is `undefined` until Clerk resolves, and
+  // redirecting then would bounce a signed-in vendor back to the sign-in screen
+  // on every cold start.
+  if (isSignedIn === false) {
+    return <Redirect href={'/(Auth)'} />;
+  }
 
   return (
       <View className="flex-1" style={{ minWidth: width, backgroundColor: darkTheme ? BRAND.bgDark : BRAND.bgLight }}>

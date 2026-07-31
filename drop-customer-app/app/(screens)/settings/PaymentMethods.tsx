@@ -2,7 +2,7 @@ import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 
-import { View, Text, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -10,6 +10,7 @@ import Button from "@/components/ui/Button";
 import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
+import { PressableScale } from "@/components/ui/PressableScale";
 
 export default function PaymentMethods() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -65,7 +66,7 @@ export default function PaymentMethods() {
             isDestructive: true,
             onConfirm: async () => {
                 Popup.setLoading(true);
-                const newMethods = [...paymentMethods];
+                const newMethods: any[] = [...paymentMethods];
                 newMethods.splice(index, 1);
                 // If we removed the default, make the first one default
                 if (paymentMethods[index].isDefault && newMethods.length > 0) {
@@ -102,9 +103,9 @@ export default function PaymentMethods() {
                         <Text className="text-blue-500 font-bold text-xs">DEFAULT</Text>
                     </View>
                 )}
-                <TouchableOpacity onPress={() => handleRemove(index)} className="ml-2">
+                <PressableScale onPress={() => handleRemove(index)} className="ml-2">
                     <Text className="text-red-500 text-lg">🗑️</Text>
-                </TouchableOpacity>
+                </PressableScale>
             </View>
         </View>
     );
@@ -122,9 +123,9 @@ export default function PaymentMethods() {
                     ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
                 }}
             >
-                <TouchableOpacity onPress={() => router.back()} className="mr-4">
+                <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
-                </TouchableOpacity>
+                </PressableScale>
                 <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Payment Methods
                 </Text>
@@ -149,23 +150,23 @@ export default function PaymentMethods() {
                             className={`p-3 rounded-xl border mb-4 ${darkTheme ? "border-gray-700 bg-black text-white" : "border-gray-300 bg-white text-black"}`}
                         />
                         <View className="flex-row gap-3">
-                            <TouchableOpacity onPress={() => setIsAdding(false)} className="flex-1 py-3 items-center rounded-xl border border-gray-400">
+                            <PressableScale onPress={() => setIsAdding(false)} className="flex-1 py-3 items-center rounded-xl border border-gray-400">
                                 <Text className={darkTheme ? "text-white font-bold" : "text-black font-bold"}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleSaveNew} disabled={isSaving} className="flex-1 py-3 items-center rounded-xl" style={{ backgroundColor: BRAND.primary }}>
+                            </PressableScale>
+                            <PressableScale onPress={handleSaveNew} disabled={isSaving} className="flex-1 py-3 items-center rounded-xl" style={{ backgroundColor: BRAND.primary }}>
                                 {isSaving ? <ActivityIndicator color={BRAND.white} /> : <Text className="text-white font-bold">Save</Text>}
-                            </TouchableOpacity>
+                            </PressableScale>
                         </View>
                     </View>
                 ) : (
-                    <TouchableOpacity 
+                    <PressableScale 
                         onPress={() => setIsAdding(true)}
                         activeOpacity={0.7}
                         className="mt-6 py-4 rounded-xl items-center border-2 bg-transparent"
                         style={{ borderColor: BRAND.primary }}
                     >
                         <Text className="text-lg font-bold" style={{ color: BRAND.primary }}>+ Add M-Pesa Number</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                 )}
             </ScrollView>
         </SafeAreaView>

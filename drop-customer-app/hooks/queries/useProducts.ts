@@ -1,5 +1,5 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { useApiRequest } from '@/API/useApiClient';
 import { useQuery } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,77 +33,62 @@ export interface Product {
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 export function useProduct(productId: string) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<Product, Error>({
         queryKey: ['product', productId],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_PRODUCT_DETAILS, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: productId }),
-            });
-            if (!res.ok) throw new Error(`Product fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.post<Product>(ROUTES.GET_PRODUCT_DETAILS, { id: productId }),
         enabled: !!productId,
     });
 }
 
 export function useVendorDetails(vendorId: string) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     return useQuery<any, Error>({
         queryKey: ['vendor', vendorId],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(ROUTES.GET_VENDOR_DETAILS, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: vendorId }),
-            });
-            if (!res.ok) throw new Error(`Vendor fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => api.post(ROUTES.GET_VENDOR_DETAILS, { id: vendorId }),
         enabled: !!vendorId,
     });
 }
 
 export function useProductsWithOffer() {
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['products', 'offers'],
         queryFn: async () => {
-            const res = await fetch(ROUTES.GET_PRODUCTS_WITH_OFFER, { method: "GET" });
-            if (!res.ok) throw new Error("Offers fetch failed");
-            const json = await res.json();
-            // The backend returns {"data": [...], "total": ... } for this endpoint
-            return json.data || json;
-        }
+            const json: any = await api.get(ROUTES.GET_PRODUCTS_WITH_OFFER);
+            // This endpoint answers with a {"data": [...], "total": …} envelope.
+            return Array.isArray(json) ? json : json?.data ?? [];
+        },
     });
 }
 
 export function useCategories() {
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['categories'],
         queryFn: async () => {
-            const res = await fetch(ROUTES.GET_CATEGORIES, { method: "GET" });
-            if (!res.ok) throw new Error("Categories fetch failed");
-            const json = await res.json();
-            return json.categories || [];
-        }
+            const json: any = await api.get(ROUTES.GET_CATEGORIES);
+            return json?.categories ?? [];
+        },
     });
 }
 
 export function usePaginatedProducts(page: number) {
+    const api = useApiRequest();
     return useQuery({
         queryKey: ['products', 'paginated', page],
+        queryFn: () => api.post(ROUTES.GET_PAGINATED_PRODUCTS, { page }),
+    });
+}
+
+export function useProductsByCategory(category: string) {
+    const api = useApiRequest();
+    return useQuery({
+        queryKey: ['products', 'category', category],
         queryFn: async () => {
-            const res = await fetch(ROUTES.GET_PAGINATED_PRODUCTS, {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ page }),
-            });
-            if (!res.ok) throw new Error("Paginated products fetch failed");
-            return res.json();
-        }
+            const json: any = await api.get(ROUTES.GET_PRODUCTS_BY_CATEGORY, { params: { category } });
+            return Array.isArray(json) ? json : json?.data ?? [];
+        },
+        enabled: !!category,
     });
 }

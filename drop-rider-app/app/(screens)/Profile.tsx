@@ -1,3 +1,4 @@
+import { useBottleDebt } from "@/hooks/queries/useBottleDebt";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useContext, useEffect, useState } from "react";
@@ -26,11 +27,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { Popup } from "@/lib/popup";
 import { RiderProfileSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import UserAvatar from "@/components/ui/UserAvatar";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 export default function Profile() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken, signOut } = useAuth();
+  const { clearPushToken } = usePushNotifications();
   const router = useRouter();
   const { user } = useUser();
   const queryClient = useQueryClient();
@@ -70,6 +73,10 @@ export default function Profile() {
     enabled: !!user
   });
 
+  // Empties this rider still owes vendors, surfaced as a badge below.
+  const { data: bottleDebt } = useBottleDebt();
+  const bottleDebtCount = bottleDebt?.total_bottles ?? 0;
+
   const fetchProfile = async () => {
     const token = await getToken();
     try {
@@ -94,10 +101,13 @@ export default function Profile() {
       cancelText: "Cancel",
       confirmText: "Sign Out",
       isDestructive: true,
-      onConfirm: () => {
+      onConfirm: async () => {
           Popup.hide();
+          // Detach the push token first — the endpoint is authenticated, so it
+          // cannot be done once the session is gone.
+          await clearPushToken();
           queryClient.clear();
-          signOut();
+          await signOut();
       }
     });
   };
@@ -362,6 +372,30 @@ export default function Profile() {
                     </View>
                   </PressableScale>
               )}
+
+              {/* Empties the rider is holding. Debt accrues on every quick_swap
+                  delivery; before this entry point there was no way to see it. */}
+              <PressableScale onPress={() => router.push("/(screens)/BottleDebt" as any)} activeOpacity={0.7} className="mt-3">
+                <View className={`rounded-2xl p-4 flex-row items-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`} style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
+                  <View className={`p-3 rounded-full mr-4 ${bottleDebtCount > 0 ? (darkTheme ? "bg-orange-900/40" : "bg-orange-50") : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
+                    <Ionicons name="water-outline" size={26} color={bottleDebtCount > 0 ? "#ea580c" : BRAND.primary} />
+                  </View>
+                  <View className="flex-1">
+                    <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Bottles I'm Holding</Text>
+                    <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+                      {bottleDebtCount > 0
+                        ? `${bottleDebtCount} empt${bottleDebtCount === 1 ? 'y' : 'ies'} to return`
+                        : "No empties outstanding"}
+                    </Text>
+                  </View>
+                  {bottleDebtCount > 0 && (
+                    <View className="px-2 py-1 rounded-full bg-orange-500/20 mr-2">
+                      <Text className="text-orange-600 font-bold text-xs">{bottleDebtCount}</Text>
+                    </View>
+                  )}
+                  <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
+                </View>
+              </PressableScale>
             </View>
 
             <PressableScale 

@@ -45,9 +45,19 @@ The Drop Customer App allows users to browse nearby water vendors, order water (
    ```env
    EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
    EXPO_PUBLIC_BACKEND_BASE_URL=http://<YOUR_IP>:8000
-   EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=AIza...
+
+   # Native Maps SDK keys — build-time only, injected by app.config.js.
+   # Deliberately not EXPO_PUBLIC_*: they belong in AndroidManifest.xml /
+   # Info.plist, not in the JS bundle. One key per platform, because a Google
+   # API key can carry only one application restriction.
+   GOOGLE_MAPS_ANDROID_API_KEY=...   # restricted to com.drop.customer + SHA-1
+   GOOGLE_MAPS_IOS_API_KEY=...       # restricted to bundle id com.drop.customer
    ```
    > **Note**: For physical device testing, `EXPO_PUBLIC_BACKEND_BASE_URL` must be your computer's local IP address, not `localhost`.
+
+   > **Never commit a Google key.** `app.json` carries no key; `app.config.js`
+   > reads the two above from the environment (EAS secrets in CI). See
+   > [docs/security/google-api-key-rotation.md](../docs/security/google-api-key-rotation.md).
 
 3. Run the app:
    ```bash

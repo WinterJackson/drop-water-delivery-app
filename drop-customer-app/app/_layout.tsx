@@ -1,9 +1,7 @@
 import 'react-native-gesture-handler';
-import { ClerkProvider } from '@clerk/clerk-expo';
+import { ClerkProvider, useUser as useClerkUser } from '@clerk/clerk-expo';
 import { tokenCache } from '@clerk/clerk-expo/token-cache';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import ModernToast from '@/components/ui/ModernToast';
 import PopupModal from '@/components/ui/PopupModal';
 import { QueryClient, focusManager } from '@tanstack/react-query';
@@ -16,11 +14,17 @@ import { Dimensions, LogBox, AppState, AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts } from 'expo-font';
 
+// `asyncStoragePersister` is shared with `useSessionCleanup`, which erases the
+// on-disk snapshot when a session ends — see config/queryPersister.ts.
+import { asyncStoragePersister } from '@/config/queryPersister';
+import { retryTransientOnly } from '@/API/errors';
+import { useSessionCleanup } from '@/hooks/useSessionCleanup';
+
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import ThemeContextProvider from '../context/ThemeContext';
-import { initSentry } from '../utils/sentry';
+import { initSentry, setSentryUser, clearSentryUser } from '../utils/sentry';
 import OfflineBanner from '../components/ui/OfflineBanner';
 import "../global.css";
 import { initAnalytics } from '../utils/analytics';
@@ -33,7 +37,7 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 5,       // 5 minutes
       gcTime: 1000 * 60 * 15,         // 15 minutes GC
-      retry: 2,
+      retry: retryTransientOnly(2),
       refetchOnWindowFocus: true,     // Enables refetch on app foreground
       networkMode: 'offlineFirst',
     },
@@ -41,11 +45,6 @@ const queryClient = new QueryClient({
       networkMode: 'offlineFirst',
     },
   },
-});
-
-const asyncStoragePersister = createAsyncStoragePersister({
-  storage: AsyncStorage,
-  key: 'DROP_CUSTOMER_QUERY_CACHE',
 });
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -64,6 +63,36 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+/**
+ * Attaches the signed-in identity to Sentry so a crash report names the account
+ * it came from, and drops it on sign-out so the next session is not attributed
+ * to the previous user. Must live inside ClerkProvider.
+ */
+const SentryUserSync = () => {
+  const { user, isLoaded } = useClerkUser();
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (user) {
+      setSentryUser(user.id, user.primaryEmailAddress?.emailAddress);
+    } else {
+      clearSentryUser();
+    }
+  }, [isLoaded, user?.id]);
+
+  return null;
+};
+
+/**
+ * Erases the previous account's cached data whenever a session ends — including
+ * the sign-outs nobody taps, such as `useApiClient`'s 401 handler and a session
+ * revoked by Clerk. Must live inside both providers.
+ */
+const SessionCleanup = () => {
+  useSessionCleanup();
+  return null;
+};
+
 const RootAppNavigation = () => {
   const { currentTheme } = React.useContext(UIThemeContext);
   const isDark = currentTheme === 'dark';
@@ -72,6 +101,8 @@ const RootAppNavigation = () => {
     <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
       <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
         <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 1000 * 60 * 60 * 24 }}>
+          <SentryUserSync />
+          <SessionCleanup />
           <BottomSheetModalProvider>
             <OfflineBanner />
             <ErrorBoundary>
@@ -117,17 +148,20 @@ export default function Layout() {
   // <------------------HOOKES------------------>
   const darkTheme = useColorScheme() === "dark"
 
-  // Hide the native splash screen once fonts are ready and init production tools
+  // Hide the native splash screen once fonts are ready
   useEffect(() => {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
     }
-
-    // Production tools
-    initSentry();
-    initAnalytics(null as any);
-    checkForAppUpdate(process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "");
   }, [fontsLoaded]);
+
+  // Production tools — exactly once. Keyed on `fontsLoaded` these ran twice per
+  // launch, double-initialising Sentry and firing two update checks.
+  useEffect(() => {
+    initSentry();
+    initAnalytics(null);
+    checkForAppUpdate();
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'android') {

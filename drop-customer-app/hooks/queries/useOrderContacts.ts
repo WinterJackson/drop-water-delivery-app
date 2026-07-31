@@ -1,7 +1,7 @@
-import { useAuth } from '@clerk/clerk-expo';
+import { ROUTES } from '@/API/routes/ApiRoutes';
+import { ApiError, retryTransientOnly } from '@/API/errors';
+import { useApiRequest } from '@/API/useApiClient';
 import { useQuery } from '@tanstack/react-query';
-
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface ContactInfo {
@@ -19,39 +19,32 @@ export interface OrderContactsResponse {
 // Active states where contacts are available
 const CONTACT_VISIBLE_STATES = ["accepted", "preparing", "ready", "picked_up", "mismatch_pending", "pending_review"];
 
-// ─── Fetch Function ───────────────────────────────────────────────────────────
-async function fetchOrderContacts(orderId: string, token: string | null): Promise<OrderContactsResponse> {
-    const res = await fetch(`${BASE_URL}/api/contacts/${orderId}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) {
-        // Return empty contacts on 403 (inactive state) rather than throwing
-        if (res.status === 403) return { contacts: [] };
-        throw new Error(`Contacts fetch failed: ${res.status}`);
-    }
-    return res.json();
-}
-
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 /**
- * Fetches cross-party contact information for an active order.
- * Only returns data if the order is in an active fulfillment state.
+ * Cross-party contact information for an active order.
  * @param orderId - The order UUID
- * @param orderStatus - Current order status (used to skip query if inactive)
+ * @param orderStatus - Current order status (used to skip the query when inactive)
  */
 export function useOrderContacts(orderId: string | null, orderStatus: string | null) {
-    const { getToken } = useAuth();
+    const api = useApiRequest();
     const isActive = orderStatus ? CONTACT_VISIBLE_STATES.includes(orderStatus) : false;
 
     return useQuery<OrderContactsResponse, Error>({
         queryKey: ['orderContacts', orderId],
         queryFn: async () => {
-            const token = await getToken();
-            return fetchOrderContacts(orderId!, token);
+            try {
+                return await api.get<OrderContactsResponse>(ROUTES.ORDER_CONTACTS(orderId!));
+            } catch (error) {
+                // The backend withholds contacts outside active fulfilment states.
+                // That is an expected answer, not a failure worth surfacing.
+                if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                    return { contacts: [] };
+                }
+                throw error;
+            }
         },
         enabled: !!orderId && isActive,
         staleTime: 1000 * 60 * 2, // 2 min — contacts don't change often
-        retry: 1,
+        retry: retryTransientOnly(1),
     });
 }

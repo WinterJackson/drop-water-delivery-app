@@ -47,7 +47,12 @@ const TRANSACTION_ICON_HEX: Record<string, string> = {
 };
 
 const TransactionItem = memo(({ item, darkTheme }: any) => {
-  const isPositive = ["top_up", "order_payment", "refund"].includes(item.transaction_type);
+  // Direction comes from the signed amount, not from the type. `order_payment`
+  // goes both ways for a rider — it debits them settling a cash order out of
+  // float and credits them their delivery earnings — so a type allow-list
+  // rendered float deductions as income.
+  const amount = Number(item.amount) || 0;
+  const isPositive = amount >= 0;
   const colorClass = TRANSACTION_COLORS[item.transaction_type] || "bg-slate-500/20 text-slate-600";
   const [bgColor] = colorClass.split(" ");
   const iconColor = TRANSACTION_ICON_HEX[item.transaction_type] || "#64748b";
@@ -73,7 +78,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
           </View>
         </View>
         <Text className={`font-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
-          {isPositive ? "+" : "-"}KSH {item.amount}
+          {isPositive ? "+" : "-"}KSH {Math.abs(amount).toLocaleString()}
         </Text>
       </View>
       

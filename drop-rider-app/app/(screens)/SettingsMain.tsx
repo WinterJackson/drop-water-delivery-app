@@ -16,6 +16,7 @@ import { useAuth, useUser } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import UserAvatar from "@/components/ui/UserAvatar";
 import { Image } from "expo-image";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
@@ -38,6 +39,7 @@ export default function SettingsMain() {
     const [isUploadingPic, setIsUploadingPic] = useState(false);
     const { user } = useUser();
     const { signOut, getToken } = useAuth();
+    const { clearPushToken } = usePushNotifications();
 
     const handleUpdateProfilePic = async () => {
         try {
@@ -97,7 +99,14 @@ export default function SettingsMain() {
             onConfirm: async () => {
                 Popup.setLoading(true);
                 try {
+                    // Before `signOut()` — the endpoint is authenticated. On a
+                    // shared device the token would otherwise stay registered and
+                    // the next rider would keep receiving this one's delivery
+                    // requests.
+                    await clearPushToken();
                     await signOut();
+                    // `useSessionCleanup` also clears on the session transition;
+                    // doing it here makes the wipe synchronous with the redirect.
                     queryClient.clear();
                     Popup.hide();
                     router.replace("/(Auth)");
@@ -131,7 +140,9 @@ export default function SettingsMain() {
 
                     if (res.ok) {
                         Toast.success("Goodbye", "Account deleted successfully.");
+                        await clearPushToken();
                         await signOut();
+                        queryClient.clear();
                         Popup.hide();
                         router.replace("/(Auth)");
                     } else {

@@ -148,7 +148,7 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 														darkTheme
 															? "text-gray-200"
 															: "text-gray-600"
-													}>{estimateDeliveryTime(item.lat, item.lng, User?.lat, User?.lng)}</Text>
+													}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
 											</View>
 										</View>
 										{/* ORDER NOW BUTTON */}

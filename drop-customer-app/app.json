@@ -21,9 +21,6 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "config": {
-        "googleMapsApiKey": "AIzaSyD9R6-hmSRZwjEuWj_8CPRzZipXtJ6MMAI"
-      },
       "bundleIdentifier": "com.drop.customer",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -34,11 +31,6 @@
         "foregroundImage": "./assets/images/app-icon.png"
       },
       "package": "com.drop.customer",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyD9R6-hmSRZwjEuWj_8CPRzZipXtJ6MMAI"
-        }
-      },
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -92,9 +84,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "67eb38b1-5561-4d41-8fa4-e886c2775a46"
+        "projectId": "6afca3fb-b8bc-41dc-9e68-7cb37e986773"
       }
     },
-    "owner": "l-bonez"
+    "owner": "wj-kuzzi"
   }
 }

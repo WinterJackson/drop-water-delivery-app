@@ -18,9 +18,25 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import Constants from 'expo-constants';
 
-const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.ios?.config?.googleMapsApiKey || Constants.expoConfig?.android?.config?.googleMaps?.apiKey || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+/**
+ * Straight-line metres between two points (haversine). Used only to decide
+ * whether the drawn route is stale enough to re-request.
+ */
+function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
+    const R = 6371000;
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(bLat - aLat);
+    const dLng = toRad(bLng - aLng);
+    const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Redraw once the rider has covered roughly a city block. Below this the
+// polyline is visually identical and the request is pure quota burn.
+const ROUTE_REFETCH_DISTANCE_M = 150;
 
 // Utility to decode Google Directions polyline string
 function decodePolyline(t: string, e: number = 5) {
@@ -86,6 +102,9 @@ export default function ActiveDelivery() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [routeCoords, setRouteCoords] = useState<any[]>([]);
+  // Origin + destination of the last route we asked for, so we can tell a
+  // meaningful move from GPS jitter.
+  const lastRouteFetch = useRef<{ lat: number; lng: number; destLat: number; destLng: number } | null>(null);
   const locationSubscription = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const riderId = useRiderStore((s) => s.riderId);
@@ -226,22 +245,53 @@ export default function ActiveDelivery() {
     };
   }, [activeOrder?.id, sendMessage]);
 
+  /**
+   * True when the drawn route is stale: no route yet, the destination changed
+   * (pickup → dropoff on status change), or the rider has moved far enough that
+   * the polyline's start no longer matches where they are.
+   */
+  const shouldRefetchRoute = (loc: any, destLat: number, destLng: number) => {
+    const last = lastRouteFetch.current;
+    if (!last) return true;
+    if (last.destLat !== destLat || last.destLng !== destLng) return true;
+    return (
+      metresBetween(last.lat, last.lng, loc.latitude, loc.longitude) >
+      ROUTE_REFETCH_DISTANCE_M
+    );
+  };
+
+  /**
+   * Fetch the road route via the backend proxy.
+   *
+   * This used to call Google Directions directly with the app's Maps key. That
+   * key is now restricted to the Maps SDK for `com.drop.rider`, so the direct
+   * call would be rejected outright — and a key permissive enough to work from
+   * JS would be extractable from the APK. The server holds an IP-restricted key
+   * and caches identical legs.
+   *
+   * A failure here is cosmetic: the map still shows both markers, so we degrade
+   * to no polyline rather than interrupting a delivery in progress.
+   */
   const fetchRoute = async (startLng: number, startLat: number, endLng: number, endLat: number) => {
+    lastRouteFetch.current = { lat: startLat, lng: startLng, destLat: endLat, destLng: endLng };
     try {
-      // 🔴 PRODUCTION GOOGLE MAPS MODE 
-      if (!GOOGLE_MAPS_API_KEY) {
-        if (__DEV__) console.warn("Google Maps API Key missing for routing.");
+      const token = await getToken();
+      if (!token) return;
+      const route = RiderApiRoutes.Directions(startLat, startLng, endLat, endLng);
+      const response = await fetch(route.path, {
+        method: route.method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        if (__DEV__) console.warn("Directions proxy returned", response.status);
         return;
       }
-      const response = await fetch(`https://maps.googleapis.com/maps/api/directions/json?origin=${startLat},${startLng}&destination=${endLat},${endLng}&key=${GOOGLE_MAPS_API_KEY}`);
       const data = await response.json();
-      if (data.routes && data.routes.length > 0) {
-        const encodedPolyline = data.routes[0].overview_polyline.points;
-        const coords = decodePolyline(encodedPolyline);
-        setRouteCoords(coords);
+      if (data?.polyline) {
+        setRouteCoords(decodePolyline(data.polyline));
       }
     } catch (e) {
-      if (__DEV__) console.error("Google Maps Route fetch error", e);
+      if (__DEV__) console.error("Route fetch error", e);
     }
   };
 
@@ -262,17 +312,28 @@ export default function ActiveDelivery() {
       }
 
       const status = activeOrder.order_status;
+      let destLat: number | null = null;
+      let destLng: number | null = null;
+
       if (status === "pending" || status === "accepted" || status === "ready") {
-        if (activeOrder.lat_from && activeOrder.lng_from) {
-           fetchRoute(currentLocation.longitude, currentLocation.latitude, activeOrder.lng_from, activeOrder.lat_from);
-        }
+        destLat = activeOrder.lat_from ?? null;
+        destLng = activeOrder.lng_from ?? null;
       } else if (status === "picked_up") {
-        if (activeOrder.lat && activeOrder.lng) {
-           fetchRoute(currentLocation.longitude, currentLocation.latitude, activeOrder.lng, activeOrder.lat);
-        }
+        destLat = activeOrder.lat ?? null;
+        destLng = activeOrder.lng ?? null;
+      }
+
+      // The location watcher fires every 5s / 10m. Re-requesting the route on
+      // every tick meant ~12 Directions calls per minute per active rider —
+      // enough to burn the daily quota with a handful of riders on the road,
+      // for a polyline that barely changes. Only refetch when the destination
+      // changes or the rider has actually moved a block.
+      if (destLat != null && destLng != null && shouldRefetchRoute(currentLocation, destLat, destLng)) {
+        fetchRoute(currentLocation.longitude, currentLocation.latitude, destLng, destLat);
       }
     } else {
       setRouteCoords([]);
+      lastRouteFetch.current = null;
     }
   }, [currentLocation?.latitude, currentLocation?.longitude, activeOrder?.id, activeOrder?.order_status]);
 
@@ -319,6 +380,10 @@ export default function ActiveDelivery() {
       if (status === "delivered") {
           setActiveOrder(null);
           locationSubscription.current?.remove();
+          // A quick_swap delivery just made this rider liable for the customer's
+          // empties, so the debt they see must not be a stale pre-delivery number.
+          queryClient.invalidateQueries({ queryKey: ['rider', 'bottle-debt'] });
+          queryClient.invalidateQueries({ queryKey: ['rider', 'bottle-ledger'] });
           Toast.success("Success", "Delivery completed!");
       } else {
         queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });

@@ -16,7 +16,8 @@ import { Popup } from "@/lib/popup";
 
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAddToCart } from "@/hooks/queries/useCart";
+import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
+import { errorMessage } from "@/API/errors";
 import { useAddFavorite, useFavorites, useRemoveFavorite } from "@/hooks/queries/useFavorites";
 import { useProduct } from "@/hooks/queries/useProducts";
 import { useUserDetails } from "@/hooks/queries/useUser";
@@ -124,12 +125,17 @@ const ProductDetails = () => {
             await addToCartMutation(payload);
 			fetchCart()
 			setLoading(false);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			setLoading(false);
-			if (error?.response?.data?.type === "vendor_conflict") {
+			// `useApiRequest` normalises every failure into an `ApiError`, which has
+			// no `.response` — reading `error.response.data.type` was always
+			// `undefined`, so the replace-cart prompt never appeared and a customer
+			// with another vendor's items simply could not add this one.
+			if (isVendorConflict(error)) {
+				const { existingVendor } = vendorConflictInfo(error);
 				Popup.show({
 					title: "Replace Cart?",
-					message: `Your cart has items from ${error?.response?.data?.existing_vendor || 'another vendor'}. Adding this will replace your current cart.`,
+					message: `Your cart has items from ${existingVendor}. Adding this will replace your current cart.`,
 					cancelText: "Cancel",
 					confirmText: "Replace",
 					isDestructive: true,
@@ -139,7 +145,7 @@ const ProductDetails = () => {
 					}
 				});
 			} else {
-                Toast.error("Failed to add", error?.response?.data?.detail || "Could not add item to cart.");
+                Toast.error("Failed to add", errorMessage(error, "Could not add item to cart."));
             }
 		}
 	};
@@ -175,12 +181,13 @@ const ProductDetails = () => {
 			
 			// Navigate to Cart screen to complete the flow with Payment methods and Address integration
 			router.push("/(screens)/Cart");
-		} catch (error: any) {
+		} catch (error: unknown) {
 			setLoading(false);
-			if (error?.response?.data?.type === "vendor_conflict") {
+			if (isVendorConflict(error)) {
+				const { existingVendor } = vendorConflictInfo(error);
 				Popup.show({
 					title: "Replace Cart?",
-					message: `Your cart has items from ${error?.response?.data?.existing_vendor || 'another vendor'}. Adding this will replace your current cart.`,
+					message: `Your cart has items from ${existingVendor}. Adding this will replace your current cart.`,
 					cancelText: "Cancel",
 					confirmText: "Replace & Checkout",
 					isDestructive: true,
@@ -191,7 +198,7 @@ const ProductDetails = () => {
 				});
 			} else {
 				if (__DEV__) console.error("Direct checkout error:", error);
-                Toast.error("Failed to checkout", error?.response?.data?.detail || "Could not proceed to checkout.");
+                Toast.error("Failed to checkout", errorMessage(error, "Could not proceed to checkout."));
 			}
 		}
 	};

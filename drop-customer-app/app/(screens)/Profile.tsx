@@ -3,13 +3,15 @@ import Button from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import icons from "@/constants/icons/icons";
 import { ROUTES } from "@/API/routes/ApiRoutes";
+import { errorMessage } from "@/API/errors";
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import CloudinaryUpload from "@/Helpers/imageUpload";
 import { useFavorites } from "@/hooks/queries/useFavorites";
-import { useUpdateProfilePic, useUserDetails } from "@/hooks/queries/useUser";
+import { useUpdateProfilePic, useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { useAuth, useClerk, useUser } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import BottomSheet, {
     BottomSheetScrollView,
     BottomSheetView,
@@ -42,9 +44,11 @@ const Profile = () => {
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const { signOut } = useClerk();
+	const { clearPushToken } = usePushNotifications();
 	const { user: clerkUser } = useUser();
 	const { setTheme } = useContext(UIThemeContext);
 	const { data: User, refetch: fetchUserDetails, isLoading: isUserLoading } = useUserDetails();
+	const updateUser = useUpdateUser();
 	const { getToken } = useAuth()
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
@@ -73,6 +77,10 @@ const Profile = () => {
 	// LOGOUT
 	const handleSignOut = async () => {
 		try {
+			// Detach the push token first — the endpoint is authenticated, so it
+			// cannot be done once the session is gone. Skipping it leaves this
+			// device receiving the previous account's order notifications.
+			await clearPushToken();
 			await signOut();
 			// F-04 SECURE CACHE WIPE: Clear Query Cache & stored items to prevent session fixation
 			queryClient.clear();
@@ -206,7 +214,7 @@ const Profile = () => {
 								<View className={`flex-row items-center px-4 py-2 rounded-full mb-2 border ${darkTheme ? "bg-green-500/20 border-green-500/30" : "bg-green-50 border-green-200"}`}>
 									<Text style={{ fontSize: 18, marginRight: 6 }}>💸</Text>
 									<Text className="font-bold text-sm" style={{ color: BRAND_TOAST.success }}>
-										Drop Cashback: KSh {User.wallet_balance.toLocaleString()}
+										Drop Cashback: KSh {(User.wallet_balance || 0).toLocaleString()}
 									</Text>
 								</View>
 							)}
@@ -524,28 +532,14 @@ const Profile = () => {
 									onPress={async () => {
 										// HIGH-11: Actually save profile data to backend
 										try {
-											const token = await getToken();
-											const res = await fetch(ROUTES.UPDATE_USER, {
-												method: 'PUT',
-												headers: {
-													Authorization: `Bearer ${token}`,
-													'Content-Type': 'application/json'
-												},
-												body: JSON.stringify({
-													full_name: User?.full_name || clerkUser?.fullName,
-													email: User?.email || clerkUser?.emailAddresses?.[0]?.emailAddress,
-													phone_number: User?.phone_number,
-												})
+											await updateUser.mutateAsync({
+												full_name: User?.full_name || clerkUser?.fullName || undefined,
+												phone_number: User?.phone_number,
 											});
-											if (res.ok) {
-												Toast.success("Saved", "Profile information saved successfully.");
-												handleClosePress();
-											} else {
-												const err = await res.json();
-												Toast.error("Save Failed", err?.detail || "Could not update profile.");
-											}
+											Toast.success("Saved", "Profile information saved successfully.");
+											handleClosePress();
 										} catch (e) {
-											Toast.error("Error", "Network error. Please try again.");
+											Toast.error("Save Failed", errorMessage(e, "Could not update profile."));
 										}
 									}}
 								>
