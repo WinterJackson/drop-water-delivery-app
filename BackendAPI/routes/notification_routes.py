@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
 from utils.verify_user_token import get_current_user
@@ -13,11 +13,15 @@ class NotificationReadRequest(BaseModel):
     notification_id: str
 
 
-@router.get("/")
+@router.get("")
+@router.get("/", include_in_schema=False)
 async def list_notifications(
     user_type: str = "customer",
-    skip: int = 0,
-    limit: int = 50,
+    # Bounded deliberately: these were unvalidated, so `?limit=1000000` asked the
+    # database for every notification a user has ever had, and a negative `skip`
+    # made asyncpg raise, surfacing as a 500.
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user)
 ):

@@ -5,7 +5,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.sql.expression import text
 from dependencies.dependencies import get_db_session
 from models.user_model import User
-from services.expo_push_service import send_push_message
+from services.notification_service import queue_push
 from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -43,12 +43,7 @@ async def run_stale_asset_monitor():
                 action_url="/(screens)/index"
             )
             
-            if user.push_token:
-                asyncio.create_task(send_push_message(
-                    to=user.push_token,
-                    title=title,
-                    body=body
-                ))
+            queue_push(session, to=user.push_token, title=title, body=body)
         
         await session.commit()
     logger.info(f"Stale asset monitor finished. Flagged {len(stale_users)} users.")

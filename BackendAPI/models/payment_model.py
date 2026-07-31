@@ -1,5 +1,5 @@
 """F-016 FIX: Real Payment/Transaction model for audit trail."""
-from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, func
+from sqlalchemy import Column, String, Numeric, DateTime, ForeignKey, func, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from db.session import Base
@@ -7,6 +7,17 @@ from db.session import Base
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        # One payment row per M-Pesa receipt: a replayed callback cannot book the
+        # same collection twice. Partial, because a pending/failed/orphaned row
+        # legitimately has no receipt yet.
+        Index(
+            "uq_payments_mpesa_receipt",
+            "mpesa_receipt",
+            unique=True,
+            postgresql_where=text("mpesa_receipt IS NOT NULL"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     order_id = Column(UUID(as_uuid=True), ForeignKey("Orders.id"), nullable=True, index=True)

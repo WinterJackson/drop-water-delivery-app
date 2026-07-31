@@ -40,7 +40,15 @@ class Vendor(Base):
   shift_end = Column(Time, default=time(19,0), nullable=False, index=True)
   verification_status = Column(String, default="pending")
   is_online = Column(Boolean, default=True, index=True)
+  # `rating` is the derived average. `rating_count`/`rating_sum` are what it is
+  # derived *from*, maintained incrementally by `review_service` so submitting a
+  # review costs one row update instead of an AVG over every review the target
+  # has ever received. `rating_count` is also what the apps need to render
+  # "4.8 (312)" — an average alone cannot distinguish one perfect review from
+  # three hundred.
   rating = Column(Float, nullable=True, index=True, default=0)
+  rating_count = Column(Integer, nullable=False, server_default='0')
+  rating_sum = Column(Float, nullable=False, server_default='0')
   h3_index_res8 = Column(String(15), index=True, nullable=True)
   total_sales = Column(Integer, nullable=True, index=True)
   sales_amount = Column(Numeric(10, 2), nullable=True, index=True)

@@ -1,7 +1,7 @@
 from db.session import Base
 from datetime import datetime, time, timezone
 import uuid
-from sqlalchemy import Column, String, Text, Boolean, TIMESTAMP, Float, Time, func, Index, Enum, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, Boolean, TIMESTAMP, Float, Numeric, Time, func, Index, Enum, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from enum import Enum as PyEnum
 from sqlalchemy.orm import relationship
@@ -60,9 +60,19 @@ class Deliverer(Base):
   is_active = Column(Boolean, default=False, index=True)
   is_verified = Column(Boolean, default=False, index=True)
   is_platinum = Column(Boolean, default=False, index=True)  # Gamification tier (drops commission to 7%)
+  # `rating` is the derived average. `rating_count`/`rating_sum` are what it is
+  # derived *from*, maintained incrementally by `review_service` so submitting a
+  # review costs one row update instead of an AVG over every review the target
+  # has ever received. `rating_count` is also what the apps need to render
+  # "4.8 (312)" — an average alone cannot distinguish one perfect review from
+  # three hundred.
   rating = Column(Float, default=5.0, index=True)
+  rating_count = Column(Integer, nullable=False, server_default='0')
+  rating_sum = Column(Float, nullable=False, server_default='0')
   acceptance_rate = Column(Float, default=100.0)
-  wallet_balance = Column(Float, default=0.0, nullable=False, index=True)
+  # Numeric, never Float: this is money. Float arithmetic on balances drifts,
+  # and this column now gates both cash-order float and payout availability.
+  wallet_balance = Column(Numeric(10, 2), default=0, nullable=False, index=True)
   shift_start = Column(Time, default=time(7,0), nullable=False, index=True)
   shift_end = Column(Time, default=time(19,0), nullable=False, index=True)
   push_token = Column(String(255), nullable=True)

@@ -1,7 +1,7 @@
 from db.session import Base
 from datetime import datetime, timezone
 import uuid
-from sqlalchemy import Column, String, Text, Boolean,Enum, TIMESTAMP, Float, Double, DateTime,Integer, ARRAY , ForeignKey, Numeric, func, Index
+from sqlalchemy import Column, String, Text, Boolean,Enum, TIMESTAMP, Float, Double, DateTime,Integer, ARRAY , ForeignKey, Numeric, func, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from enum import Enum as PyEnum
 from sqlalchemy.orm import relationship
@@ -15,6 +15,15 @@ class Order(Base):
       Index('idx_orders_vendor_created', 'vendor_id', 'created_at'),
       Index('idx_orders_deliverer_created', 'deliverer_id', 'created_at'),
       Index('idx_orders_customer_status', 'customer_id', 'order_status'),
+      Index('idx_orders_payment_status', 'payment_status'),
+      # One order per M-Pesa transaction. Partial so cash orders — which have no
+      # CheckoutRequestID — are unconstrained.
+      Index(
+          'uq_orders_checkout_request_id',
+          'checkout_request_ID',
+          unique=True,
+          postgresql_where=text('"checkout_request_ID" IS NOT NULL'),
+      ),
   )
   id = Column(UUID(as_uuid=True), unique=True, primary_key=True, default=uuid.uuid4, index=True)
   customer_id = Column(UUID(as_uuid=True),ForeignKey("Users.id"), index=True)
