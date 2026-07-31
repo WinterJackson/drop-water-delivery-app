@@ -13,7 +13,7 @@ from sqlalchemy import and_
 from models.order_model import Order
 from models.payment_model import Payment
 from services.payment_service import initiate_mpesa_reversal
-from services.notification_service import create_notification
+from services.notification_service import create_notification, queue_push
 from services.expo_push_service import send_push_message
 from models.user_model import User
 import asyncio
@@ -81,13 +81,8 @@ async def process_single_refund(session: AsyncSession, order: Order) -> dict:
                 action_url=action_url,
                 related_order_id=order.id,
             )
-            if customer.push_token:
-                asyncio.create_task(send_push_message(
-                    to=customer.push_token,
-                    title=title,
-                    body=body,
-                    data={"url": action_url},
-                ))
+            queue_push(session, to=customer.push_token, title=title, body=body,
+                       data={"url": action_url})
 
         logger.info(f"Refund initiated for order {order_id}, receipt {payment.mpesa_receipt}")
         return {
@@ -108,12 +103,22 @@ async def process_single_refund(session: AsyncSession, order: Order) -> dict:
         }
 
 
-async def process_all_pending_refunds(session: AsyncSession) -> dict:
+async def process_all_pending_refunds(session: AsyncSession, limit: int = 50) -> dict:
     """
     Batch-process all orders with payment_status = 'refund_pending'.
     Returns a summary of processed, succeeded, and failed refunds.
+
+    `FOR UPDATE SKIP LOCKED` makes this safe to run from several worker
+    instances at once: each claims a disjoint slice of the queue, so a reversal
+    is never issued twice for the same order.
     """
-    stmt = select(Order).where(Order.payment_status == "refund_pending")
+    stmt = (
+        select(Order)
+        .where(Order.payment_status == "refund_pending")
+        .order_by(Order.updated_at.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
     result = await session.execute(stmt)
     pending_orders = result.scalars().all()
 

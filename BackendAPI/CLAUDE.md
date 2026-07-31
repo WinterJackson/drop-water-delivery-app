@@ -24,6 +24,130 @@ Key Business Workflows:
 - **Schema Validation**: Pydantic v2.
 - **Background Tasks**: ARQ (Async Redis Queue).
 
+## 💰 Order Pricing — one function, no exceptions
+
+`services/pricing_service.py::compute_order_quote` is the **single** source of
+truth for what an order costs. It returns every line item as `Decimal` and
+quantizes `total` to whole shillings.
+
+- `POST /api/cart/quote` serves that quote to the client, which renders it verbatim.
+- `POST /api/cart/mpesa_payment` pushes `quote.stk_amount` to Safaricom.
+- `order_service.create_order(..., quote=quote)` writes that same `quote.total`.
+
+The amount charged and the amount recorded are therefore equal by construction.
+**Never re-derive a total anywhere else** — four competing implementations of this
+arithmetic is what made the M-Pesa callback's amount cross-check reject every
+retail payment. Fee constants (`RETAIL_SERVICE_FEE_KSH`, `SURGE_FEE_KSH`, …) live
+in `order_service.py` and are read through `pricing_service`; do not inline them.
+
+## 🔑 Authentication
+
+**Identity comes from the token, never from the request body.** `create_user`,
+`create_vendor` and `create_rider` all overwrite `clerk_id` with `user["sub"]`.
+They previously read it from the posted JSON with no auth dependency at all, so
+anyone could bind a vendor row to somebody else's Clerk subject.
+
+`core/security.py` verifies with the JWKS pinned to RS256, plus audience and
+issuer — a missing Clerk env var makes python-jose skip those checks silently, so
+the module refuses to start outside development without them. An unknown `kid`
+forces one cache refresh (rate-limited, single-flight) before the token is
+rejected: that is how signing-key rotation is survived, and without it a rotation
+locked out every user for up to an hour.
+
+Sockets are the one place a token is presented once and then trusted for hours.
+Every socket loop calls `_close_if_token_expired`, closing with 1008 so the client
+reconnects with a fresh token. Webhooks that mutate money or order state
+(`sms_routes`, the M-Pesa payout and reversal callbacks) need a shared secret;
+IP allow-listing alone is not a guard while `ProxyHeadersMiddleware` trusts every
+forwarding host.
+
+## 🔒 Authorisation on order-scoped endpoints
+
+Authenticating a token proves *who* is calling; it says nothing about whether they
+have any relationship to the order named in the URL. Every order-scoped endpoint —
+REST **and** WebSocket — must call
+`dependencies.auth_dependencies.authorise_order_access` (or `owns_entity` for
+entity-scoped sockets). Skipping it exposes one customer's live delivery location
+to any other signed-in account.
+
+## 🗺️ Google Maps web services go through the backend
+
+The six keys shipped in the mobile apps are restricted to the **Maps SDK** for one
+package/bundle each — that restriction is the only thing that makes an embedded key
+safe, and it also means those keys cannot call Directions, Places, or Geocoding.
+
+`routes/maps_routes.py` owns every Google web-service call, using a single
+IP-restricted `GOOGLE_MAPS_SERVER_API_KEY`. It authenticates, rate-limits, caches in
+Redis on coordinates rounded to ~11 m, reduces the response to what the client
+draws, and never forwards Google's `error_message` (it names the project and
+sometimes the key). Add new services there, not in the apps — see
+`docs/maps-architecture.md`.
+
+## 💵 Wallets, cash float and payouts
+
+`wallet_balance` is the **single spendable balance** for riders and vendors.
+`available_for_withdrawal = wallet_balance − committed_cash_float`, and
+`services/settlement_service.py` owns that arithmetic — never re-derive it.
+Withdrawal eligibility used to come from a separate derived earnings sum while
+payouts debited nothing, so the same money could be withdrawn *and* spent as
+cash-order float.
+
+Move balances only through `wallet_service.apply_wallet_delta`, which mutates the
+balance and appends the signed `WalletTransaction` in one call. Money is `Decimal`,
+never `float`. See `docs/cash-settlement.md`.
+
+## 🔔 Notifications
+
+Every user-visible event writes an in-app `Notification` row **and** may send a
+push. The two are not interchangeable: the row is always written so the history
+survives, while the push is subject to `notification_service.push_allowed`, which
+reads the recipient's `preferences`. Unmapped `message_type`s are transactional
+and always delivered — muting promotions must not mute a failed payment.
+
+There are exactly two ways to send a push, and `asyncio.create_task` is neither:
+
+| When | Use | Why |
+|---|---|---|
+| Before the commit | `queue_push(session, …)` | An `after_commit` hook sends it; a rollback discards it |
+| After the commit | `dispatch_background(…)` | Holds a strong reference so the task cannot be collected mid-send |
+
+`tests/test_ratings_and_notifications.py` fails the build if a bare
+`create_task(send_push_message(...))` reappears. Pushes used to be fired several
+statements *before* the commit that made the change real, so a rolled-back order
+still told the customer it was confirmed.
+
+`expo_push_service` retries only what retrying fixes — transport failures, 5xx
+and 429. A 4xx is a refusal. The retry decorator previously wrapped a body that
+caught every exception, so it never ran and one 502 dropped the batch silently.
+
+`user_type` arrives as a query parameter and is validated against
+`VALID_USER_TYPES`; it must be passed on **every** notification call, reads and
+writes alike, because `Notification.user_id` holds ids from three tables and
+carries no foreign key.
+
+## ⭐ Ratings
+
+Aggregation is incremental. `Vendors`/`Deliverers` carry `rating_count` and
+`rating_sum`; `review_service` locks the target `FOR UPDATE`, folds the new
+rating in, and derives `rating` from the two. Never recompute with `AVG()` over
+the reviews table — that is unbounded work on exactly the busiest targets.
+
+A repeat review for the same (customer, order, target) is an **edit**, not an
+error: `uq_customer_order_target_review` would otherwise turn the client's retry
+into a 500. Editing moves `rating_sum` and leaves `rating_count` alone.
+
+`is_rated` on an order means *every* ratable party has been rated — the vendor,
+plus the rider when one was assigned. `ReviewOut` must never carry
+`customer_clerk_id`: the target-review endpoint is unauthenticated.
+
+## ⚙️ Background jobs
+
+ARQ runs as its **own process** (`arq worker.WorkerSettings`), never inside the
+API — see `BackendAPI/README.md`. Every sweep must claim rows with
+`with_for_update(skip_locked=True)`, re-check state under the lock, and commit
+per item inside a `try/except`, so it stays correct with several workers running
+and one bad row cannot discard the batch.
+
 ## 📜 Coding Guidelines
 
 ### 1. Database Interactions

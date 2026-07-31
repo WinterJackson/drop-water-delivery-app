@@ -13,10 +13,19 @@ from models.vendor_model import Vendor
 from models.review_model import Review
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
-from services.expo_push_service import send_push_message
-from services.notification_service import create_notification
+from services.expo_push_service import send_push_message, dispatch_background
+from services.notification_service import create_notification, push_allowed
 import asyncio
 import h3
+from decimal import Decimal
+
+
+def _money(value) -> Decimal:
+    """Money is Decimal. Balances used to be mutated with float arithmetic, which
+    drifts over repeated settlements."""
+    return Decimal(str(value or 0))
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -257,59 +266,115 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
     if new_status == "delivered":
         deliverer.is_available = True # F-030: Free the rider for the next order
         
-        # --- Cash Order Float Deduction ---
+        # --- Wallet settlement ---
+        # Every movement below goes through `apply_wallet_delta`, which mutates the
+        # balance and writes the matching WalletTransaction in one step. These five
+        # lines used to assign to `wallet_balance` directly with float arithmetic,
+        # so a rider's own Transactions screen could not explain where their money
+        # went, and repeated float rounding drifted the balance.
+        from services.wallet_service import apply_wallet_delta
+        from models.wallet_transaction_model import TransactionType
+
+        short_id = str(order.id)[:8].upper()
+        is_wholesale = bool(vendor and vendor.vendor_type and vendor.vendor_type.value == "wholesale_b2b")
+
         if order.payment_method == "cash":
             order.payment_status = "paid"
             if vendor:
-                if vendor.vendor_type and vendor.vendor_type.value == "wholesale_b2b":
-                    # For wholesale, the vendor's in-house rider collected the cash.
-                    # The platform only deducts the platform_total from the vendor's wallet.
-                    vendor.wallet_balance = float(vendor.wallet_balance or 0) - float(order.platform_total or 0)
+                if is_wholesale:
+                    # The vendor's own in-house rider collected the cash, so the
+                    # vendor holds it; only the platform's cut comes off their wallet.
+                    await apply_wallet_delta(
+                        session,
+                        owner=vendor,
+                        clerk_id=vendor.clerk_id,
+                        user_type="vendor",
+                        amount=-_money(order.platform_total),
+                        transaction_type=TransactionType.commission_deduction,
+                        description=f"Platform commission on cash order {short_id}",
+                        reference_id=str(order.id),
+                    )
                 else:
-                    # For retail, the gig-rider collected the cash.
-                    # Deduct full vendor_net + platform_total from rider, and credit vendor_net to vendor.
-                    amount_to_deduct = float(order.vendor_net or 0) + float(order.platform_total or 0)
-                    deliverer.wallet_balance = float(deliverer.wallet_balance or 0) - amount_to_deduct
-                    vendor.wallet_balance = float(vendor.wallet_balance or 0) + float(order.vendor_net or 0)
+                    # The gig rider collected the customer's cash, so their float
+                    # settles the vendor's cut and the platform's cut.
+                    await apply_wallet_delta(
+                        session,
+                        owner=deliverer,
+                        clerk_id=deliverer.clerk_id,
+                        user_type="rider",
+                        amount=-(_money(order.vendor_net) + _money(order.platform_total)),
+                        transaction_type=TransactionType.order_payment,
+                        description=f"Cash order {short_id} settled from float",
+                        reference_id=str(order.id),
+                    )
+                    await apply_wallet_delta(
+                        session,
+                        owner=vendor,
+                        clerk_id=vendor.clerk_id,
+                        user_type="vendor",
+                        amount=_money(order.vendor_net),
+                        transaction_type=TransactionType.order_payment,
+                        description=f"Payout for cash order {short_id}",
+                        reference_id=str(order.id),
+                    )
         elif order.payment_method == "mpesa" and order.payment_status == "paid":
-            # --- M-Pesa Order Crediting ---
             if vendor:
-                vendor.wallet_balance = float(vendor.wallet_balance or 0) + float(order.vendor_net or 0)
-            # Rider only gets commission if they are a gig worker (retail)
-            if not (vendor and vendor.vendor_type and vendor.vendor_type.value == "wholesale_b2b"):
-                deliverer.wallet_balance = float(deliverer.wallet_balance or 0) + float(order.rider_net or 0)
+                await apply_wallet_delta(
+                    session,
+                    owner=vendor,
+                    clerk_id=vendor.clerk_id,
+                    user_type="vendor",
+                    amount=_money(order.vendor_net),
+                    transaction_type=TransactionType.order_payment,
+                    description=f"Payout for order {short_id}",
+                    reference_id=str(order.id),
+                )
+            # Riders earn a delivery commission only on retail; on wholesale the
+            # in-house rider is the vendor's own employee.
+            if not is_wholesale:
+                await apply_wallet_delta(
+                    session,
+                    owner=deliverer,
+                    clerk_id=deliverer.clerk_id,
+                    user_type="rider",
+                    amount=_money(order.rider_net),
+                    transaction_type=TransactionType.order_payment,
+                    description=f"Delivery earnings for order {short_id}",
+                    reference_id=str(order.id),
+                )
 
         # --- Bottle Inventory Debt Tracking (quick_swap) ---
         if order.delivery_type == "quick_swap":
-            from models.vendor_rider_model import VendorRiderRegistry
-            
-            registry_result = await session.execute(
-                select(VendorRiderRegistry).where(
-                    and_(
-                        VendorRiderRegistry.rider_id == deliverer.id,
-                        VendorRiderRegistry.vendor_id == order.vendor_id
-                    )
-                )
+            from services.bottle_ledger_service import (
+                accrue_delivery_empties,
+                quantities_from_order_items,
             )
-            reg_entry = registry_result.scalar_one_or_none()
-            
+
             items = (await session.execute(
                 select(OrderItem).options(joinedload(OrderItem.product)).where(OrderItem.order_id == order.id)
             )).scalars().all()
-            
-            total_qty = 0
-            for item in items:
-                total_qty += item.quantity
-                if reg_entry and item.product and hasattr(item.product, 'capacity'):
-                    cap = int(item.product.capacity or 0)
-                    if cap == 20:
-                        reg_entry.pending_20L_empties = (reg_entry.pending_20L_empties or 0) + item.quantity
-                    elif cap == 10:
-                        reg_entry.pending_10L_empties = (reg_entry.pending_10L_empties or 0) + item.quantity
 
+            total_qty = sum(int(item.quantity or 0) for item in items)
+
+            # Guardrail first: a deficit without a photo must not reach the ledger,
+            # because the accrual is what makes the rider liable for the bottles.
             received = empties_received or 0
             if received < total_qty and not proof_url:
                 raise HTTPException(status_code=400, detail="Proof of delivery photo is mandatory when reporting missing empty bottles.")
+
+            # The rider is now holding the vendor's empties. This writes an audit
+            # row *and* moves the registry counter, and does so whether or not a
+            # registry row exists — radar dispatch deliberately offers orders to
+            # riders who have never registered with the vendor, and the previous
+            # implementation dropped their debt on the floor.
+            await accrue_delivery_empties(
+                session,
+                rider_id=deliverer.id,
+                vendor_id=order.vendor_id,
+                order_id=order.id,
+                quantities_by_capacity=quantities_from_order_items(items),
+                actor_clerk_id=clerk_id,
+            )
         
         # Update customer lifecycle tracking
         if customer:
@@ -348,8 +413,8 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
             action_url=action_url,
             related_order_id=order.id
         )
-        if customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer.push_token and push_allowed(customer, "delivery_update"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title=title,
                 body=body,
@@ -372,7 +437,7 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
             related_order_id=order.id
         )
         if vendor.push_token:
-            asyncio.create_task(send_push_message(
+            dispatch_background(send_push_message(
                 to=vendor.push_token,
                 title=title,
                 body=body,
@@ -514,7 +579,7 @@ async def reject_delivery(session: AsyncSession, clerk_id: str, order_id: UUID):
             related_order_id=order.id
         )
         if vendor.push_token:
-            asyncio.create_task(send_push_message(
+            dispatch_background(send_push_message(
                 to=vendor.push_token,
                 title=title,
                 body=body,
@@ -537,8 +602,8 @@ async def reject_delivery(session: AsyncSession, clerk_id: str, order_id: UUID):
             action_url=action_url,
             related_order_id=order.id
         )
-        if customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer.push_token and push_allowed(customer, "delivery_update"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title=title,
                 body=body,
@@ -596,14 +661,39 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
 
         # --- Cash Order Float Check (Zero-Fraud) ---
         if order.payment_method == "cash":
-            required_float = float(order.vendor_net or 0) + float(order.platform_total or 0)
-            current_balance = float(deliverer.wallet_balance or 0)
-            if current_balance < required_float:
-                await session.rollback()
-                raise HTTPException(
-                    status_code=402, 
-                    detail=f"Insufficient Wallet Balance. You need at least KSH {required_float:,.2f} to accept this Cash order. Your balance is KSH {current_balance:,.2f}."
+            from services.settlement_service import committed_cash_float
+
+            # Lock the rider's row: the check below is read-then-decide, and the
+            # deliverer row was previously loaded with a plain SELECT. Two cash
+            # orders accepted at once both read the same balance and both passed,
+            # committing the rider to more float than they hold.
+            locked_rider = (
+                await session.execute(
+                    select(Deliverer).where(Deliverer.id == deliverer.id).with_for_update()
                 )
+            ).scalars().first()
+            if locked_rider is not None:
+                deliverer = locked_rider
+
+            required_float = _money(order.vendor_net) + _money(order.platform_total)
+            # Float already promised to other cash orders this rider is carrying is
+            # not spendable here either — otherwise one balance backs every order.
+            already_committed = await committed_cash_float(session, deliverer.id)
+            spare = _money(deliverer.wallet_balance) - already_committed
+
+            if spare < required_float:
+                await session.rollback()
+                detail = (
+                    f"Insufficient Wallet Balance. You need at least KSH {required_float:,.2f} "
+                    f"to accept this Cash order. You have KSH {spare:,.2f} available"
+                )
+                if already_committed > 0:
+                    detail += (
+                        f" (KSH {already_committed:,.2f} of your KSH "
+                        f"{_money(deliverer.wallet_balance):,.2f} is held for cash orders "
+                        "you are already carrying)"
+                    )
+                raise HTTPException(status_code=402, detail=detail + ".")
 
         # Removed duplicate registry check in favor of the auto-register block below
 
@@ -695,8 +785,8 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
             action_url=action_url,
             related_order_id=order.id
         )
-        if customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer.push_token and push_allowed(customer, "order_assigned"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title=title,
                 body=body,
@@ -720,7 +810,7 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
             related_order_id=order.id
         )
         if vendor.push_token:
-            asyncio.create_task(send_push_message(
+            dispatch_background(send_push_message(
                 to=vendor.push_token,
                 title=title,
                 body=body,
@@ -791,8 +881,8 @@ async def report_address_mismatch(session: AsyncSession, clerk_id: str, order_id
         )
         
         customer = await session.get(User, order.customer_id)
-        if customer and customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer and customer.push_token and push_allowed(customer, "delivery_update"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title="Delivery Paused ⚠️",
                 body="Rider arrived but reported an address mismatch. Please come to the ground floor to pick up your bottles.",
@@ -852,40 +942,44 @@ async def report_bottle_rejection(session: AsyncSession, clerk_id: str, order_id
 
     return {"message": "Rejection flagged for review. Please wait 2-5 minutes.", "status": order.order_status}
 
-async def get_deliverer_reviews(session: AsyncSession, clerk_id: str):
+async def get_deliverer_reviews(session: AsyncSession, clerk_id: str, limit: int = 50, offset: int = 0):
+    """A rider's rating summary plus a page of their reviews.
+
+    The totals and the star distribution come from one grouped query rather than
+    from loading every review the rider has ever received and counting them in
+    Python — which is what this did, so a rider with thousands of deliveries pulled
+    all of them into memory every time they opened the screen.
+    """
     deliverer = await get_deliverer_by_clerk_id(session, clerk_id)
     if not deliverer:
         raise HTTPException(status_code=404, detail="Rider not found")
 
-    reviews_query = select(Review).where(
-        and_(Review.target_type == 'rider', Review.target_id == deliverer.id)
-    ).order_by(Review.created_at.desc())
+    from services.review_service import get_target_rating_summary
 
-    result = await session.execute(reviews_query)
-    reviews = result.scalars().all()
+    summary = await get_target_rating_summary(session, "rider", deliverer.id)
 
-    # Aggregate counts
-    distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    formatted_reviews = []
-    
-    for r in reviews:
-        rating_int = int(round(r.rating))
-        if rating_int in distribution:
-            distribution[rating_int] += 1
-            
-        formatted_reviews.append({
-            "id": str(r.id),
-            "order_id": str(r.order_id),
-            "rating": r.rating,
-            "comment": r.comment,
-            "created_at": r.created_at.isoformat() if r.created_at else None
-        })
+    result = await session.execute(
+        select(Review)
+        .where(and_(Review.target_type == 'rider', Review.target_id == deliverer.id))
+        .order_by(Review.created_at.desc())
+        .offset(max(0, offset))
+        .limit(max(1, min(limit, 100)))
+    )
 
     return {
-        "total_reviews": len(reviews),
-        "average_rating": deliverer.rating or 5.0,
-        "distribution": distribution,
-        "reviews": formatted_reviews
+        "total_reviews": summary["total_reviews"],
+        "average_rating": summary["average_rating"],
+        "distribution": summary["distribution"],
+        "reviews": [
+            {
+                "id": str(r.id),
+                "order_id": str(r.order_id),
+                "rating": r.rating,
+                "comment": r.comment,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in result.scalars().all()
+        ],
     }
 
 
@@ -899,7 +993,7 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
     """
     from services.deliverer_service import get_deliverer_by_clerk_id
     from services.notification_service import create_notification
-    from services.expo_push_service import send_push_message
+    from services.expo_push_service import send_push_message, dispatch_background
     
     deliverer = await get_deliverer_by_clerk_id(session, clerk_id)
     if not deliverer:
@@ -983,7 +1077,7 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
             action_url = "/(screens)/Orders"
             await create_notification(session=session, user_id=vendor.id, user_type="vendor", title=title, message=body, message_type="delivery_update", action_url=action_url, related_order_id=order.id)
             if vendor.push_token:
-                asyncio.create_task(send_push_message(to=vendor.push_token, title=title, body=body, data={"url": action_url}))
+                dispatch_background(send_push_message(to=vendor.push_token, title=title, body=body, data={"url": action_url}))
         
         customer = await session.get(User, order.customer_id)
         if customer:
@@ -991,8 +1085,8 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
             body = "Your previous rider had an issue. We are dispatching a new rider!"
             action_url = "/(screens)/Orders"
             await create_notification(session=session, user_id=customer.id, user_type="customer", title=title, message=body, message_type="delivery_update", action_url=action_url, related_order_id=order.id)
-            if customer.push_token:
-                asyncio.create_task(send_push_message(to=customer.push_token, title=title, body=body, data={"url": action_url}))
+            if customer.push_token and push_allowed(customer, "delivery_update"):
+                dispatch_background(send_push_message(to=customer.push_token, title=title, body=body, data={"url": action_url}))
     else:
         # action_taken == "cancelled"
         vendor = await session.get(Vendor, order.vendor_id)
@@ -1004,7 +1098,7 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
             action_url = "/(screens)/Orders"
             await create_notification(session=session, user_id=vendor.id, user_type="vendor", title=title, message=body, message_type="order_cancelled", action_url=action_url, related_order_id=order.id)
             if vendor.push_token:
-                asyncio.create_task(send_push_message(to=vendor.push_token, title=title, body=body, data={"url": action_url}))
+                dispatch_background(send_push_message(to=vendor.push_token, title=title, body=body, data={"url": action_url}))
         
         customer = await session.get(User, order.customer_id)
         if customer:
@@ -1014,8 +1108,8 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
                 body += " Your refund will be processed shortly."
             action_url = "/(screens)/Orders"
             await create_notification(session=session, user_id=customer.id, user_type="customer", title=title, message=body, message_type="order_cancelled", action_url=action_url, related_order_id=order.id)
-            if customer.push_token:
-                asyncio.create_task(send_push_message(to=customer.push_token, title=title, body=body, data={"url": action_url}))
+            if customer.push_token and push_allowed(customer, "order_cancelled"):
+                dispatch_background(send_push_message(to=customer.push_token, title=title, body=body, data={"url": action_url}))
 
     return {"message": "Cancellation processed", "action_taken": action_taken, "order_id": str(order.id)}
 

@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -21,23 +22,67 @@ async def _get_provider_details(session: AsyncSession, clerk_id: str):
     
     raise HTTPException(status_code=404, detail="Provider account not found associated with this user.")
 
-async def _get_available_balance(session: AsyncSession, clerk_id: str, provider_id, provider_type: str) -> float:
-    # 1. Fetch Total Earnings
-    if provider_type == "vendor":
-        dashboard = await get_vendor_dashboard(session, clerk_id)
-        total_earnings = dashboard["total_revenue"]
-    else:
-        earnings = await get_deliverer_earnings(session, clerk_id)
-        total_earnings = earnings["total_earnings"]
+async def _refund_failed_payout(session, *, payout, owner, clerk_id: str, provider_type: str, reason: str):
+    """Return a debited payout to the balance when the disbursement never left.
 
-    # 2. Fetch locked payouts (pending, processing, completed)
-    locked_payouts_q = select(func.sum(Payout.amount)).where(
-        Payout.provider_id == provider_id,
-        Payout.status.in_(["pending", "processing", "completed"])
+    The debit happens up front so the money cannot be spent twice while the B2C
+    call is in flight. That makes refunding on failure mandatory — without it a
+    failed payout silently confiscates the amount.
+    """
+    from services.wallet_service import apply_wallet_delta
+    from models.wallet_transaction_model import TransactionType
+
+    await apply_wallet_delta(
+        session,
+        owner=owner,
+        clerk_id=clerk_id,
+        user_type=provider_type,
+        amount=Decimal(str(payout.amount)),
+        transaction_type=TransactionType.refund,
+        description=f"Withdrawal failed, amount returned ({reason})",
+        reference_id=str(payout.id),
     )
-    locked_amount = float((await session.execute(locked_payouts_q)).scalar() or 0)
 
-    return float(total_earnings) - locked_amount
+
+async def _get_provider_row(session: AsyncSession, provider_id, provider_type: str):
+    """The provider's row, locked FOR UPDATE so the balance cannot move between
+    the availability check and the debit."""
+    from models.deliverer_model import Deliverer
+    from models.vendor_model import Vendor
+
+    model = Vendor if provider_type == "vendor" else Deliverer
+    result = await session.execute(
+        select(model).where(model.id == provider_id).with_for_update()
+    )
+    row = result.scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Payout account not found.")
+    return row
+
+
+async def _get_available_balance(session: AsyncSession, clerk_id: str, provider_id, provider_type: str, owner=None) -> Decimal:
+    """
+    Withdrawable amount = wallet_balance − float committed to open cash orders.
+
+    This used to be computed from a *derived* sum of earnings over delivered
+    orders, minus prior payouts — a number with no connection to `wallet_balance`,
+    which is what the cash-order float check reads. Nothing reconciled the two, so
+    the same money could be withdrawn by M-Pesa **and** spent as float to accept a
+    cash order: the rider kept the customer's cash and the platform funded the
+    vendor's cut. Payouts now debit `wallet_balance`, making it the single
+    spendable balance, and `settlement_service` owns the committed-float subtraction.
+    """
+    from services.settlement_service import available_for_payout
+
+    if owner is None:
+        owner = await _get_provider_row(session, provider_id, provider_type)
+
+    return await available_for_payout(
+        session,
+        provider_id=provider_id,
+        provider_type=provider_type,
+        wallet_balance=owner.wallet_balance,
+    )
 
 async def get_payout_limits(session: AsyncSession, clerk_id: str, provider_id, provider_type: str):
     """
@@ -98,10 +143,31 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
     lock_key = abs(hash(str(provider_id))) % (2**31)  # Convert UUID to int32 for pg_advisory_xact_lock
     await session.execute(text(f"SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
 
-    available_balance = await _get_available_balance(session, clerk_id, provider_id, provider_type)
+    # Lock the balance row before reading it, so a concurrent payout or a cash
+    # order settling cannot move it between the check and the debit.
+    owner = await _get_provider_row(session, provider_id, provider_type)
+    available_balance = await _get_available_balance(
+        session, clerk_id, provider_id, provider_type, owner=owner
+    )
 
-    if data.amount > available_balance:
-        raise HTTPException(status_code=400, detail=f"Insufficient balance. Available: KSH {available_balance:.2f}")
+    requested = Decimal(str(data.amount))
+    if requested > available_balance:
+        from services.settlement_service import committed_cash_float, committed_cash_float_for_vendor
+
+        committed = (
+            await committed_cash_float_for_vendor(session, provider_id)
+            if provider_type == "vendor"
+            else await committed_cash_float(session, provider_id)
+        )
+        detail = f"Insufficient balance. Available: KSH {available_balance:.2f}"
+        if committed > 0:
+            # Say why, or a rider stares at a balance they cannot withdraw.
+            detail += (
+                f" (KSH {committed:.2f} of your KSH {Decimal(str(owner.wallet_balance or 0)):.2f}"
+                " is held as float for cash orders you are carrying, and is released"
+                " when you deliver them)."
+            )
+        raise HTTPException(status_code=400, detail=detail)
 
     payout = Payout(
         provider_id=provider_id,
@@ -113,6 +179,24 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
         status="pending"
     )
     session.add(payout)
+
+    # Debit immediately, in the same transaction as the Payout row. Leaving the
+    # balance untouched until the B2C callback is what let the same money be spent
+    # twice; a failed disbursement refunds it below.
+    from services.wallet_service import apply_wallet_delta
+    from models.wallet_transaction_model import TransactionType
+
+    await apply_wallet_delta(
+        session,
+        owner=owner,
+        clerk_id=clerk_id,
+        user_type=provider_type,
+        amount=-requested,
+        transaction_type=TransactionType.withdrawal,
+        description=f"Withdrawal to {data.payment_method}",
+        reference_id=str(payout.id),
+    )
+
     await session.commit()
     await session.refresh(payout)
 
@@ -134,12 +218,20 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
             else:
                 payout.status = "failed"
                 payout.failure_reason = b2c_result.get("error", "B2C initiation failed")
+                await _refund_failed_payout(
+                    session, payout=payout, owner=owner, clerk_id=clerk_id,
+                    provider_type=provider_type, reason="disbursement declined",
+                )
             await session.commit()
             await session.refresh(payout)
         except Exception as e:
             logger.error(f"B2C payout initiation failed for {payout.id}: {e}")
             payout.status = "failed"
             payout.failure_reason = str(e)
+            await _refund_failed_payout(
+                session, payout=payout, owner=owner, clerk_id=clerk_id,
+                provider_type=provider_type, reason="disbursement error",
+            )
             await session.commit()
 
     # Send notification to provider about payout status

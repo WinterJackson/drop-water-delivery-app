@@ -18,90 +18,264 @@ async def test_get_closest_deliverer_returns_none():
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_create_order_with_no_deliverer_sets_unassigned():
-    """Order should be created with order_status='unassigned' when no deliverer is found."""
-    from services.order_service import create_order
-
-    mock_session = AsyncMock()
-    # session.add is synchronous in SQLAlchemy — override from AsyncMock to plain MagicMock
-    mock_session.add = MagicMock()
-
-    vendor_id = uuid4()
-
-    cart_item = MagicMock()
-    cart_item.vendor_id = vendor_id
-    cart_item.product_id = uuid4()
-    cart_item.quantity = 1
-    cart_item.price = Decimal("100.00")
-    cart_item.Subtotal = Decimal("100.00")
-    cart_item.vendor = MagicMock(
-        id=vendor_id, lat=-1.28, lng=36.82,
-        vendor_type="retail_refill", deposit_fee=Decimal("50"),
-        location=MagicMock(), clerk_id="vendor_clerk"
+def _cart_item(vendor_id, *, quantity=1, price="100.00", capacity=20, weight=20.0, stock=10):
+    item = MagicMock()
+    item.vendor_id = vendor_id
+    item.product_id = uuid4()
+    item.quantity = quantity
+    item.price = Decimal(price)
+    item.Subtotal = Decimal(price) * quantity
+    item.product = MagicMock(
+        stock=stock, name="Water 20L", weight_kg=weight, capacity=capacity, vendor_id=vendor_id
     )
-    cart_item.product = MagicMock(
-        stock=10, name="Water 20L", weight_kg=20.0, vendor_id=vendor_id
+    return item
+
+
+def _customer(**overrides):
+    user = MagicMock()
+    user.id = overrides.get("id", uuid4())
+    user.clerk_id = overrides.get("clerk_id", "user_clerk")
+    user.debt_balance = Decimal(str(overrides.get("debt_balance", 0)))
+    user.wallet_balance = Decimal(str(overrides.get("wallet_balance", 0)))
+    user.has_used_welcome_offer = overrides.get("has_used_welcome_offer", True)
+    user.floor_level = overrides.get("floor_level", 0)
+    user.has_elevator = overrides.get("has_elevator", False)
+    user.location_address = "Kilimani, Nairobi"
+    user.push_token = None
+    return user
+
+
+def _vendor(vendor_id, vendor_type="retail_refill"):
+    vendor = MagicMock()
+    vendor.id = vendor_id
+    vendor.clerk_id = "vendor_clerk"
+    vendor.staff_clerk_id = None
+    vendor.lat = -1.28
+    vendor.lng = 36.82
+    vendor.vendor_type = MagicMock()
+    vendor.vendor_type.value = vendor_type
+    vendor.wholesale_base_delivery_fee = 0
+    vendor.wholesale_per_km_fee = 0
+    vendor.push_token = None
+    return vendor
+
+
+def _build_session(user, vendor, items):
+    """A session double wired for the exact call sequence `create_order` makes."""
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
+    idempotency = MagicMock()
+    idempotency.scalar_one_or_none.return_value = None
+
+    locked_user = MagicMock()
+    locked_user.scalar_one_or_none.return_value = user
+
+    cart_items = MagicMock()
+    cart_items.unique.return_value.scalars.return_value.all.return_value = items
+
+    stock_update = MagicMock()
+    stock_update.fetchone.return_value = (9, "Water 20L", vendor.id)
+
+    session.execute = AsyncMock(
+        side_effect=[idempotency, locked_user, cart_items] + [stock_update] * len(items)
     )
 
-    # Mock user with all attributes create_order reads
-    mock_user = MagicMock()
-    mock_user.debt_balance = Decimal("0")
-    mock_user.active_deposits = 0
-    mock_user.has_used_welcome_offer = True
-    mock_user.empty_bottles_held = 0
-    mock_user.push_token = None
-    mock_user.clerk_id = "user_clerk"
-    mock_user.floor_level = 0
-    mock_user.has_elevator = False
-    mock_user.wallet_balance = Decimal("0")
-
-    # 1st execute: Idempotency guard → None (no duplicate)
-    mock_idempotency_result = MagicMock()
-    mock_idempotency_result.scalar_one_or_none.return_value = None
-
-    # 2nd execute: SELECT cart items
-    mock_cart_result = MagicMock()
-    mock_cart_result.unique.return_value.scalars.return_value.all.return_value = [cart_item]
-
-    # 3rd execute: UPDATE...RETURNING (atomic stock decrement)
-    mock_update_result = MagicMock()
-    mock_update_result.fetchone.return_value = (9, "Water 20L", vendor_id)
-
-    mock_session.execute = AsyncMock(
-        side_effect=[mock_idempotency_result, mock_cart_result, mock_update_result]
-    )
-
-    mock_vendor = MagicMock()
-    mock_vendor.vendor_type = MagicMock()
-    mock_vendor.vendor_type.value = "retail_refill"
-    mock_vendor.clerk_id = "vendor_clerk"
-    mock_vendor.staff_clerk_id = None
-    
-    async def mock_get(model, id):
-        if model.__name__ == 'User':
-            return mock_user
-        if model.__name__ == 'Vendor':
-            return mock_vendor
+    async def _get(model, ident):
+        if model.__name__ == "Vendor":
+            return vendor
+        if model.__name__ == "User":
+            return user
         return None
 
-    mock_session.get = AsyncMock(side_effect=mock_get)
-    # session.flush is needed for order ID generation
-    mock_session.flush = AsyncMock()
+    session.get = AsyncMock(side_effect=_get)
+    return session
 
-    # Mock get_closest_deliverer to return None (triggers unassigned status)
-    with patch("services.order_service.get_closest_deliverer", return_value=None), \
-         patch("services.order_service.asyncio.create_task"), \
+
+@pytest.mark.asyncio
+async def test_create_order_with_no_deliverer_sets_unassigned():
+    """A new order starts `unassigned` — no rider is force-assigned at creation."""
+    from services.order_service import create_order
+
+    vendor_id = uuid4()
+    user = _customer()
+    vendor = _vendor(vendor_id)
+    items = [_cart_item(vendor_id)]
+    session = _build_session(user, vendor, items)
+
+    with patch("services.order_service.asyncio.create_task"), \
          patch("services.order_service.create_notification", new_callable=AsyncMock):
-        result = await create_order(
-            session=mock_session,
+        order = await create_order(
+            session=session,
             CheckoutRequestID="test-unique-123",
             id=uuid4(),
-            user_id=uuid4(),
+            user_id=user.id,
             phone="254700000000",
             type="cart",
             lat=-1.28,
             lng=36.82,
         )
-    # Function should not raise an error
-    assert result is not None
+
+    assert order is not None
+    assert order.order_status == "unassigned"
+    assert order.deliverer_id is None
+    assert order.checkout_request_ID == "test-unique-123"
+
+
+@pytest.mark.asyncio
+async def test_create_order_records_the_quoted_total_verbatim():
+    """`order.total_amount` must be the quote's total, to the shilling.
+
+    This is the invariant that B1/B2/B3 violated: the route pushed one amount to
+    M-Pesa while `create_order` derived a different one for the order row.
+    """
+    from services.order_service import create_order
+    from services.pricing_service import compute_order_quote
+
+    vendor_id = uuid4()
+    user = _customer(wallet_balance=0)
+    vendor = _vendor(vendor_id)
+    items = [_cart_item(vendor_id, quantity=2, price="250.00")]
+
+    quote = await compute_order_quote(
+        AsyncMock(), items=items, user=user, vendor=vendor,
+        delivery_type="quick_swap", lat=-1.29, lng=36.83,
+    )
+
+    session = _build_session(user, vendor, items)
+    with patch("services.order_service.asyncio.create_task"), \
+         patch("services.order_service.create_notification", new_callable=AsyncMock):
+        order = await create_order(
+            session=session, CheckoutRequestID="ws_CO_PARITY", id=uuid4(),
+            user_id=user.id, phone="254700000000", type="cart",
+            lat=-1.29, lng=36.83, quote=quote,
+        )
+
+    assert order.total_amount == quote.total
+    assert int(order.total_amount) == quote.stk_amount
+    assert order.service_fee == quote.revenue["service_fee"]
+    assert order.surge_fee == quote.surge_fee
+
+
+@pytest.mark.asyncio
+async def test_create_order_consumes_wallet_credit_and_writes_a_ledger_row():
+    """Wallet credit spent on an order must leave an auditable trail.
+
+    Balances used to move silently, so the customer's Transactions screen could
+    not account for its own numbers.
+    """
+    from services.order_service import create_order
+    from services.pricing_service import compute_order_quote
+
+    vendor_id = uuid4()
+    user = _customer(wallet_balance=100)
+    vendor = _vendor(vendor_id)
+    items = [_cart_item(vendor_id, quantity=2, price="250.00")]
+
+    quote = await compute_order_quote(
+        AsyncMock(), items=items, user=user, vendor=vendor,
+        delivery_type="quick_swap", lat=-1.29, lng=36.83,
+    )
+    assert quote.wallet_discount == Decimal("100.00")
+
+    session = _build_session(user, vendor, items)
+    with patch("services.order_service.asyncio.create_task"), \
+         patch("services.order_service.create_notification", new_callable=AsyncMock), \
+         patch("services.wallet_service.record_wallet_movement", new_callable=AsyncMock) as mock_ledger:
+        await create_order(
+            session=session, CheckoutRequestID="ws_CO_WALLET", id=uuid4(),
+            user_id=user.id, phone="254700000000", type="cart",
+            lat=-1.29, lng=36.83, quote=quote,
+        )
+
+    assert user.wallet_balance == Decimal("0.00")
+    mock_ledger.assert_awaited_once()
+    # Signed: spending wallet credit is money leaving, so the ledger row is
+    # negative. `transaction_type` cannot carry direction — `order_payment` also
+    # credits a rider their delivery earnings.
+    assert mock_ledger.await_args.kwargs["amount"] == Decimal("-100.00")
+
+
+@pytest.mark.asyncio
+async def test_create_order_rejects_duplicate_checkout_request_id():
+    """A retried STK push must not be able to create a second order."""
+    from fastapi import HTTPException
+    from services.order_service import create_order
+
+    session = AsyncMock()
+    existing = MagicMock()
+    existing.scalar_one_or_none.return_value = MagicMock()  # an order already exists
+    session.execute = AsyncMock(return_value=existing)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_order(
+            session=session, CheckoutRequestID="ws_CO_DUPLICATE", id=uuid4(),
+            user_id=uuid4(), phone="254700000000", type="cart", lat=-1.28, lng=36.82,
+        )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_order_refuses_multi_vendor_cart():
+    """One CheckoutRequestID must map to exactly one order.
+
+    A multi-vendor cart would produce several orders sharing a payment reference,
+    leaving the callback unable to tell which order it had just paid for.
+    """
+    from fastapi import HTTPException
+    from services.order_service import create_order
+
+    user = _customer()
+    vendor_a, vendor_b = uuid4(), uuid4()
+    items = [_cart_item(vendor_a), _cart_item(vendor_b)]
+    session = _build_session(user, _vendor(vendor_a), items)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_order(
+            session=session, CheckoutRequestID="ws_CO_MULTI", id=uuid4(),
+            user_id=user.id, phone="254700000000", type="cart", lat=-1.28, lng=36.82,
+        )
+    assert exc.value.status_code == 400
+    assert "more than one vendor" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_order_blocks_self_dealing():
+    """A vendor cannot order from their own store."""
+    from fastapi import HTTPException
+    from services.order_service import create_order
+
+    vendor_id = uuid4()
+    user = _customer(clerk_id="vendor_clerk")  # same clerk id as the vendor
+    vendor = _vendor(vendor_id)
+    items = [_cart_item(vendor_id)]
+    session = _build_session(user, vendor, items)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_order(
+            session=session, CheckoutRequestID="ws_CO_SELF", id=uuid4(),
+            user_id=user.id, phone="254700000000", type="cart", lat=-1.28, lng=36.82,
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_order_blocks_customers_with_outstanding_debt():
+    """An unpaid bottle deposit blocks new orders."""
+    from fastapi import HTTPException
+    from services.order_service import create_order
+
+    vendor_id = uuid4()
+    user = _customer(debt_balance=300)
+    vendor = _vendor(vendor_id)
+    items = [_cart_item(vendor_id)]
+    session = _build_session(user, vendor, items)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_order(
+            session=session, CheckoutRequestID="ws_CO_DEBT", id=uuid4(),
+            user_id=user.id, phone="254700000000", type="cart", lat=-1.28, lng=36.82,
+        )
+    assert exc.value.status_code == 402

@@ -93,8 +93,9 @@ class AssignRiderRequest(BaseModel):
 
 class ReceiveBottlesRequest(BaseModel):
     rider_id: str
-    received_10L: int = 0
-    received_20L: int = 0
+    received_10L: int = Field(0, ge=0)
+    received_20L: int = Field(0, ge=0)
+    note: Optional[str] = Field(None, max_length=500)
 
 # --- Routes ---
 
@@ -273,13 +274,50 @@ async def vendor_receive_bottles(
     from services.vendor_management_service import receive_bottles_from_rider
     clerk_id = user["sub"]
     result = await receive_bottles_from_rider(
-        session=db, 
-        clerk_id=clerk_id, 
-        rider_id=body.rider_id, 
-        received_10L=body.received_10L, 
-        received_20L=body.received_20L
+        session=db,
+        clerk_id=clerk_id,
+        rider_id=body.rider_id,
+        received_10L=body.received_10L,
+        received_20L=body.received_20L,
+        note=body.note,
     )
     return result
+
+
+@router.get("/bottle-debtors")
+async def vendor_bottle_debtors(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_vendor),
+):
+    """
+    Riders currently holding this vendor's empties.
+
+    Sourced from the bottle ledger, not the rider registry, so riders who took a
+    radar order without ever registering with the vendor are included. They were
+    invisible before, which is exactly how bottles went missing.
+    """
+    from services.vendor_management_service import get_vendor_bottle_debtors
+
+    return await get_vendor_bottle_debtors(session=db, clerk_id=user["sub"])
+
+
+@router.get("/bottle-ledger")
+async def vendor_bottle_ledger(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_vendor),
+):
+    """Audit trail of every bottle movement for this vendor."""
+    from services.bottle_ledger_service import get_ledger_history
+    from services.vendor_management_service import get_vendor_by_clerk_id
+
+    vendor = await get_vendor_by_clerk_id(db, user["sub"])
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {
+        "entries": await get_ledger_history(db, vendor_id=vendor.id, limit=limit, offset=offset)
+    }
 
 
 @router.get("/products")

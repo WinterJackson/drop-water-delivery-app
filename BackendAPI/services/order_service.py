@@ -16,7 +16,7 @@ from models.vendor_model import Vendor
 from models.user_model import User
 from schemas.order_schema import BaseOrder
 from services.expo_push_service import send_push_message
-from services.notification_service import create_notification
+from services.notification_service import create_notification, queue_push
 from services.dispatch_policy import DispatchPolicy
 import asyncio
 
@@ -79,12 +79,20 @@ SURGE_FEE_KSH = 10.0             # KSH 10 surcharge during peak hours
 PEAK_HOURS = [(6, 8), (17, 19)]   # 6:00-8:00 AM and 5:00-7:00 PM
 
 
-def is_surge_active() -> bool:
-    """Check if current Nairobi time falls within peak hours."""
+NAIROBI_TZ_OFFSET_HOURS = 3  # EAT = UTC+3, no DST
+
+
+def is_surge_active(now=None) -> bool:
+    """Is the current East Africa Time inside a documented peak window?
+
+    `now` is injectable so the surge windows can be asserted deterministically
+    instead of only when the suite happens to run at 07:00 or 18:00.
+    """
     from datetime import datetime, timezone, timedelta
-    nairobi_tz = timezone(timedelta(hours=3))  # EAT = UTC+3
-    now = datetime.now(nairobi_tz)
-    current_hour = now.hour
+
+    nairobi_tz = timezone(timedelta(hours=NAIROBI_TZ_OFFSET_HOURS))
+    moment = now.astimezone(nairobi_tz) if now is not None else datetime.now(nairobi_tz)
+    current_hour = moment.hour
     return any(start <= current_hour < end for start, end in PEAK_HOURS)
 
 def _haversine_km(lat_from: float, lng_from: float, lat_to: float, lng_to: float) -> float:
@@ -434,11 +442,8 @@ async def dispatch_order_to_riders(
                         related_order_id=order_id,
                         data=notification_data
                     )
-                    if p_token:
-                        asyncio.create_task(send_push_message(
-                            to=p_token, title=title, body=body,
-                            data={"url": action_url}
-                        ))
+                    queue_push(session, to=p_token, title=title, body=body,
+                               data={"url": action_url})
 
                 # WebSocket event to rider apps
                 try:
@@ -530,11 +535,8 @@ async def dispatch_order_to_riders(
                         related_order_id=order_id,
                         data=notification_data
                     )
-                    if p_token:
-                        asyncio.create_task(send_push_message(
-                            to=p_token, title=title, body=body,
-                            data={"url": action_url}
-                        ))
+                    queue_push(session, to=p_token, title=title, body=body,
+                               data={"url": action_url})
 
                 # Trip Radar WebSocket event
                 try:
@@ -578,7 +580,41 @@ async def dispatch_order_to_riders(
         logger.error(f"Dispatch Tier 2 error for order {order_id}: {e}")
 
 
-async def create_order(session: AsyncSession, CheckoutRequestID: str | None, id: UUID, user_id: UUID, phone: str, type: str, lat: float, lng: float, delivery_type: str = "quick_swap", payment_method: str = "mpesa"):
+async def create_order(
+    session: AsyncSession,
+    CheckoutRequestID: str | None,
+    id: UUID,
+    user_id: UUID,
+    phone: str,
+    type: str,
+    lat: float,
+    lng: float,
+    delivery_type: str = "quick_swap",
+    payment_method: str = "mpesa",
+    quote=None,
+):
+  """Materialise a paid-or-pending order from a cart.
+
+  `quote` is an `OrderQuote` from `services.pricing_service`. When the caller has
+  already priced the cart — which `POST /api/cart/mpesa_payment` must do, because
+  it needs the total *before* it can push the STK request — it passes that exact
+  quote in, and every monetary column on the order is taken from it verbatim.
+  That is what guarantees `order.total_amount == the amount we charged`; letting
+  this function re-derive the price is exactly how the two drifted apart.
+
+  When `quote` is None (tests, seeds, cash-only callers) we price it here using
+  the same function, so there is still only one formula in the codebase.
+  """
+  from services.pricing_service import (
+      compute_order_quote,
+      validate_quote,
+      single_vendor_or_400,
+  )
+  from decimal import Decimal
+
+  if type != "cart":
+      raise HTTPException(status_code=400, detail=f"Unsupported order source '{type}'.")
+
   # --- Idempotency Guard: Prevent duplicate STK push double-charges ---
   if CheckoutRequestID:
       existing_order = await session.execute(
@@ -590,289 +626,239 @@ async def create_order(session: AsyncSession, CheckoutRequestID: str | None, id:
               detail="This payment request has already been processed. Please refresh your orders."
           )
 
-  # --- Debt Intercept: Block checkout if customer has outstanding bottle debts ---
-  user_check_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
-  user_check = user_check_res.scalar_one_or_none()
-  if user_check and float(user_check.debt_balance) > 0:
+  # Lock the customer row for the whole transaction: the welcome offer and the
+  # wallet balance are both consumed below and must not be spendable twice.
+  user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
+  user = user_res.scalar_one_or_none()
+  if not user:
+      raise HTTPException(status_code=403, detail="Customer profile not found.")
+
+  items_result = await session.execute(
+      select(CartItem)
+      .where(CartItem.cart_id == id)
+      .options(joinedload(CartItem.vendor), joinedload(CartItem.product))
+  )
+  pre_order_items = items_result.unique().scalars().all()
+  if not pre_order_items:
+      raise HTTPException(status_code=400, detail="Your cart is empty. Add an item before checking out.")
+
+  vendor_id = single_vendor_or_400(pre_order_items)
+  vendor = await session.get(Vendor, vendor_id)
+
+  # --- Anti-Fraud: Self-Dealing Prevention ---
+  if vendor and (user.clerk_id == vendor.clerk_id or user.clerk_id == getattr(vendor, "staff_clerk_id", None)):
       raise HTTPException(
-          status_code=402,
-          detail=f"You have an outstanding bottle deposit debt of KSH {float(user_check.debt_balance):.0f}. Please clear it before placing a new order."
+          status_code=403,
+          detail="Self-dealing prohibited. You cannot place an order from your own store."
       )
 
-  if type == "cart":
-    query = select(CartItem).where(CartItem.cart_id == id).options(joinedload(CartItem.vendor), joinedload(CartItem.product))
-    result = await session.execute(query)
-    items = result.unique().scalars().all()
-    grouped_items = defaultdict(list)
-    for item in items:
-      grouped_items[item.vendor_id].append(item)
-    
-    for vendor_id, pre_order_items in grouped_items.items():
-      # --- Stock Validation ---
-      for item in pre_order_items:
-        product = item.product
-        if not product or product.stock < item.quantity:
-          raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient stock for product '{product.name if product else 'unknown'}'. Available: {product.stock if product else 0}, Requested: {item.quantity}"
+  locked_balance = Decimal(str(user.wallet_balance or 0))
+
+  if quote is None:
+      quote = await compute_order_quote(
+          session,
+          items=pre_order_items,
+          user=user,
+          vendor=vendor,
+          delivery_type=delivery_type,
+          lat=lat,
+          lng=lng,
+          wallet_balance_override=locked_balance,
+      )
+  elif quote.wallet_discount > locked_balance:
+      # The balance moved between pricing and creation (a concurrent order or
+      # withdrawal). Refuse rather than silently charging a different amount than
+      # the one already pushed to the customer's phone.
+      raise HTTPException(
+          status_code=409,
+          detail="Your wallet balance changed while checking out. Please review your cart and try again.",
+      )
+
+  # Re-run every gate under the lock — stock and debt can move between pricing
+  # and creation even though the cart itself is locked.
+  validate_quote(quote, pre_order_items, user=user)
+
+  import h3
+  order_h3_index = h3.latlng_to_cell(lat, lng, 8)
+
+  revenue = quote.revenue
+
+  order = Order(
+      customer_id=user_id,
+      vendor_id=vendor_id,
+      checkout_request_ID=CheckoutRequestID,
+      deliverer_id=None,
+      # Rider is never direct-assigned; the tiered dispatch engine offers the
+      # trip and a rider claims it.
+      order_status="unassigned",
+      lat_from=quote.lat_from,
+      lng_from=quote.lng_from,
+      lat=lat,
+      lng=lng,
+      h3_index_res8=str(order_h3_index),
+      distance_km=quote.distance_km,
+      phone=phone,
+      delivery_address=user.location_address if user else None,
+      total_amount=quote.total,
+      delivery_fee=float(quote.delivery_fee),
+
+      # ── Surcharges ──
+      staircase_surcharge=quote.staircase_surcharge,
+      payload_surcharge=quote.payload_surcharge,
+
+      # ── Revenue Split Ledger ──
+      vendor_commission=revenue["vendor_commission"],
+      service_fee=revenue["service_fee"],
+      rider_commission=revenue["rider_commission"],
+      platform_total=revenue["platform_total"],
+      vendor_net=revenue["vendor_net"],
+      rider_net=revenue["rider_net"],
+      surge_fee=quote.surge_fee,
+      delivery_markup=quote.delivery_markup,
+      vehicle_class=quote.vehicle_class,
+      delivery_time=quote.estimated_minutes,
+      is_welcome_offer=quote.is_welcome_offer,
+      delivery_type=delivery_type,
+      bottle_source="platform" if quote.is_welcome_offer else "own",
+      payment_method=payment_method,
+
+      # ── Discount Audit Trail ──
+      wallet_discount=quote.wallet_discount,
+      welcome_discount=quote.welcome_discount,
+      product_subtotal=quote.product_subtotal,
+  )
+  session.add(order)
+  await session.flush()
+
+  # ── Consume the one-shot incentives, now that the order exists ─────────────
+  if quote.is_welcome_offer:
+      user.has_used_welcome_offer = True
+      logger.info(
+          "Welcome offer consumed by user %s: KSH %s off a deposit of %s",
+          user_id, quote.welcome_discount, quote.bottle_deposit,
+      )
+
+  if quote.wallet_discount > 0:
+      # Balance and ledger row in one call. The amount is negative because this
+      # is money leaving the wallet — `transaction_type` cannot carry direction,
+      # since `order_payment` also credits riders their delivery earnings.
+      from services.wallet_service import apply_wallet_delta
+      from models.wallet_transaction_model import TransactionType
+      user.wallet_balance = locked_balance   # value read under the row lock
+      await apply_wallet_delta(
+          session,
+          owner=user,
+          clerk_id=user.clerk_id,
+          user_type="customer",
+          amount=-quote.wallet_discount,
+          transaction_type=TransactionType.order_payment,
+          description=f"Wallet credit applied to order {str(order.id)[:8].upper()}",
+          reference_id=str(order.id),
+      )
+
+  for item in pre_order_items:
+      session.add(OrderItem(
+          order_id=order.id,
+          product_id=item.product_id,
+          quantity=item.quantity,
+          price=item.price,
+          Subtotal=item.Subtotal,
+      ))
+
+      # --- Atomic Stock Decrement ---
+      # UPDATE ... WHERE stock >= qty RETURNING: if no row comes back, a
+      # concurrent order depleted the stock and we must not oversell.
+      result = await session.execute(
+          update(Product)
+          .where(Product.id == item.product_id, Product.stock >= item.quantity)
+          .values(
+              stock=Product.stock - item.quantity,
+              is_available=Product.stock - item.quantity > 0
           )
-
-      # --- V6: Payload & Vehicle Class Determination ---
-      payload_info = calculate_cart_payload(pre_order_items)
-      required_vehicle = payload_info["required_vehicle"]
-      total_weight_kg = payload_info["total_weight_kg"]
-      total_quantity = payload_info["total_quantity"]
-
-      first_item = pre_order_items[0]
-      lat_from = first_item.vendor.lat
-      lng_from = first_item.vendor.lng
-      vendor = await session.get(Vendor, vendor_id)
-      vendor_type_str = vendor.vendor_type.value if vendor and vendor.vendor_type else "retail_refill"
-      
-      # --- Anti-Fraud: Self-Dealing Prevention ---
-      if user_check and vendor and (user_check.clerk_id == vendor.clerk_id or user_check.clerk_id == vendor.staff_clerk_id):
-          raise HTTPException(
-              status_code=403,
-              detail="Self-dealing prohibited. You cannot place an order from your own store."
-          )
-
-      # --- V6: Wholesale MOQ Enforcement ---
-      if vendor_type_str == "wholesale_b2b" and total_weight_kg < DispatchPolicy.WHOLESALE_MOQ_KG:
+          .returning(Product.stock, Product.name, Product.vendor_id)
+      )
+      updated_row = result.fetchone()
+      if not updated_row:
           raise HTTPException(
               status_code=400,
-              detail=f"Wholesale orders require a minimum of {DispatchPolicy.WHOLESALE_MOQ_KG}kg (~5 bottles). Current cart weight: {total_weight_kg}kg."
+              detail="Insufficient stock for product (concurrent purchase detected). Please refresh and try again."
           )
 
-      # --- V6: Tiered Delivery Fee Calculation ---
-      delivery = calculate_delivery_fee(
-          lat_from, lng_from, lat, lng,
-          vendor_type=vendor_type_str,
-          vehicle_class=required_vehicle,
-          delivery_type=delivery_type
-      )
+      new_stock, product_name, vendor_id_for_push = updated_row
 
-      # --- V6: Distance Guard (Retail Only) ---
-      if vendor_type_str == "retail_refill":
-          max_distance = DispatchPolicy.RETAIL_MAX_DISTANCE_KM
-          if delivery["distance_km"] > max_distance:
-              raise HTTPException(
-                  status_code=400,
-                  detail=f"Delivery address ({delivery['distance_km']} km) exceeds the {max_distance} km maximum for retail orders."
+      # Low stock push threshold evaluator
+      if new_stock <= 5:
+          stock_alert_vendor = await session.get(Vendor, vendor_id_for_push)
+          if stock_alert_vendor:
+              title = "Low Stock Alert! ⚠️"
+              body = f"'{product_name}' is running critically low ({new_stock} left). Restock soon!"
+              action_url = "/(screens)/Inventory"
+              await create_notification(
+                  session=session,
+                  user_id=stock_alert_vendor.id,
+                  user_type="vendor",
+                  title=title,
+                  message=body,
+                  message_type="low_stock",
+                  action_url=action_url
               )
+              queue_push(session, to=stock_alert_vendor.push_token, title=title,
+                         body=body, data={"url": action_url})
 
-      import h3
-      order_h3_index = h3.latlng_to_cell(lat, lng, 8)
-
-      # --- Welcome Offer (First-Bottle Injection & 30% Discount) ---
-      user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
-      user = user_res.scalar_one_or_none()
-      total_quantity = sum(item.quantity for item in pre_order_items)
-      
-      welcome_discount = 0.0
-      bottle_fee_total = 0.0
-      is_welcome = False
-      
-      # 1. Determine if customer needs to pay bottle deposit.
-      # Deposit is required if they selected "keep_my_bottle" OR if it's their first order (no empty bottles to swap).
-      is_first_order = user and not getattr(user, 'has_used_welcome_offer', True)
-      
-      if delivery_type == "keep_my_bottle" or is_first_order:
-          highest_bottle_price = 0.0
-          for item in pre_order_items:
-              product = item.product
-              if product:
-                  capacity = getattr(product, 'capacity', 0)
-                  if capacity == 20:
-                      bottle_fee_total += 300.0 * item.quantity
-                      highest_bottle_price = max(highest_bottle_price, 300.0)
-                  elif capacity == 10:
-                      bottle_fee_total += 150.0 * item.quantity
-                      highest_bottle_price = max(highest_bottle_price, 150.0)
-          
-          # 2. Apply Welcome Discount ONLY if it's their first order and they are paying a bottle fee
-          if is_first_order and highest_bottle_price > 0:
-              # C-05 FIX: Welcome discount is 30% of the total BOTTLE DEPOSIT
-              welcome_discount = round(bottle_fee_total * 0.30, 2)
-              is_welcome = True
-              user.has_used_welcome_offer = True
-              logger.info(f"Welcome Offer applied for user {user_id}: KSH {welcome_discount:.0f} off on bottle fee of {bottle_fee_total}")
-
-      # --- Surcharge Logic (Anti-Fraud) ---
-      payload_surcharge = 0.0
-      staircase_surcharge = 0.0
-
-      if total_quantity > 2:
-          payload_surcharge = float((total_quantity - 2) * 10.0)
-
-      if user:
-          floor_level = getattr(user, 'floor_level', 0)
-          has_elevator = getattr(user, 'has_elevator', False)
-          if floor_level > 2 and not has_elevator:
-                staircase_surcharge = float((floor_level - 2) * 10.0)
-
-      total_rider_surcharges = payload_surcharge + staircase_surcharge
-
-      # --- V6: Revenue Split Calculation ---
-      product_total = float(sum(item.Subtotal for item in pre_order_items))
-      revenue = calculate_revenue_splits(
-          product_total=product_total,
-          delivery_fee=delivery["fee"],
-          vendor_type=vendor_type_str,
-          bottle_deposit=bottle_fee_total, # Pass bottle fee to vendor without commission deduction
-          rider_surcharges=total_rider_surcharges,
-          delivery_type=delivery_type,
-          welcome_discount=welcome_discount # Platform absorbs the discount
-      )
-
-      # --- Trip Radar Broadcast Logic ---
-      # Rider is no longer direct assigned. Order stays unassigned.
-      deliverer_id = None
-      initial_status = "unassigned"
-
-      # C-04 FIX: Compute the FULL pre-discount total including bottle fees.
-      # Bottle deposit fees are charged to the customer and credited to the vendor.
-      pre_discount_total = (
-          float(product_total) + delivery["fee"] + revenue["service_fee"] +
-          revenue["surge_fee"] + revenue["delivery_markup"] +
-          total_rider_surcharges + bottle_fee_total
-      )
-
-      # H-06 FIX: Apply welcome_discount FIRST (it reduces the bottle fee component),
-      # then calculate wallet_discount on the remaining total. This prevents the wallet
-      # from over-discounting when both are active.
-      after_welcome = pre_discount_total - welcome_discount
-
-      # --- Wallet Discount ---
-      wallet_discount = 0.0
-      if user and getattr(user, 'wallet_balance', 0) > 0:
-          # Ensure at least KSh 1 remains after all discounts (prevents zero-amount orders)
-          max_discount = max(0.0, after_welcome - 1.0)
-          wallet_discount = min(float(user.wallet_balance), max_discount)
-          # Deduct only what we used
-          user.wallet_balance = float(user.wallet_balance) - wallet_discount
-
-      final_total = after_welcome - wallet_discount
-
-      order = Order(
-        customer_id = user_id,
-        vendor_id = vendor_id,
-        checkout_request_ID = CheckoutRequestID,
-        deliverer_id = deliverer_id,
-        order_status = initial_status,
-        lat_from = lat_from,
-        lng_from = lng_from,
-        lat = lat,
-        lng = lng,
-        h3_index_res8 = str(order_h3_index),
-        distance_km = delivery["distance_km"],
-        phone = phone,
-        delivery_address = user.location_address if user else None,
-        total_amount = final_total,
-        delivery_fee = delivery["fee"],
-        
-        # ── Surcharges ──
-        staircase_surcharge = staircase_surcharge,
-        payload_surcharge = payload_surcharge,
-
-        # ── Revenue Split Ledger ──
-        vendor_commission = revenue["vendor_commission"],
-        service_fee = revenue["service_fee"],
-        rider_commission = revenue["rider_commission"],
-        platform_total = revenue["platform_total"],
-        vendor_net = revenue["vendor_net"],
-        rider_net = revenue["rider_net"],
-        surge_fee = revenue["surge_fee"],
-        delivery_markup = revenue["delivery_markup"],
-        vehicle_class = required_vehicle,
-        delivery_time = delivery["estimated_minutes"],
-        is_welcome_offer = is_welcome,
-        delivery_type=delivery_type,
-        bottle_source="platform" if is_welcome else "own",
-        payment_method=payment_method,
-
-        # ── H-07 FIX: Discount Audit Trail ──
-        wallet_discount = wallet_discount,
-        welcome_discount = welcome_discount,
-        product_subtotal = float(product_total),
-      )
-      session.add(order)
-      await session.flush()
-      
-      for item in pre_order_items:
-        order_item = OrderItem(
-          order_id = order.id,
-          product_id = item.product_id,
-          quantity = item.quantity,
-          price = item.price,
-          Subtotal = item.Subtotal
-        )
-        session.add(order_item)
-
-        # --- F-004 FIX: Atomic Stock Decrement ---
-        # Uses SQL UPDATE...WHERE stock >= qty to prevent overselling
-        # If rows_affected == 0, another transaction already depleted stock
-        result = await session.execute(
-            update(Product)
-            .where(Product.id == item.product_id, Product.stock >= item.quantity)
-            .values(
-                stock=Product.stock - item.quantity,
-                is_available=Product.stock - item.quantity > 0
-            )
-            .returning(Product.stock, Product.name, Product.vendor_id)
-        )
-        updated_row = result.fetchone()
-        if not updated_row:
-            raise HTTPException(
-                status_code=400,
-                detail="Insufficient stock for product (concurrent purchase detected). Please refresh and try again."
-            )
-
-        new_stock, product_name, vendor_id_for_push = updated_row
-
-        # Low stock push threshold evaluator
-        if new_stock <= 5:
-            # H-08 FIX: Renamed vendor to stock_alert_vendor to prevent shadowing
-            stock_alert_vendor = await session.get(Vendor, vendor_id_for_push)
-            if stock_alert_vendor:
-                title = "Low Stock Alert! ⚠️"
-                body = f"'{product_name}' is running critically low ({new_stock} left). Restock soon!"
-                action_url = "/(screens)/Inventory"
-                await create_notification(
-                    session=session,
-                    user_id=stock_alert_vendor.id,
-                    user_type="vendor",
-                    title=title,
-                    message=body,
-                    message_type="low_stock",
-                    action_url=action_url
-                )
-                if stock_alert_vendor.push_token:
-                    asyncio.create_task(send_push_message(
-                        to=stock_alert_vendor.push_token,
-                        title=title,
-                        body=body,
-                        data={"url": action_url}
-                    ))
-
-      await session.commit()
-
-    return grouped_items
+  await session.commit()
+  return order
 
 async def update_orders_payment_status_by_checkout_id(
     session: AsyncSession,
     checkout_request_id: str,
     new_status: str
 ):
-    stmt = select(Order).where(Order.checkout_request_ID == checkout_request_id).options(joinedload(Order.vendor))
+    """Transition an order's payment status, exactly once.
+
+    Two independent callers race here on every single order: the client polls
+    `/confirm_payment` every few seconds, and Safaricom POSTs `/mpesa/callback`
+    (and retries it). Without the guard below, each call re-broadcast NEW_ORDER,
+    created another vendor notification, and spawned another
+    `dispatch_order_to_riders` cascade — so a normal checkout could offer the same
+    trip to the whole rider pool several times over.
+
+    The row lock plus the terminal-state check make this idempotent: only the
+    transition *into* `paid` fires side effects, and only one caller can win it.
+    """
+    stmt = (
+        select(Order)
+        .where(Order.checkout_request_ID == checkout_request_id)
+        .with_for_update()
+    )
     result = await session.execute(stmt)
     orders = result.scalars().all()
 
     if not orders:
         return {"message": "No orders found with that checkout_request_ID"}
 
+    # `paid` is terminal for the payment lifecycle. A late `failed` must never
+    # walk a paid order backwards, and a repeated `paid` must be a no-op.
+    already_settled = [o for o in orders if o.payment_status == "paid"]
+    if already_settled:
+        if new_status == "paid":
+            logger.info(
+                "Payment %s already settled — skipping duplicate side effects.", checkout_request_id
+            )
+            return {"message": "Transaction was completed successfully.", "code": "0"}
+        logger.warning(
+            "Refusing to move already-paid payment %s to '%s'.", checkout_request_id, new_status
+        )
+        return {"message": "Transaction was completed successfully.", "code": "0"}
+
+    pending_dispatches: list[dict] = []
+
     for order in orders:
         order.payment_status = new_status
         if new_status == "paid":
+            # Load the vendor separately: combining `joinedload` with
+            # `FOR UPDATE` locks the nullable side of an outer join, which
+            # Postgres rejects.
+            order_vendor = await session.get(Vendor, order.vendor_id)
             try:
                 from routes.websocket_routes import manager
                 await manager.broadcast_order_update(
@@ -884,20 +870,20 @@ async def update_orders_payment_status_by_checkout_id(
             except Exception as e:
                 logger.error(f"WS Broadcast fail: {e}")
 
-            if order.vendor:
+            if order_vendor:
                 from services.order_snapshot import build_order_snapshot
                 from services.dispatch_policy import DispatchPolicy
-                
+
                 # Fetch order items including product relationship
                 _items_result = await session.execute(
                     select(OrderItem).options(joinedload(OrderItem.product))
                     .where(OrderItem.order_id == order.id)
                 )
-                order_items = _items_result.scalars().all()
+                order_items = _items_result.unique().scalars().all()
                 _total_qty = sum(i.quantity for i in order_items)
                 _total_weight = sum(float(i.product.weight_kg or 0) * i.quantity for i in order_items if i.product)
 
-                snapshot_data = build_order_snapshot(order, order_items, order.vendor, role="vendor")
+                snapshot_data = build_order_snapshot(order, order_items, order_vendor, role="vendor")
 
                 title = "New Order Received! 📦"
                 body = (
@@ -908,7 +894,7 @@ async def update_orders_payment_status_by_checkout_id(
                 action_url = "/(screens)/Orders"
                 await create_notification(
                     session=session,
-                    user_id=order.vendor.id,
+                    user_id=order_vendor.id,
                     user_type="vendor",
                     title=title,
                     message=body,
@@ -917,45 +903,83 @@ async def update_orders_payment_status_by_checkout_id(
                     related_order_id=order.id,
                     data=snapshot_data
                 )
-                if order.vendor.push_token:
-                    asyncio.create_task(send_push_message(
-                        to=order.vendor.push_token,
-                        title=title,
-                        body=body,
-                        data={"url": action_url}
-                    ))
-                    
+                queue_push(session, to=order_vendor.push_token, title=title,
+                           body=body, data={"url": action_url})
+
                 # Auto-dispatch (only retail per Policy)
-                vendor_type_str = order.vendor.vendor_type.value if hasattr(order.vendor.vendor_type, 'value') else order.vendor.vendor_type
+                vendor_type_str = order_vendor.vendor_type.value if hasattr(order_vendor.vendor_type, 'value') else order_vendor.vendor_type
                 if DispatchPolicy.should_auto_dispatch(vendor_type_str):
-                    asyncio.create_task(
-                        dispatch_order_to_riders(
-                            order_id=order.id,
-                            vendor_id=order.vendor_id,
-                            customer_id=order.customer_id,
-                            lat=order.lat_from,
-                            lng=order.lng_from,
-                            delivery_fee=float(order.delivery_fee or 0),
-                            vehicle_class=order.vehicle_class,
-                            vendor_type=vendor_type_str,
-                            total_weight_kg=_total_weight,
-                            total_quantity=_total_qty,
-                            delivery_type=order.delivery_type or "quick_swap",
-                            notification_data=snapshot_data
-                        )
-                    )
+                    # Deferred until after the commit: the dispatch task opens its
+                    # own session, so firing it now would let it read the order
+                    # before this transaction is visible.
+                    pending_dispatches.append(dict(
+                        order_id=order.id,
+                        vendor_id=order.vendor_id,
+                        customer_id=order.customer_id,
+                        lat=order.lat_from,
+                        lng=order.lng_from,
+                        delivery_fee=float(order.delivery_fee or 0),
+                        vehicle_class=order.vehicle_class,
+                        vendor_type=vendor_type_str,
+                        total_weight_kg=_total_weight,
+                        total_quantity=_total_qty,
+                        delivery_type=order.delivery_type or "quick_swap",
+                        notification_data=snapshot_data,
+                    ))
 
     await session.commit()
+
+    for dispatch_kwargs in pending_dispatches:
+        asyncio.create_task(dispatch_order_to_riders(**dispatch_kwargs))
+
     return {
         "message": "Transaction was completed successfully.",
         "code": "0"
       }
 
+async def annotate_is_rated(session: AsyncSession, orders: list) -> list:
+  """Populate `is_rated` on a batch of orders with one extra query.
+
+  A per-order lookup here would be an N+1 on the orders list, which is the most
+  frequently loaded screen in the app.
+  """
+  if not orders:
+      return orders
+
+  from models.review_model import Review
+
+  order_ids = [o.id for o in orders if o is not None]
+  if not order_ids:
+      return orders
+
+  # Which *targets* have been rated, not merely whether any review exists. The
+  # customer rates the vendor and the rider as two separate submissions; if the
+  # second one failed, treating the order as rated retired the "Rate Delivery"
+  # action and the rider could never be rated at all.
+  rated_rows = await session.execute(
+      select(Review.order_id, Review.target_type)
+      .where(Review.order_id.in_(order_ids))
+      .distinct()
+  )
+  rated: dict = {}
+  for order_id, target_type in rated_rows.all():
+      rated.setdefault(order_id, set()).add(target_type)
+
+  for order in orders:
+      if order is None:
+          continue
+      done = rated.get(order.id, set())
+      # A rider is only ratable once one has been assigned.
+      expected = {"vendor"} if order.deliverer_id is None else {"vendor", "rider"}
+      order.is_rated = expected.issubset(done)
+  return orders
+
+
 async def fetch_orders_by_id(session: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 50) -> list[BaseOrder]:
   query = select(Order).where(Order.customer_id == user_id).options(joinedload(Order.order_item).joinedload(OrderItem.product), joinedload(Order.vendor), joinedload(Order.deliverer)).order_by(Order.created_at.desc()).offset(skip).limit(limit)
   result = await session.execute(query)
   orders = result.unique().scalars().all()
-  return orders
+  return await annotate_is_rated(session, list(orders))
 
 async def get_last_completed_order(session: AsyncSession, user_id: UUID) -> BaseOrder | None:
     query = (
@@ -967,6 +991,7 @@ async def get_last_completed_order(session: AsyncSession, user_id: UUID) -> Base
     )
     result = await session.execute(query)
     order = result.unique().scalar_one_or_none()
+    await annotate_is_rated(session, [order] if order else [])
     return order
 
 async def get_active_order(session: AsyncSession, user_id: UUID) -> BaseOrder | None:
@@ -983,6 +1008,7 @@ async def get_active_order(session: AsyncSession, user_id: UUID) -> BaseOrder | 
     )
     result = await session.execute(query)
     order = result.unique().scalar_one_or_none()
+    await annotate_is_rated(session, [order] if order else [])
     return order
 
 async def fetch_order_tracking_logs(session: AsyncSession, order_id: UUID):
@@ -997,8 +1023,14 @@ async def fetch_order_tracking_logs(session: AsyncSession, order_id: UUID):
     return result.scalars().all()
 
 async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: UUID):
-    """Customer cancels their own order before preparation"""
-    order = await session.get(Order, order_id)
+    """Customer cancels their own order before preparation."""
+    from decimal import Decimal
+
+    # Lock the order: two taps on "Cancel" must not restore stock twice.
+    order_res = await session.execute(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    order = order_res.scalar_one_or_none()
     if not order or order.customer_id != user_id:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -1010,26 +1042,30 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             detail=f"Cannot cancel order with status '{order.order_status}'. Only pending, accepted, or unassigned orders can be cancelled."
         )
 
-    # H-05 FIX: Add cancellation penalty for accepted orders
-    # If the order is "accepted", the vendor is likely preparing it.
-    # We enforce a KSH 50 cancellation fee added to their debt balance.
-    if order.order_status == "accepted":
-        user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
-        user = user_res.scalar_one_or_none()
-        if user:
-            penalty = 50.0
-            user.debt_balance = float(user.debt_balance or 0) + penalty
-            logger.info(f"Cancellation penalty of KSH {penalty} applied to user {user_id}")
+    was_paid = order.payment_status == "paid"
 
-    # M-08 FIX: Release rider availability if assigned
+    # Lock the customer once, up front — the penalty, the wallet restoration and
+    # the welcome-offer reset all mutate this row.
+    user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
+    user = user_res.scalar_one_or_none()
+
+    # A vendor who has already accepted is likely preparing the order, so a late
+    # cancellation carries a KSH 50 fee added to the customer's debt balance.
+    if order.order_status == "accepted" and user:
+        penalty = Decimal("50.00")
+        user.debt_balance = Decimal(str(user.debt_balance or 0)) + penalty
+        logger.info("Cancellation penalty of KSH %s applied to user %s", penalty, user_id)
+
+    # Release rider availability if one was already assigned
     if order.deliverer_id:
         deliverer = await session.get(Deliverer, order.deliverer_id)
         if deliverer:
             deliverer.is_available = True
 
     order.order_status = "cancelled"
+    order.cancellation_reason = "cancelled_by_customer"
 
-    # BUG-05 FIX: Restore stock on cancellation
+    # Restore stock
     items_q = select(OrderItem).where(OrderItem.order_id == order.id)
     result = await session.execute(items_q)
     items = result.scalars().all()
@@ -1044,20 +1080,32 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             )
         )
 
-    # Restore Wallet Balance and Welcome Offer
-    user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
-    user = user_res.scalar_one_or_none()
     if user:
-        if order.wallet_discount and float(order.wallet_discount) > 0:
-            user.wallet_balance = float(user.wallet_balance or 0) + float(order.wallet_discount)
-            logger.info(f"Restored KSH {order.wallet_discount} to wallet for user {user_id}")
-            
-        if order.is_welcome_offer or (order.welcome_discount and float(order.welcome_discount) > 0):
-            user.has_used_welcome_offer = False
-            logger.info(f"Reset welcome offer status for user {user_id} due to cancellation")
+        wallet_refund = Decimal(str(order.wallet_discount or 0))
+        if wallet_refund > 0:
+            from services.wallet_service import apply_wallet_delta
+            from models.wallet_transaction_model import TransactionType
+            await apply_wallet_delta(
+                session,
+                owner=user,
+                clerk_id=user.clerk_id,
+                user_type="customer",
+                amount=wallet_refund,
+                transaction_type=TransactionType.refund,
+                description=f"Wallet credit returned after cancelling order {str(order.id)[:8].upper()}",
+                reference_id=str(order.id),
+            )
+            logger.info("Restored KSH %s to wallet for user %s", wallet_refund, user_id)
 
-    # Flag paid orders for refund
-    if order.payment_status == "paid":
+        # Only give the welcome offer back if the customer actually paid for the
+        # order they are cancelling. Restoring it on a free `pending`/`unassigned`
+        # cancellation let the 30% first-order discount be farmed indefinitely.
+        if was_paid and (order.is_welcome_offer or Decimal(str(order.welcome_discount or 0)) > 0):
+            user.has_used_welcome_offer = False
+            logger.info("Reset welcome offer status for user %s (paid order cancelled)", user_id)
+
+    # Flag paid orders for refund and queue the reversal
+    if was_paid:
         order.payment_status = "refund_pending"
         # Track the platform revenue lost due to this cancellation
         order.commission_lost = order.platform_total
@@ -1078,13 +1126,8 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             action_url=action_url,
             related_order_id=order.id
         )
-        if vendor.push_token:
-            asyncio.create_task(send_push_message(
-                to=vendor.push_token,
-                title=title,
-                body=body,
-                data={"url": action_url}
-            ))
+        queue_push(session, to=vendor.push_token, title=title, body=body,
+                   data={"url": action_url})
     
     # Notify Rider
     if order.deliverer_id:
@@ -1103,13 +1146,8 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
                 action_url=action_url,
                 related_order_id=order.id
             )
-            if deliverer.push_token:
-                asyncio.create_task(send_push_message(
-                    to=deliverer.push_token,
-                    title=title,
-                    body=body,
-                    data={"url": action_url}
-                ))
+            queue_push(session, to=deliverer.push_token, title=title, body=body,
+                       data={"url": action_url})
 
     await session.commit()
 
@@ -1131,50 +1169,69 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
 # ── Order Assignment Retry Engine ──────────────────────────────────────────
 # Re-assigns orders that have status="unassigned" and no rider after 3+ minutes
 
-async def reassign_unassigned_orders(session: AsyncSession):
-    """
-    Queries all orders with status='unassigned' older than 3 minutes.
-    For each, finds the nearest available rider using Haversine and assigns them.
-    Called:
-      1. When a rider toggles availability to True
-      2. As a background task after new order creation
+async def reassign_unassigned_orders(session: AsyncSession, batch_size: int = 50):
+    """Re-offer paid orders that the tiered dispatch engine failed to place.
+
+    Nothing is force-assigned: the order stays `unassigned` and we simply push the
+    offer again to every eligible nearby rider, so a rider still has to actively
+    accept it.
+
+    Two things were wrong before:
+      * it counted an order as "reassigned" merely because *a* rider existed,
+        without changing any state — so the log line was fiction;
+      * it notified only the single closest rider, which is a much weaker offer
+        than the Trip Radar broadcast used on the first attempt.
+
+    Unpaid orders are deliberately excluded: re-broadcasting an order nobody has
+    paid for would have riders competing for a trip that may never exist.
     """
     import datetime
 
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=3)
-    stmt = select(Order).where(
-        Order.order_status == "unassigned",
-        Order.deliverer_id.is_(None),
-        Order.created_at <= cutoff
-    ).order_by(Order.created_at.asc())
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=3)
+    stmt = (
+        select(Order)
+        .where(
+            Order.order_status == "unassigned",
+            Order.deliverer_id.is_(None),
+            Order.payment_status == "paid",
+            Order.created_at <= cutoff,
+        )
+        .order_by(Order.created_at.asc())
+        .limit(batch_size)
+    )
 
     result = await session.execute(stmt)
     unassigned_orders = result.scalars().all()
 
     if not unassigned_orders:
-        return {"reassigned": 0}
+        return {"reassigned": 0, "riders_notified": 0}
 
-    reassigned_count = 0
+    reoffered_count = 0
+    riders_notified = 0
 
     for order in unassigned_orders:
-        # Use the vendor/pickup location to find closest rider
         lat_from = order.lat_from or 0.0
         lng_from = order.lng_from or 0.0
 
-        deliverer = await get_closest_deliverer(
-            session=session, lat=lat_from, lng=lng_from,
-            vendor_id=order.vendor_id,
-            vehicle_class=order.vehicle_class or "motorbike",
-        )
-        if not deliverer:
-            continue
-            
-        # H-02 FIX: Do not force auto-assign. Just broadcast the offer to the closest rider via Trip Radar.
-        # Wait for them to actively accept it instead of forcing them offline.
-        # Order stays 'unassigned'.
-        reassigned_count += 1
+        vendor = await session.get(Vendor, order.vendor_id)
+        vendor_type_str = "retail_refill"
+        if vendor is not None and vendor.vendor_type is not None:
+            vendor_type_str = (
+                vendor.vendor_type.value if hasattr(vendor.vendor_type, "value") else str(vendor.vendor_type)
+            )
 
-        # BUG-08 FIX: Push-notify the newly assigned rider with order details
+        radar_riders = await get_radar_deliverers(
+            session=session,
+            lat=lat_from,
+            lng=lng_from,
+            vendor_id=None,
+            vehicle_class=order.vehicle_class or "motorbike",
+            vendor_type=vendor_type_str,
+        )
+        if not radar_riders:
+            logger.info("Re-offer: still no eligible riders for order %s", order.id)
+            continue
+
         title = "New Delivery Nearby! 📦"
         body = (
             f"Ksh {order.delivery_fee or 0:.0f} fee | "
@@ -1183,44 +1240,51 @@ async def reassign_unassigned_orders(session: AsyncSession):
             f"{order.vehicle_class or 'motorbike'}. Tap to view and accept."
         )
         action_url = "/(screens)/TripRadar"
-        await create_notification(
-            session=session,
-            user_id=deliverer.id,
-            user_type="rider",
-            title=title,
-            message=body,
-            message_type="new_delivery",
-            action_url=action_url,
-            related_order_id=order.id
-        )
-        if deliverer.push_token:
-            asyncio.create_task(send_push_message(
-                to=deliverer.push_token,
-                title=title,
-                body=body,
-                data={"url": action_url}
-            ))
 
-        # Broadcast assignment via WebSocket
+        rider_ids: list[str] = []
+        for rider_obj, push_token, uid in radar_riders:
+            rider_ids.append(str(uid))
+            await create_notification(
+                session=session,
+                user_id=uid,
+                user_type="rider",
+                title=title,
+                message=body,
+                message_type="new_delivery",
+                action_url=action_url,
+                related_order_id=order.id,
+            )
+            queue_push(session, to=push_token, title=title, body=body,
+                       data={"url": action_url})
+
+        riders_notified += len(rider_ids)
+        reoffered_count += 1
+
         try:
             from routes.websocket_routes import manager
-            await manager.broadcast_order_update(
-                vendor_id=str(order.vendor_id),
-                customer_id=str(order.customer_id),
-                deliverer_id=str(deliverer.id),
+            await manager.broadcast_to_riders(
+                rider_ids=rider_ids,
                 payload={
-                    "action": "ORDER_OFFER_BROADCAST",
+                    "action": "TRIP_RADAR_BROADCAST",
                     "order_id": str(order.id),
-                    "status": "unassigned",
-                    "deliverer_id": str(deliverer.id),
+                    "fee": float(order.delivery_fee or 0),
+                    "tier": 3,  # 3 = re-offer sweep
+                    "delivery_type": order.delivery_type or "quick_swap",
+                    "distance_km": order.distance_km,
+                    "lat_from": order.lat_from,
+                    "lng_from": order.lng_from,
+                    "lat": order.lat,
+                    "lng": order.lng,
                 }
             )
         except Exception as e:
             logger.error(f"WS broadcast fail in reassign: {e}")
 
     await session.commit()
-    logger.info(f"Reassigned {reassigned_count} unassigned orders")
-    return {"reassigned": reassigned_count}
+    logger.info(
+        "Re-offered %s unassigned order(s) to %s rider slot(s)", reoffered_count, riders_notified
+    )
+    return {"reassigned": reoffered_count, "riders_notified": riders_notified}
 
 # ── C-03 FIX: Mismatch Resolution Logic ────────────────────────────────────
 

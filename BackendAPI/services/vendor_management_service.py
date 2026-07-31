@@ -12,8 +12,8 @@ from models.order_model import Order, OrderItem
 from models.user_model import User
 from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
-from services.expo_push_service import send_push_message
-from services.notification_service import create_notification
+from services.expo_push_service import send_push_message, dispatch_background
+from services.notification_service import create_notification, push_allowed
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -356,8 +356,8 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
             action_url=action_url,
             related_order_id=order.id
         )
-        if customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer.push_token and push_allowed(customer, "order_update"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title=title,
                 body=body,
@@ -579,7 +579,7 @@ async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUI
         related_order_id=order.id
     )
     if rider.push_token:
-        asyncio.create_task(send_push_message(
+        dispatch_background(send_push_message(
             to=rider.push_token,
             title=title,
             body=body,
@@ -602,8 +602,8 @@ async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUI
             action_url=action_url,
             related_order_id=order.id
         )
-        if customer.push_token:
-            asyncio.create_task(send_push_message(
+        if customer.push_token and push_allowed(customer, "order_assigned"):
+            dispatch_background(send_push_message(
                 to=customer.push_token,
                 title=title,
                 body=body,
@@ -613,40 +613,50 @@ async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUI
     return {"message": "Rider assigned successfully", "order_id": str(order.id)}
 
 
-async def receive_bottles_from_rider(session: AsyncSession, clerk_id: str, rider_id: str, received_10L: int, received_20L: int):
+async def receive_bottles_from_rider(
+    session: AsyncSession,
+    clerk_id: str,
+    rider_id: str,
+    received_10L: int,
+    received_20L: int,
+    note: str | None = None,
+):
     """
-    Clears empty bottle debt when a gig-rider physically hands bottles back to the retail vendor.
+    Clear empty-bottle debt when a rider physically hands bottles back to the vendor.
+
+    Delegates to `bottle_ledger_service.settle_empties`, which locks the row, checks
+    the amount against what is actually outstanding, and writes an audit entry.
+    Three things changed from the version this replaced:
+
+    * It no longer requires a registry row. Radar dispatch lets a rider deliver for
+      a vendor they never registered with, and those riders could not return
+      bottles at all — the endpoint 404'd.
+    * Over-receipt is rejected instead of silently clamped to zero. The vendor app
+      checked the limit client-side; the API accepted anything.
+    * Every settlement leaves a record of who confirmed it and when.
     """
     vendor = await get_vendor_by_clerk_id(session, clerk_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    from models.vendor_rider_model import VendorRiderRegistry
-    registry_q = select(VendorRiderRegistry).where(
-        and_(
-            VendorRiderRegistry.rider_id == rider_id,
-            VendorRiderRegistry.vendor_id == vendor.id
-        )
+    from services.bottle_ledger_service import settle_empties
+
+    return await settle_empties(
+        session,
+        rider_id=rider_id,
+        vendor_id=vendor.id,
+        received_by_capacity={10: received_10L, 20: received_20L},
+        actor_clerk_id=clerk_id,
+        note=note,
     )
-    result = await session.execute(registry_q)
-    registry = result.scalar_one_or_none()
-    
-    if not registry:
-        raise HTTPException(status_code=404, detail="Rider is not registered with this vendor.")
 
-    # Decrement pending empties (ensure they don't go below zero)
-    if received_10L > 0:
-        current_10L = registry.pending_10L_empties or 0
-        registry.pending_10L_empties = max(0, current_10L - received_10L)
-        
-    if received_20L > 0:
-        current_20L = registry.pending_20L_empties or 0
-        registry.pending_20L_empties = max(0, current_20L - received_20L)
 
-    await session.commit()
-    
-    return {
-        "message": "Bottles received and rider debt cleared successfully.",
-        "pending_10L_empties": registry.pending_10L_empties,
-        "pending_20L_empties": registry.pending_20L_empties
-    }
+async def get_vendor_bottle_debtors(session: AsyncSession, clerk_id: str):
+    """Every rider holding this vendor's empties, registered or not."""
+    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    from services.bottle_ledger_service import get_vendor_outstanding
+
+    return {"riders": await get_vendor_outstanding(session, vendor.id)}

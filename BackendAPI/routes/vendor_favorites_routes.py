@@ -17,7 +17,8 @@ class VendorFavoriteRequest(BaseModel):
     vendor_id: str
 
 
-@router.get("/")
+@router.get("")
+@router.get("/", include_in_schema=False)
 async def list_vendor_favorites(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_customer),
@@ -47,6 +48,24 @@ async def remove_from_vendor_favorites(
     """Remove a vendor from the user's favorites."""
     clerk_id = user["sub"]
     return await remove_vendor_favorite(session=db, clerk_id=clerk_id, vendor_id=body.vendor_id)
+
+
+@router.get("/check/{vendor_id}")
+async def check_vendor_favorite(
+    vendor_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_customer),
+):
+    """Is this vendor in the caller's favourites?
+
+    The vendor detail screen renders its heart icon before the full favourites
+    list resolves, so it needs a single-vendor answer. The app has always called
+    this path; it simply did not exist server-side.
+    """
+    clerk_id = user["sub"]
+    favorites = await get_vendor_favorites(session=db, clerk_id=clerk_id)
+    is_favorite = any(str(getattr(f, "vendor_id", "")) == str(vendor_id) for f in favorites or [])
+    return {"is_favorite": is_favorite, "vendor_id": str(vendor_id)}
 
 
 @router.get("/{vendor_id}/last-order")

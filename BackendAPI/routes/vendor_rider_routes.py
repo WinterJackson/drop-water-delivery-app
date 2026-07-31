@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import asyncio
 import logging
 from services.notification_service import create_notification
-from services.expo_push_service import send_push_message
+from services.expo_push_service import send_push_message, dispatch_background
 from services.email_service import send_rider_approved
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ async def manage_rider_status(request: RiderActionRequest, session: AsyncSession
             action_url="/(screens)/DiscoverVendors"
         )
         if rider.push_token:
-            asyncio.create_task(send_push_message(
+            dispatch_background(send_push_message(
                 to=rider.push_token,
                 title=title,
                 body=body,

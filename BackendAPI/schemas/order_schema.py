@@ -90,6 +90,12 @@ class BaseOrder(BaseModel):
   welcome_discount: float | None = 0.0
   product_subtotal: float | None = 0.0
 
+  # ── Review state ──
+  # The client has always typed `is_rated` on its Order interface, but nothing
+  # ever populated it, so the "Rate this order" action was offered forever.
+  # Computed from the order's reviews; see `fetch_orders_by_id`.
+  is_rated: bool = False
+
   # ── Relationships (C-02 FIX) ──
   vendor: Optional[OrderVendorSnippet] = None
   deliverer: Optional[OrderDelivererSnippet] = None

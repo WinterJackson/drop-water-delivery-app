@@ -12,7 +12,8 @@ class FavoriteRequest(BaseModel):
     product_id: str
 
 
-@router.get("/")
+@router.get("")
+@router.get("/", include_in_schema=False)
 async def list_favorites(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_customer)

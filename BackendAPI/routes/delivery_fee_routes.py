@@ -19,7 +19,8 @@ async def preview_delivery_fee(
     Returns the tiered delivery fee, distance, estimated time, and vehicle class
     using the V6 Haversine + Vehicle Pricing engine.
     """
-    from services.order_service import calculate_delivery_fee, calculate_revenue_splits
+    from services.order_service import calculate_delivery_fee, calculate_revenue_splits, is_surge_active
+    from services.dispatch_policy import DispatchPolicy
     from db.session import AsyncSessionLocal
     from models.vendor_model import Vendor
 
@@ -67,6 +68,12 @@ async def preview_delivery_fee(
         delivery_type=delivery_type
     )
 
+    max_distance_km = (
+        DispatchPolicy.WHOLESALE_MAX_DISTANCE_KM
+        if vendor_type == "wholesale_b2b"
+        else DispatchPolicy.RETAIL_MAX_DISTANCE_KM
+    )
+
     return {
         "delivery_fee": result["fee"],
         "quick_swap_fee": result_quick_swap["fee"],
@@ -75,4 +82,11 @@ async def preview_delivery_fee(
         "estimated_minutes": result["estimated_minutes"],
         "vehicle_class": result["vehicle_class"],
         "service_fee": revenue["service_fee"],
+        # Surge was already being charged and recorded but never disclosed, so the
+        # customer had no way to understand a peak-hour price difference.
+        "surge_fee": revenue["surge_fee"],
+        "surge_active": is_surge_active(),
+        # Lets the client explain an out-of-range address before checkout.
+        "max_distance_km": float(max_distance_km),
+        "within_range": float(result["distance_km"]) <= float(max_distance_km),
     }

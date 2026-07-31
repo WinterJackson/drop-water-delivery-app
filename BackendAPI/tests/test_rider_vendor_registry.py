@@ -37,10 +37,15 @@ async def test_5_vendor_cap_counts_only_active():
 
 @pytest.mark.asyncio
 async def test_distance_enforcement_constant():
-    """DispatchPolicy.RIDER_REGISTRATION_MAX_RADIUS_KM should be 1.5km."""
+    """Rider registration radius is 2 km for retail, 15 km for wholesale.
+
+    The constant was split per business model; this assertion still referenced the
+    old single-radius name and had been failing ever since.
+    """
     from services.dispatch_policy import DispatchPolicy
 
-    assert DispatchPolicy.RIDER_REGISTRATION_MAX_RADIUS_KM == 2.0
+    assert DispatchPolicy.RETAIL_RIDER_REGISTRATION_MAX_RADIUS_KM == 2.0
+    assert DispatchPolicy.WHOLESALE_RIDER_REGISTRATION_MAX_RADIUS_KM == 15.0
 
 
 @pytest.mark.asyncio

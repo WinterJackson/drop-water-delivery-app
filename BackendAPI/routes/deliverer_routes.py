@@ -300,11 +300,13 @@ async def rider_report_bottle_rejection(
 
 @router.get("/reviews")
 async def rider_reviews(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_rider),
 ):
     clerk_id = user["sub"]
-    return await get_deliverer_reviews(session=db, clerk_id=clerk_id)
+    return await get_deliverer_reviews(session=db, clerk_id=clerk_id, limit=limit, offset=offset)
 
 
 @router.post("/upload_proof")
@@ -328,3 +330,82 @@ async def upload_proof(
         raise HTTPException(status_code=500, detail="Failed to upload proof photo securely")
         
     return {"url": url, "secure_url": url}
+
+
+@router.get("/bottle-debt")
+async def rider_bottle_debt(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_rider),
+):
+    """
+    Empties this rider is holding, broken down by vendor.
+
+    There was previously no way for a rider to see this at all: debt accrued
+    silently on every quick_swap delivery and only the vendor could see it. A rider
+    cannot return bottles they do not know they have.
+    """
+    from services.bottle_ledger_service import get_rider_outstanding
+
+    deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    vendors = await get_rider_outstanding(db, deliverer.id)
+    return {
+        "vendors": vendors,
+        "total_bottles": sum(v["total_bottles"] for v in vendors),
+    }
+
+
+@router.get("/bottle-ledger")
+async def rider_bottle_ledger(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_rider),
+):
+    """This rider's own bottle movement history — accruals and confirmed returns."""
+    from services.bottle_ledger_service import get_ledger_history
+
+    deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    return {
+        "entries": await get_ledger_history(db, rider_id=deliverer.id, limit=limit, offset=offset)
+    }
+
+
+@router.get("/wallet-summary")
+async def rider_wallet_summary(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_rider),
+):
+    """
+    Balance, float committed to open cash orders, and what is actually withdrawable.
+
+    A rider carrying cash orders holds money that is not theirs to withdraw: it
+    settles the vendor's cut and the platform's cut when they deliver. Showing only
+    `wallet_balance` made a refused withdrawal look arbitrary.
+    """
+    from decimal import Decimal
+    from services.settlement_service import available_for_payout, committed_cash_float
+
+    deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    balance = Decimal(str(deliverer.wallet_balance or 0))
+    committed = await committed_cash_float(db, deliverer.id)
+    available = await available_for_payout(
+        db, provider_id=deliverer.id, provider_type="rider", wallet_balance=balance,
+    )
+
+    return {
+        "wallet_balance": float(balance),
+        "committed_cash_float": float(committed),
+        "available_for_withdrawal": float(available),
+        # Negative means the rider owes the platform — settle before they can
+        # accept further cash orders.
+        "is_in_arrears": balance < 0,
+    }

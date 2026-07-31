@@ -9,6 +9,7 @@ from models.vendor_model import Vendor
 from schemas.cart_schemas import CartDetailed
 from sqlalchemy.ext.asyncio import AsyncSession
 from services.product_service import get_product_for_cart
+from services.dispatch_policy import DispatchPolicy
 from decimal import Decimal
 # >ADD TO CART 
       # POSSIBILITIES [ CART DOES NOT EXIST, CART EXISTS, ITEM DOES NOT EXIST IN THE CART, ITEM EXISTS IN THE CART]
@@ -44,30 +45,76 @@ async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetai
   if not cart:
     return None
   cart.cart_item.sort(key=lambda item: item.id)  # or item.product.name.lower()
-  
-  # Inject dynamic empty bottle deposit requirements
-  welcome_discount_amount = 0.0
+
+  # Metadata the cart screen needs to explain the platform's rules before the
+  # customer reaches checkout. The fee itself comes from `pricing_service` so this
+  # can never drift from the amount actually charged — a hardcoded literal here
+  # was one of the four competing definitions of the service fee.
+  from services.pricing_service import service_fee_for, vendor_type_of
+
   service_fee = 0.0
-  
+  vendor_type_str = None
+  total_weight_kg = 0.0
+  total_quantity = 0
+
   if cart.cart_item:
-      vendor_id = cart.cart_item[0].vendor_id
-      user = await session.get(User, user_id)
-      vendor = await session.get(Vendor, vendor_id)
-      
-      if user and vendor:
-          vendor_type_str = vendor.vendor_type.value if hasattr(vendor.vendor_type, 'value') else vendor.vendor_type
-          service_fee = 50.0 if vendor_type_str == "wholesale_b2b" else 12.0
-          
-          # Welcome discount and bottle fee injection is now handled dynamically
-          # based on delivery_type during checkout and in the Cart UI.
-          welcome_discount_amount = 0.0
-          
-  cart.welcome_discount_amount = welcome_discount_amount
+      vendor = await session.get(Vendor, cart.cart_item[0].vendor_id)
+      vendor_type_str = vendor_type_of(vendor)
+      service_fee = float(service_fee_for(vendor_type_str))
+      total_quantity = sum(int(i.quantity or 0) for i in cart.cart_item)
+      total_weight_kg = float(sum(
+          Decimal(str(getattr(i.product, "weight_kg", 0) or 0)) * int(i.quantity or 0)
+          for i in cart.cart_item if i.product is not None
+      ))
+
+  cart.vendor_type = vendor_type_str
   cart.service_fee = service_fee
+  cart.total_quantity = total_quantity
+  cart.total_weight_kg = round(total_weight_kg, 2)
+
+  # Progress toward the wholesale minimum order quantity, so the UI can show
+  # "62 / 100 kg" instead of letting the customer discover the rule as a 400.
+  if vendor_type_str == "wholesale_b2b":
+      cart.moq_kg = float(DispatchPolicy.WHOLESALE_MOQ_KG)
+      cart.moq_met = total_weight_kg >= float(DispatchPolicy.WHOLESALE_MOQ_KG)
+      cart.max_units = None
+  else:
+      cart.moq_kg = None
+      cart.moq_met = True
+      cart.max_units = RETAIL_MAX_UNITS
+
+  # Deposits and discounts are delivery-type dependent, so they are quoted by
+  # POST /api/cart/quote rather than guessed here.
+  cart.welcome_discount_amount = 0.0
   cart.delivery_fee_quick_swap = 0.0
   cart.delivery_fee_keep_my_bottle = 0.0
-  
+
   return cart
+
+RETAIL_MAX_UNITS = 4
+
+
+async def _assert_retail_capacity(session: AsyncSession, vendor_id: UUID, requested_total: int) -> None:
+    """Retail is fulfilled by motorbike, which carries at most 4 × 20 L bottles.
+
+    Enforced on every path into the cart. The check used to live only in the
+    "cart already exists" branch, so the very first add on a fresh cart could
+    smuggle in any quantity and the customer only found out when checkout
+    rejected it.
+    """
+    vendor = await session.get(Vendor, vendor_id)
+    if vendor is None:
+        return
+    vendor_type_str = vendor.vendor_type.value if hasattr(vendor.vendor_type, "value") else vendor.vendor_type
+    if vendor_type_str == "retail_refill" and requested_total > RETAIL_MAX_UNITS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Motorbikes can carry a maximum of {RETAIL_MAX_UNITS} (20L) bottles per trip. "
+                "Please reduce the quantity."
+            ),
+        )
+
 
 async def add_to_cart_service( user_id: UUID, session: AsyncSession, product_id : UUID, quantity : int, force_replace: bool = False):
   if quantity <= 0 or quantity > 500:
@@ -79,15 +126,19 @@ async def add_to_cart_service( user_id: UUID, session: AsyncSession, product_id 
     raise HTTPException(status_code=400, detail=f"Insufficient stock for '{product.name}'. Available: {product.stock}")
 
   actual_price = Decimal(product.price) - Decimal(product.discount or 0)
-  
-  # check if the cart exists 
+
+  # check if the cart exists
   query = select(Cart).where(Cart.customer_id == user_id).options(selectinload(Cart.cart_item))
   result = await session.execute(query)
   existing_cart =  result.unique().scalar_one_or_none()
-  
+
   if existing_cart and getattr(existing_cart, 'is_locked', False):
       raise HTTPException(status_code=409, detail="Cart is locked during checkout. Please wait for payment to complete.")
-      
+
+  if not existing_cart:
+    # Same capacity rule as the existing-cart path below.
+    await _assert_retail_capacity(session, product.vendor_id, quantity)
+
   if not existing_cart:
     # create new cart 
     new_cart = Cart(
@@ -139,13 +190,8 @@ async def add_to_cart_service( user_id: UUID, session: AsyncSession, product_id 
     existing_item = next((item for item in existing_cart.cart_item if item.product_id == product_id), None)
     
     # --- Retail Capacity Validation ---
-    vendor = await session.get(Vendor, product.vendor_id)
-    if vendor:
-        vendor_type_str = vendor.vendor_type.value if hasattr(vendor.vendor_type, 'value') else vendor.vendor_type
-        if vendor_type_str == "retail_refill":
-            current_cart_qty = sum(item.quantity for item in existing_cart.cart_item) if not force_replace else 0
-            if current_cart_qty + quantity > 4:
-                raise HTTPException(status_code=400, detail="Motorbikes can carry a maximum of 4 (20L) bottles per trip. Please reduce the quantity.")
+    current_cart_qty = sum(item.quantity for item in existing_cart.cart_item) if not force_replace else 0
+    await _assert_retail_capacity(session, product.vendor_id, current_cart_qty + quantity)
 
     if existing_item and not force_replace:
     # if it exists update the [quantity of the item , the subtotal , and the total for the cart  ]
@@ -185,13 +231,8 @@ async def change_cart_item_quantity_service(user_id: UUID, session: AsyncSession
     raise HTTPException(status_code=404, detail="Cart item not found")
 
   # --- Retail Capacity Validation ---
-  vendor = await session.get(Vendor, cart_item.vendor_id)
-  if vendor:
-      vendor_type_str = vendor.vendor_type.value if hasattr(vendor.vendor_type, 'value') else vendor.vendor_type
-      if vendor_type_str == "retail_refill":
-          new_total_qty = sum(item.quantity for item in cart.cart_item if str(item.id) != str(id)) + quantity
-          if new_total_qty > 4:
-              raise HTTPException(status_code=400, detail="Motorbikes can carry a maximum of 4 (20L) bottles per trip.")
+  new_total_qty = sum(item.quantity for item in cart.cart_item if str(item.id) != str(id)) + quantity
+  await _assert_retail_capacity(session, cart_item.vendor_id, new_total_qty)
 
   cart.total_amount -= cart_item.Subtotal
   cart_item.quantity = quantity

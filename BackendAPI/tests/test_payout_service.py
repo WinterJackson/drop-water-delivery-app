@@ -1,12 +1,20 @@
 """
-Tests for payout_service: request_payout balance validation and advisory locking.
-Pure mocks — no real database.
+Tests for payout_service: request_payout balance validation, wallet debiting and
+advisory locking. Pure mocks — no real database.
 """
+from decimal import Decimal
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from fastapi import HTTPException
 from schemas.payout_schemas import PayoutCreate
+
+
+def _owner(balance):
+    """Stand-in for a Deliverer/Vendor row with a real Decimal balance."""
+    return SimpleNamespace(wallet_balance=Decimal(str(balance)), clerk_id="clerk_v1")
 
 
 @pytest.mark.asyncio
@@ -26,9 +34,17 @@ async def test_request_payout_insufficient_balance():
         new_callable=AsyncMock,
         return_value=(vendor_id, "vendor"),
     ), patch(
+        "services.payout_service._get_provider_row",
+        new_callable=AsyncMock,
+        return_value=_owner(500),
+    ), patch(
         "services.payout_service._get_available_balance",
         new_callable=AsyncMock,
-        return_value=500.0,  # Only 500 available
+        return_value=Decimal("500"),  # Only 500 available
+    ), patch(
+        "services.settlement_service.committed_cash_float_for_vendor",
+        new_callable=AsyncMock,
+        return_value=Decimal("0"),
     ):
         with pytest.raises(HTTPException) as exc:
             await request_payout(
@@ -59,14 +75,20 @@ async def test_request_payout_success():
         new_callable=AsyncMock,
         return_value=(vendor_id, "vendor"),
     ), patch(
+        "services.payout_service._get_provider_row",
+        new_callable=AsyncMock,
+        return_value=_owner(2000),
+    ), patch(
         "services.payout_service._get_available_balance",
         new_callable=AsyncMock,
-        return_value=2000.0,
+        return_value=Decimal("2000"),
     ), patch(
-        "services.payout_service.initiate_b2c_payout",
+        # Patch where it is defined: request_payout imports it inside the function,
+        # so patching the payout_service namespace never took effect and the real
+        # call was silently failing into the refund path.
+        "services.payment_service.initiate_b2c_payout",
         new_callable=AsyncMock,
         return_value={"success": True, "ConversationID": "AG_123"},
-        create=True,
     ), patch(
         "services.notification_service.create_notification",
         new_callable=AsyncMock,
@@ -77,8 +99,24 @@ async def test_request_payout_success():
             PayoutCreate(amount=500.0, payment_method="mpesa", account_details="254700000000"),
         )
 
-    # payout is a Payout ORM object; session.add should have been called
-    session.add.assert_called_once()
+    # Two rows: the Payout itself and the withdrawal ledger entry. The balance is
+    # debited up front so the same money cannot also be spent as cash-order float
+    # while the disbursement is in flight.
+    added = [c.args[0] for c in session.add.call_args_list]
+    assert len(added) == 2, [type(a).__name__ for a in added]
+
+    from models.payout_model import Payout
+    from models.wallet_transaction_model import TransactionType, WalletTransaction
+
+    assert isinstance(added[0], Payout)
+    ledger = added[1]
+    assert isinstance(ledger, WalletTransaction)
+    assert ledger.transaction_type == TransactionType.withdrawal
+    assert ledger.amount == Decimal("-500")      # signed debit
+    # A successful disbursement must not also refund.
+    assert not any(
+        getattr(a, "transaction_type", None) == TransactionType.refund for a in added
+    )
     session.commit.assert_awaited()
 
 
