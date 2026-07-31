@@ -175,6 +175,10 @@ class ConnectionManager:
         if order_id not in self.tracking_connections:
             self.tracking_connections[order_id] = []
         self.tracking_connections[order_id].append(websocket)
+        # Resolve the rider up front so the very first GPS packet is relayed,
+        # rather than waiting for an unrelated order-status broadcast to populate
+        # the mapping.
+        await self.resolve_order_rider(order_id)
         logger.info(f"Tracker connected for order {order_id}")
 
     def disconnect_tracker(self, order_id: str, websocket: WebSocket):
@@ -200,29 +204,86 @@ class ConnectionManager:
 
     async def _local_update_rider_location(self, rider_id: str, location: dict):
         self.rider_locations[rider_id] = location
-        # Broadcast to all customers tracking orders assigned to this rider
-        for order_id, mapped_rider in self.order_rider_map.items():
-            if mapped_rider == rider_id:
-                if order_id in self.tracking_connections:
-                    for ws in self.tracking_connections[order_id]:
-                        try:
-                            await ws.send_json({"rider_id": rider_id, "location": location})
-                        except Exception as e:
-                            logger.error(f"Failed to update rider location to tracker {order_id}: {e}")
-                
-                # Broadcast to the vendor of this order
-                vendor_id = self.order_vendor_map.get(order_id)
-                if vendor_id and str(vendor_id) in self.vendor_orders:
-                    for ws in self.vendor_orders[str(vendor_id)]:
-                        try:
-                            await ws.send_json({
-                                "action": "RIDER_LOCATION",
-                                "rider_id": rider_id,
-                                "location": location,
-                                "order_id": order_id
-                            })
-                        except Exception as e:
-                            logger.error(f"Failed to update rider location to vendor {vendor_id}: {e}")
+
+        # Fan out to every locally-connected tracker whose order is served by this
+        # rider. The order→rider mapping is resolved per socket at connect time
+        # (see `connect_tracker`) and cached in Redis, so a worker that never
+        # happened to relay an order-status broadcast still knows the mapping.
+        for order_id in list(self.tracking_connections.keys()):
+            mapped_rider = self.order_rider_map.get(order_id)
+            if mapped_rider is None:
+                mapped_rider = await self.resolve_order_rider(order_id)
+            if mapped_rider != rider_id:
+                continue
+
+            payload = {"rider_id": rider_id, "location": location, "order_id": order_id}
+            # Include the coordinates at the top level too: older clients read
+            # `data.lat` / `data.lng` directly.
+            if isinstance(location, dict):
+                if location.get("lat") is not None:
+                    payload["lat"] = location["lat"]
+                if location.get("lng") is not None:
+                    payload["lng"] = location["lng"]
+
+            for ws in list(self.tracking_connections.get(order_id, [])):
+                try:
+                    await ws.send_json(payload)
+                except Exception as e:
+                    logger.warning("Dropping dead tracker socket for order %s: %s", order_id, e)
+                    self.disconnect_tracker(order_id, ws)
+
+            # Broadcast to the vendor of this order
+            vendor_id = self.order_vendor_map.get(order_id)
+            if vendor_id and str(vendor_id) in self.vendor_orders:
+                for ws in list(self.vendor_orders[str(vendor_id)]):
+                    try:
+                        await ws.send_json({
+                            "action": "RIDER_LOCATION",
+                            "rider_id": rider_id,
+                            "location": location,
+                            "order_id": order_id
+                        })
+                    except Exception as e:
+                        logger.warning("Dropping dead vendor socket for %s: %s", vendor_id, e)
+                        self.disconnect_entity("vendor", str(vendor_id), ws)
+
+    async def resolve_order_rider(self, order_id: str) -> Optional[str]:
+        """Which rider is serving this order? Redis first, database as fallback.
+
+        This mapping used to live only in per-process memory and was populated as
+        a side effect of order-status broadcasts. Any worker that had not seen
+        such a broadcast — a fresh instance after a deploy, or one that a customer
+        connected to before the next status change — silently dropped every GPS
+        update instead of relaying it.
+        """
+        r = get_redis()
+        if r:
+            try:
+                cached = await r.get(f"order_rider_map:{order_id}")
+                if cached:
+                    rider_id = cached.decode() if isinstance(cached, bytes) else str(cached)
+                    self.order_rider_map[order_id] = rider_id
+                    return rider_id
+            except Exception as e:
+                logger.warning("Redis lookup failed for order_rider_map:%s — %s", order_id, e)
+
+        try:
+            from uuid import UUID as _UUID
+            from dependencies.dependencies import get_db_session
+            from models.order_model import Order
+
+            async with get_db_session() as session:
+                order = await session.get(Order, _UUID(str(order_id)))
+                if order and order.deliverer_id:
+                    rider_id = str(order.deliverer_id)
+                    self.map_order_to_rider(order_id, rider_id)
+                    if order.vendor_id:
+                        self.order_vendor_map[order_id] = str(order.vendor_id)
+                    return rider_id
+        except Exception as e:
+            logger.warning("DB lookup failed resolving rider for order %s: %s", order_id, e)
+
+        return None
 
     def map_order_to_rider(self, order_id: str, rider_id: str):
         self.order_rider_map[order_id] = rider_id
@@ -253,18 +314,141 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> Option
         return None
 
 
+def _token_expired(payload: dict) -> bool:
+    """True once the token that opened this socket has passed its `exp`.
+
+    A REST call re-presents its token on every request, so expiry is enforced
+    continuously. A socket presents one exactly once, at connect, and then stays
+    open for hours — a rider signed out or deactivated mid-shift kept streaming.
+    """
+    exp = payload.get("exp")
+    if not isinstance(exp, (int, float)):
+        # Verification already requires `exp` (python-jose rejects tokens whose
+        # `exp` has passed), so its absence means an unexpected token shape.
+        return True
+    return time.time() >= float(exp)
+
+
+async def _close_if_token_expired(websocket: WebSocket, payload: dict) -> bool:
+    """Close the socket when its token has expired. True if it was closed.
+
+    The backstop, not the primary mechanism: clients refresh in-band via
+    `_handle_auth_refresh` well before this fires. It matters when a client stops
+    refreshing — an old build, or a session revoked while the socket is idle.
+    """
+    if not _token_expired(payload):
+        return False
+    try:
+        await websocket.close(code=1008, reason="Token expired — reconnect")
+    except Exception:
+        pass
+    return True
+
+
+async def _handle_auth_refresh(websocket: WebSocket, user: dict, message: dict) -> bool:
+    """Handle `{"action": "auth_refresh", "token": "..."}`. True if consumed.
+
+    Clerk session tokens live about a minute. Enforcing `exp` by closing the
+    socket would therefore tear down and rebuild every connection on the platform
+    once a minute — a reconnect storm, and a tracking map that drops to "not
+    live" every time. Instead the client sends a fresh token on the open socket
+    and we extend the session in place.
+
+    The new token must belong to the *same* subject: otherwise this becomes a way
+    to hand an already-authorised socket — one whose entity/order access was
+    checked at connect — to a different account.
+    """
+    if message.get("action") != "auth_refresh":
+        return False
+
+    payload = await verify_clerk_token(message.get("token") or "")
+    if not payload or payload.get("sub") != user.get("sub"):
+        logger.warning("WebSocket auth refresh rejected for %s", user.get("sub"))
+        await websocket.close(code=1008, reason="Re-authentication failed")
+        return True
+
+    # Mutate in place: the socket handlers hold this dict, and `_token_expired`
+    # reads `exp` from it on every loop.
+    user.update(payload)
+    try:
+        await websocket.send_json({"action": "auth_refreshed", "exp": payload.get("exp")})
+    except Exception:
+        pass
+    return True
+
+
+async def _authorise_ws_entity(websocket: WebSocket, entity_type: str, entity_id: str, clerk_id: str) -> bool:
+    """Confirm the token holder owns the entity named in the URL path.
+
+    Authentication alone only proves someone is signed in. Without this check any
+    signed-in account could stream fabricated GPS for an arbitrary rider, or
+    subscribe to another customer's or vendor's order events.
+    """
+    from dependencies.dependencies import get_db_session
+    from dependencies.auth_dependencies import owns_entity
+
+    try:
+        async with get_db_session() as session:
+            if await owns_entity(session, entity_type, entity_id, clerk_id):
+                return True
+    except Exception as e:
+        logger.error("WebSocket entity authorisation failed for %s %s: %s", entity_type, entity_id, e)
+        await websocket.close(code=1011, reason="Authorisation check failed")
+        return False
+
+    logger.warning(
+        "WebSocket authorisation denied: %s attempted to attach to %s %s",
+        clerk_id, entity_type, entity_id,
+    )
+    await websocket.close(code=1008, reason="Not authorised for this resource")
+    return False
+
+
+async def _authorise_ws_order(websocket: WebSocket, order_id: str, clerk_id: str) -> Optional[str]:
+    """Confirm the token holder is a party to this order; return their role."""
+    from uuid import UUID as _UUID
+    from dependencies.dependencies import get_db_session
+    from dependencies.auth_dependencies import resolve_order_role
+
+    try:
+        parsed = _UUID(str(order_id))
+    except (ValueError, TypeError):
+        await websocket.close(code=1008, reason="Invalid order id")
+        return None
+
+    try:
+        async with get_db_session() as session:
+            role = await resolve_order_role(session, parsed, clerk_id)
+    except Exception as e:
+        logger.error("WebSocket order authorisation failed for order %s: %s", order_id, e)
+        await websocket.close(code=1011, reason="Authorisation check failed")
+        return None
+
+    if role is None:
+        logger.warning("WebSocket tracking denied: %s is not a party to order %s", clerk_id, order_id)
+        await websocket.close(code=1008, reason="Not authorised for this order")
+        return None
+    return role
+
+
 @router.websocket("/ws/rider/{rider_id}")
 async def rider_location_ws(websocket: WebSocket, rider_id: str, token: Optional[str] = Query(None)):
     """Rider sends periodic location updates as JSON: {"lat": ..., "lng": ...}"""
     user = await _authenticate_ws(websocket, token)
     if not user:
         return
+    if not await _authorise_ws_entity(websocket, "rider", rider_id, user.get("sub")):
+        return
     await manager.connect_rider(rider_id, websocket)
     try:
         while True:
+            if await _close_if_token_expired(websocket, user):
+                break
             try:
                 # BUG-WS-01 FIX: Server-side heartbeat to prevent silent proxy timeouts
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+                if isinstance(data, dict) and await _handle_auth_refresh(websocket, user, data):
+                    continue
                 await manager.update_rider_location(rider_id, data)
                 
                 async def _persist_location(lat: float, lng: float, heading: float, speed: float, order_id_str: str | None):
@@ -322,6 +506,14 @@ async def rider_location_ws(websocket: WebSocket, rider_id: str, token: Optional
             except asyncio.TimeoutError:
                 await websocket.send_json({"action": "heartbeat", "timestamp": time.time()})
     except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning("Rider socket %s closed unexpectedly: %s", rider_id, e)
+    finally:
+        # `finally`, not just the disconnect handler: any other exception (a send
+        # on a half-closed socket, for instance) used to escape and leave the
+        # connection registered forever, so the manager's maps grew without bound
+        # and dead sockets kept receiving fan-out attempts.
         manager.disconnect_rider(rider_id)
 
 
@@ -331,14 +523,33 @@ async def track_order_ws(websocket: WebSocket, order_id: str, token: Optional[st
     user = await _authenticate_ws(websocket, token)
     if not user:
         return
+    # Only a party to this order may watch it. Order ids are UUIDs, but any id
+    # that leaks (a screenshot, a log line) previously granted a live feed of
+    # somebody else's home delivery to any signed-in account.
+    if not await _authorise_ws_order(websocket, order_id, user.get("sub")):
+        return
     await manager.connect_tracker(order_id, websocket)
     try:
         while True:
+            if await _close_if_token_expired(websocket, user):
+                break
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # The tracker is receive-only apart from re-authentication, which
+                # keeps the map live across Clerk's ~60s token lifetime.
+                try:
+                    message = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    message = None
+                if isinstance(message, dict):
+                    await _handle_auth_refresh(websocket, user, message)
             except asyncio.TimeoutError:
                 await websocket.send_json({"action": "heartbeat", "timestamp": time.time()})
     except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning("Tracker socket for order %s closed unexpectedly: %s", order_id, e)
+    finally:
         manager.disconnect_tracker(order_id, websocket)
 
 
@@ -349,24 +560,38 @@ async def orders_ws(websocket: WebSocket, entity_type: str, entity_id: str, toke
     if not user:
         return
     if entity_type not in ["vendor", "customer", "rider"]:
-        await websocket.close()
+        await websocket.close(code=1008, reason="Unknown entity type")
         return
-        
+
+    # `entity_id` comes straight from the URL and was never compared to the token
+    # subject, so anyone could subscribe to another customer's or vendor's stream.
+    if not await _authorise_ws_entity(websocket, entity_type, entity_id, user.get("sub")):
+        return
+
     await manager.connect_entity(entity_type, entity_id, websocket)
     try:
         while True:
+            if await _close_if_token_expired(websocket, user):
+                break
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 try:
                     message = json.loads(data)
+                    if await _handle_auth_refresh(websocket, user, message):
+                        continue
                     if message.get("action") == "join-entity-room":
                         pass
                     elif message.get("action") == "location_update" and entity_type == "rider":
+                        # Safe: `entity_id` is proven to be this token's own rider.
                         await manager.update_rider_location(entity_id, message)
                 except json.JSONDecodeError as e:
-                    logger.warning(f"WebSocket JSON decode error from {entity_type} {entity_id}: {e}", exc_info=True)
+                    logger.warning(f"WebSocket JSON decode error from {entity_type} {entity_id}: {e}")
                     await websocket.send_json({"error": "invalid_payload", "message": "Failed to parse JSON"})
             except asyncio.TimeoutError:
                 await websocket.send_json({"action": "heartbeat", "timestamp": time.time()})
     except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning("Order socket for %s %s closed unexpectedly: %s", entity_type, entity_id, e)
+    finally:
         manager.disconnect_entity(entity_type, entity_id, websocket)

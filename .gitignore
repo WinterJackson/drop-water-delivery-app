@@ -59,7 +59,35 @@ recent_crash.txt
 **/tsconfig.tsbuildinfo
 
 # ── Scratch & Test Scripts ──
-test_*.py
-check_*.py
-scripts/
+# Anchored to the directories where throwaway probes actually get dropped. These
+# were previously unanchored (`test_*.py`, `scripts/`), so they matched at every
+# depth and silently excluded most of BackendAPI/tests/ and every app's
+# scripts/ directory — including the preflight check that `eas-build-pre-install`
+# invokes, which would have failed the build with "file not found".
+/test_*.py
+/check_*.py
+BackendAPI/test_*.py
+BackendAPI/check_*.py
+/scripts/
 venv/
+
+# Backup copies of config files — google-services.json.bak was tracked in HEAD
+# with a live Google API key long after the original had been removed.
+*.bak
+*.orig
+google-services.json
+GoogleService-Info.plist
+
+# SQLite artifact produced by the test suite
+BackendAPI/test.db
+
+# Google service-account keys (FCM v1 sending, Play submissions).
+# Unlike google-services.json — which is client config designed to ship inside
+# an APK — these are server credentials with broad access to the Firebase
+# project. They must never enter the repo, and `eas credentials` offers to
+# auto-detect JSON files in the project directory, which is exactly how one
+# ends up here by accident.
+*service-account*.json
+*serviceaccount*.json
+*-firebase-adminsdk-*.json
+google-service-account*.json

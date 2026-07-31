@@ -18,11 +18,84 @@ from dependencies.dependencies import get_db
 from utils.verify_user_token import get_current_user
 from utils.find_user import get_existing_user, get_existing_user_by_email, get_user
 from utils.serializers import safe_serialize
+import asyncio
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── Account deletion: Clerk identity removal ──────────────────────────────────
+# Anonymising the local row is only half of a deletion. While the Clerk identity
+# survives, the user can sign in again and be re-provisioned as a brand new
+# account, and their existing sessions stay valid. This used to be wrapped in a
+# bare `if clerk_secret:` in all three delete flows, so an unset CLERK_SECRET_KEY
+# skipped it silently while the endpoint still reported permanent deletion.
+
+
+def _require_clerk_secret() -> str:
+    """Read CLERK_SECRET_KEY, refusing the request when it is not configured.
+
+    Called *before* any row is mutated. Discovering the misconfiguration after
+    the local PII has already been anonymised would leave nothing to retry with:
+    the row's `clerk_id` has been rewritten by then, so a second attempt cannot
+    even find the account.
+    """
+    secret = os.getenv("CLERK_SECRET_KEY")
+    if not secret:
+        logger.error("Account deletion refused: CLERK_SECRET_KEY is not configured.")
+        raise HTTPException(
+            status_code=503,
+            detail="Account deletion is temporarily unavailable. Please contact support.",
+        )
+    return secret
+
+
+async def _delete_clerk_identity(clerk_secret: str, clerk_id: str) -> bool:
+    """Delete the Clerk user and invalidate its sessions. True when it worked.
+
+    `clerk_backend_api` is a synchronous SDK, so the call goes to a worker thread
+    rather than blocking the event loop for the duration of an outbound HTTPS
+    request.
+
+    A failure here is not raised. The local anonymisation has already committed,
+    which is the part the data-protection obligation actually attaches to, and
+    reporting a 500 would tell the user their deletion failed when their PII is
+    in fact gone — prompting a retry that can no longer find the account.
+    """
+    from clerk_backend_api import Clerk
+
+    try:
+        clerk = Clerk(bearer_auth=clerk_secret)
+        await asyncio.to_thread(clerk.users.delete, clerk_id)
+        return True
+    except Exception as e:
+        # Distinctive prefix: this needs manual cleanup in the Clerk dashboard,
+        # so it should be alertable rather than lost among ordinary errors.
+        logger.error(
+            "CLERK_DELETE_FAILED clerk_id=%s — local data anonymised but the "
+            "Clerk identity survives and must be removed manually: %s",
+            clerk_id,
+            e,
+            exc_info=True,
+        )
+        return False
+
+
+def _deletion_response(message: str, clerk_deleted: bool) -> dict:
+    """Report honestly when the Clerk half did not complete."""
+    if clerk_deleted:
+        return {"message": message}
+    return {
+        "message": message,
+        "warning": (
+            "Your personal data has been erased, but sign-out across devices "
+            "could not be completed automatically. Please contact support."
+        ),
+        "clerk_identity_deleted": False,
+    }
 
 def sanitize_phone_number(phone: str) -> str:
     if not phone:
@@ -115,7 +188,18 @@ async def change_user_profile_pic( response_body: RequestBodyProfilePic, db: Asy
 
 @router.post("/create_vendor")
 @limiter.limit("5/minute")
-async def register_vendor(request: Request, vendor_data: CreateVendor, session: AsyncSession = Depends(get_db)):
+async def register_vendor(request: Request, vendor_data: CreateVendor, session: AsyncSession = Depends(get_db), user = Depends(get_current_user)):
+  # Identity comes from the verified token, never the request body.
+  #
+  # This endpoint had no auth dependency at all and trusted `vendor_data.clerk_id`.
+  # Two consequences: any Clerk user could mint themselves a Vendor row and
+  # instantly pass `get_current_vendor` (customer → vendor privilege escalation),
+  # and anyone who learned a vendor's clerk_id could POST here unauthenticated to
+  # overwrite that vendor's phone number, business name, location and licence via
+  # the update branch below. Both apps already send the bearer token; only the
+  # server was not checking it.
+  vendor_data.clerk_id = user["sub"]
+
   existing_vendor = await get_existing_vendor(clerk_id=vendor_data.clerk_id, db=session)
   if existing_vendor:
     if vendor_data.phone_number:
@@ -159,7 +243,12 @@ async def register_vendor(request: Request, vendor_data: CreateVendor, session: 
 
 @router.post("/create_rider")
 @limiter.limit("5/minute")
-async def register_rider(request: Request, rider_data: CreateDeliverer, session: AsyncSession = Depends(get_db)):
+async def register_rider(request: Request, rider_data: CreateDeliverer, session: AsyncSession = Depends(get_db), user = Depends(get_current_user)):
+  # Identity comes from the verified token, never the request body. Unauthenticated
+  # callers could previously overwrite an existing rider's phone number, ID number,
+  # vehicle and plate by supplying their clerk_id, and flip is_active/is_verified.
+  rider_data.clerk_id = user["sub"]
+
   existing_rider = await get_existing_rider(clerk_id=rider_data.clerk_id, db=session)
   if existing_rider: 
     if rider_data.phone_number:
@@ -253,6 +342,11 @@ async def delete_account(
     if body.confirmation != "DELETE MY ACCOUNT":
         raise HTTPException(status_code=400, detail="Confirmation text must be exactly 'DELETE MY ACCOUNT'")
 
+    # Fail before touching a single row. Once the anonymisation commits, the
+    # row's clerk_id is rewritten and the Clerk identity can no longer be
+    # located from it — so a missing secret has to stop the request here.
+    clerk_secret = _require_clerk_secret()
+
     from models.order_model import Order
 
     if body.app_type == "customer":
@@ -289,18 +383,12 @@ async def delete_account(
         await session.commit()
         
         # SEC-05 FIX: Invalidate Clerk Sessions
-        import os
-        from clerk_backend_api import Clerk
-        clerk_secret = os.getenv("CLERK_SECRET_KEY")
-        if clerk_secret:
-            try:
-                clerk = Clerk(bearer_auth=clerk_secret)
-                # Clerk backend SDK handles deletion and session invalidation
-                clerk.users.delete(clerk_id)
-            except Exception as e:
-                logger.error(f"Failed to delete Clerk user {clerk_id}: {e}")
+        clerk_deleted = await _delete_clerk_identity(clerk_secret, clerk_id)
 
-        return {"message": "Your account has been permanently deleted and all personal data anonymized."}
+        return _deletion_response(
+            "Your account has been permanently deleted and all personal data anonymized.",
+            clerk_deleted,
+        )
 
     elif body.app_type == "vendor":
         result = await session.execute(select(Vendor).where(Vendor.clerk_id == clerk_id))
@@ -337,17 +425,12 @@ async def delete_account(
         await session.commit()
         
         # SEC-05 FIX: Invalidate Clerk Sessions
-        import os
-        from clerk_backend_api import Clerk
-        clerk_secret = os.getenv("CLERK_SECRET_KEY")
-        if clerk_secret:
-            try:
-                clerk = Clerk(bearer_auth=clerk_secret)
-                clerk.users.delete(clerk_id)
-            except Exception as e:
-                logger.error(f"Failed to delete Clerk user {clerk_id}: {e}")
+        clerk_deleted = await _delete_clerk_identity(clerk_secret, clerk_id)
 
-        return {"message": "Your vendor account has been permanently deleted and all personal data anonymized."}
+        return _deletion_response(
+            "Your vendor account has been permanently deleted and all personal data anonymized.",
+            clerk_deleted,
+        )
 
     elif body.app_type == "rider":
         result = await session.execute(select(Deliverer).where(Deliverer.clerk_id == clerk_id))
@@ -389,17 +472,12 @@ async def delete_account(
         await session.commit()
         
         # SEC-05 FIX: Invalidate Clerk Sessions
-        import os
-        from clerk_backend_api import Clerk
-        clerk_secret = os.getenv("CLERK_SECRET_KEY")
-        if clerk_secret:
-            try:
-                clerk = Clerk(bearer_auth=clerk_secret)
-                clerk.users.delete(clerk_id)
-            except Exception as e:
-                logger.error(f"Failed to delete Clerk user {clerk_id}: {e}")
+        clerk_deleted = await _delete_clerk_identity(clerk_secret, clerk_id)
 
-        return {"message": "Your rider account has been permanently deleted and all personal data anonymized."}
+        return _deletion_response(
+            "Your rider account has been permanently deleted and all personal data anonymized.",
+            clerk_deleted,
+        )
 
     raise HTTPException(status_code=400, detail="Invalid app_type. Must be 'customer', 'vendor', or 'rider'.")
 
