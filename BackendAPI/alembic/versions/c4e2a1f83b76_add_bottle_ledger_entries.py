@@ -17,6 +17,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "c4e2a1f83b76"
 down_revision: Union[str, Sequence[str], None] = "b7c1e9f04a21"
@@ -25,12 +26,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    entry_type = sa.Enum(
+    # `create_type=False` is load-bearing. A plain `sa.Enum` column makes
+    # `op.create_table` emit its own CREATE TYPE, so the type was created twice
+    # in one migration — once explicitly below, once by the table — and the
+    # second attempt aborted the whole upgrade with DuplicateObjectError.
+    entry_type = postgresql.ENUM(
         "DELIVERY_ACCRUAL",
         "VENDOR_RECEIPT",
         "ADJUSTMENT",
         name="bottle_ledger_entry_type",
+        create_type=False,
     )
+    # checkfirst so a re-run after a partially applied upgrade is not fatal.
     entry_type.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
