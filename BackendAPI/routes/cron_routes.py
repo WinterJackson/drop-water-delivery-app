@@ -27,6 +27,7 @@ finishes. Every job takes a short Redis lock so a second invocation returns
 `already running` instead of double-processing.
 """
 import hmac
+import time
 import logging
 import os
 from typing import Optional
@@ -90,23 +91,47 @@ async def _release(job: str) -> None:
         pass
 
 
+def _dedup_id(job: str) -> str:
+    """A per-minute job id, so ARQ discards a duplicate enqueue of the same tick.
+
+    The lock alone cannot do this job. It is released as soon as the endpoint
+    returns, because on the enqueue path the endpoint's work *is* finished — the
+    sweep itself runs in the worker. Something still has to absorb cron-job.org
+    retrying a tick it thinks failed, and ARQ already does exactly that: an
+    `enqueue_job` whose `_job_id` matches one still queued or running is
+    dropped. Bucketing by minute means a retry seconds later is deduplicated
+    while the next scheduled tick gets its own id.
+    """
+    return f"cron:{job}:{int(time.time() // 60)}"
+
+
 async def _run(job: str, task) -> dict:
     """Enqueue the ARQ task, falling back to running it inline if ARQ is down."""
     if not await _claim(job):
         logger.info("Cron job %s is already running; skipping this tick.", job)
         return {"job": job, "status": "already_running"}
 
+    # One `finally` covering both paths. The enqueue branch used to `return`
+    # from inside its own `try`, skipping the release below, so the lock was
+    # held for its full 600s TTL and every later tick answered
+    # "already_running" — a job scheduled every minute actually ran once every
+    # ten.
     try:
-        from core.redis_client import get_arq_pool
+        pool = None
+        try:
+            from core.redis_client import get_arq_pool
 
-        pool = await get_arq_pool()
+            pool = await get_arq_pool()
+        except Exception as e:
+            logger.warning("Could not reach ARQ for %s (%s); running inline.", job, e)
+
         if pool:
-            await pool.enqueue_job(task.__name__)
+            enqueued = await pool.enqueue_job(task.__name__, _job_id=_dedup_id(job))
+            if enqueued is None:
+                # Same tick already queued — a retry, not a new run.
+                return {"job": job, "status": "already_queued"}
             return {"job": job, "status": "enqueued"}
-    except Exception as e:
-        logger.warning("Could not enqueue %s (%s); running inline.", job, e)
 
-    try:
         # ARQ passes a context dict as the first argument; none of these tasks
         # read it, so `None` is safe and keeps one definition of each job.
         result = await task(None)

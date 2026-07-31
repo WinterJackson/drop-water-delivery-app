@@ -129,7 +129,10 @@ async def test_the_job_is_enqueued_rather_than_run_in_the_request():
         result = await cron_routes._run("process-refunds", task)
 
     assert result["status"] == "enqueued"
-    pool.enqueue_job.assert_awaited_once_with("process_pending_refunds_task")
+    # The task *name* is the contract — it must match a registered worker
+    # function. The `_job_id` alongside it is deduplication and is covered
+    # separately, so this asserts the name rather than the whole call.
+    assert pool.enqueue_job.await_args.args == ("process_pending_refunds_task",)
     task.assert_not_awaited()
 
 
@@ -330,3 +333,68 @@ async def test_sending_a_push_records_its_tickets():
         await push._execute_push_chunks(["ExponentPushToken[x]"], "t", "b")
 
     record.assert_awaited_once_with(payload["data"], ["ExponentPushToken[x]"])
+
+
+# ── The per-job lock must always be released ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_lock_is_released_after_enqueuing():
+    """Regression: the enqueue branch returned from inside its own `try`.
+
+    The `finally` that released the lock belonged to the *inline* branch below
+    it, so on the enqueue path the lock was never dropped and sat for its full
+    600s TTL. Every later tick answered "already_running" — a job scheduled
+    every minute actually ran once every ten, while cron-job.org recorded 200s
+    throughout.
+    """
+    released = []
+    pool = AsyncMock()
+    pool.enqueue_job.return_value = MagicMock()  # a Job, i.e. accepted
+
+    with patch.object(cron_routes, "_claim", AsyncMock(return_value=True)), \
+         patch.object(cron_routes, "_release", AsyncMock(side_effect=lambda j: released.append(j))), \
+         patch("core.redis_client.get_arq_pool", AsyncMock(return_value=pool)):
+        result = await cron_routes._run("flush-gps-logs", MagicMock(__name__="t"))
+
+    assert result["status"] == "enqueued"
+    assert released == ["flush-gps-logs"], "the lock outlived the request"
+
+
+@pytest.mark.asyncio
+async def test_the_lock_is_released_when_a_job_fails_inline():
+    released = []
+
+    async def boom(_):
+        raise RuntimeError("sweep exploded")
+
+    with patch.object(cron_routes, "_claim", AsyncMock(return_value=True)), \
+         patch.object(cron_routes, "_release", AsyncMock(side_effect=lambda j: released.append(j))), \
+         patch("core.redis_client.get_arq_pool", AsyncMock(return_value=None)):
+        with pytest.raises(HTTPException) as exc:
+            await cron_routes._run("process-refunds", boom)
+
+    assert exc.value.status_code == 500
+    assert released == ["process-refunds"], "a failed job must not hold its lock"
+
+
+@pytest.mark.asyncio
+async def test_a_retry_of_the_same_tick_is_deduplicated():
+    """cron-job.org retries a tick it believes failed; ARQ drops the duplicate."""
+    pool = AsyncMock()
+    pool.enqueue_job.return_value = None  # ARQ: this _job_id is already queued
+
+    with patch.object(cron_routes, "_claim", AsyncMock(return_value=True)), \
+         patch.object(cron_routes, "_release", AsyncMock()), \
+         patch("core.redis_client.get_arq_pool", AsyncMock(return_value=pool)):
+        result = await cron_routes._run("cancel-pending-orders", MagicMock(__name__="t"))
+
+    assert result["status"] == "already_queued"
+
+
+def test_the_dedup_id_changes_between_ticks_but_not_within_one():
+    with patch.object(cron_routes.time, "time", return_value=1_000_000.0):
+        first = cron_routes._dedup_id("flush-gps-logs")
+        assert cron_routes._dedup_id("flush-gps-logs") == first, "same minute, same id"
+    with patch.object(cron_routes.time, "time", return_value=1_000_060.0):
+        assert cron_routes._dedup_id("flush-gps-logs") != first, "next minute, new id"
