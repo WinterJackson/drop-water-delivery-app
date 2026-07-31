@@ -1,67 +1,145 @@
-from fastapi import APIRouter, Depends, Request, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from dependencies.dependencies import get_db
-from utils.verify_user_token import get_current_user
-from services.wallet_service import initiate_wallet_topup, handle_mpesa_topup_callback, initiate_wallet_withdrawal, get_wallet_transactions
-from pydantic import BaseModel
 import logging
+import os
+
+from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.redis_client import redis_limiter as limiter
+from dependencies.dependencies import get_db
+from services.payment_service import reject_mpesa_callback
+from services.wallet_service import (
+    get_wallet_transactions,
+    handle_mpesa_topup_callback,
+    initiate_wallet_topup,
+    initiate_wallet_withdrawal,
+)
+from utils.verify_user_token import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/wallet", tags=["Wallet"])
 
+
+
 class TopUpRequest(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, le=150_000)
     phone_number: str
-    user_type: str
+    # Which of the caller's wallets to act on. Verified against the token in
+    # `resolve_wallet_owner` — a client cannot name an account it does not own.
+    user_type: str = "customer"
+
 
 class WithdrawRequest(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, le=150_000)
     phone_number: str
-    user_type: str
+    user_type: str = "customer"
+
 
 @router.post("/top-up")
-async def top_up_wallet(request: TopUpRequest, db: AsyncSession = Depends(get_db), auth: dict = Depends(get_current_user)):
-    user_id = auth.get("sub")
-    if not user_id:
+@limiter.limit("5/minute")
+async def top_up_wallet(
+    request: Request,
+    body: TopUpRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(get_current_user),
+):
+    clerk_id = auth.get("sub")
+    if not clerk_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     return await initiate_wallet_topup(
         session=db,
-        user_id=user_id,
-        user_type=request.user_type,
-        amount=request.amount,
-        phone=request.phone_number
+        user_id=clerk_id,
+        user_type=body.user_type,
+        amount=body.amount,
+        phone=body.phone_number,
     )
+
 
 @router.post("/withdraw")
-async def withdraw_wallet(request: WithdrawRequest, db: AsyncSession = Depends(get_db), auth: dict = Depends(get_current_user)):
-    user_id = auth.get("sub")
-    if not user_id:
+@limiter.limit("5/minute")
+async def withdraw_wallet(
+    request: Request,
+    body: WithdrawRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(get_current_user),
+):
+    clerk_id = auth.get("sub")
+    if not clerk_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     return await initiate_wallet_withdrawal(
         session=db,
-        user_id=user_id,
-        user_type=request.user_type,
-        amount=request.amount,
-        phone=request.phone_number
+        user_id=clerk_id,
+        user_type=body.user_type,
+        amount=body.amount,
+        phone=body.phone_number,
     )
 
+
 @router.get("/transactions")
-async def fetch_wallet_transactions(limit: int = 50, offset: int = 0, search: str = None, type: str = None, db: AsyncSession = Depends(get_db), auth: dict = Depends(get_current_user)):
-    user_id = auth.get("sub")
-    if not user_id:
+async def fetch_wallet_transactions(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = None,
+    type: str | None = None,
+    user_type: str = Query("customer"),
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(get_current_user),
+):
+    clerk_id = auth.get("sub")
+    if not clerk_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    return await get_wallet_transactions(session=db, user_id=user_id, limit=limit, offset=offset, search=search, transaction_type=type)
+
+    return await get_wallet_transactions(
+        session=db,
+        user_id=clerk_id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        transaction_type=type,
+        user_type=user_type,
+    )
+
 
 @router.post("/mpesa-callback")
-async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db)):
+async def mpesa_topup_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    secret: str | None = Query(default=None),
+):
+    """Safaricom STK callback for wallet top-ups.
+
+    Guarded identically to the order callback. Previously this endpoint was fully
+    open: because `POST /top-up` hands the CheckoutRequestID back to the caller,
+    anyone could replay it here with `ResultCode: 0` and credit their own wallet
+    without paying — and wallet credit is spendable at checkout.
+    """
+    rejected = reject_mpesa_callback(request, secret, "Wallet top-up callback")
+    if rejected:
+        return rejected
+
     try:
         payload = await request.json()
-        logger.info(f"M-PESA Wallet STK Callback received: {payload}")
+    except Exception:
+        logger.warning("Wallet top-up callback rejected: unparseable body")
+        return JSONResponse(status_code=400, content={"message": "Invalid payload"})
+
+    try:
         return await handle_mpesa_topup_callback(session=db, payload=payload)
     except Exception as e:
-        logger.error(f"Error handling M-Pesa callback: {e}")
-        return {"status": "error"}
+        # Never leak internals to Safaricom, but do not swallow the incident.
+        logger.error("Error handling wallet top-up callback: %s", e, exc_info=True)
+        try:
+            import sentry_sdk
+            from utils.redaction import redact_payload
+
+            sentry_sdk.set_context(
+                "webhook_payload", {"raw": redact_payload(str(payload)[:2000])}
+            )
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return JSONResponse(status_code=500, content={"message": "Callback processing failed"})

@@ -1,16 +1,31 @@
 import logging
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse
+from decimal import Decimal
+from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
 from utils.verify_user_token import get_current_user
 from schemas.payout_schemas import PayoutCreate, PayoutResponse
 from services.payout_service import request_payout, get_provider_payouts
-from services.payment_service import is_safaricom_ip
+from services.payment_service import reject_mpesa_callback
 
 logger = logging.getLogger(__name__)
 
+#: Legacy payout endpoints. **Not registered in `main.py`** — cashouts go through
+#: `POST /api/wallet/withdraw` instead. Kept only because historic `Payout` rows
+#: still exist and the callbacks below fall back to reconciling them.
 router = APIRouter()
+
+#: Safaricom's B2C callbacks. These *are* registered, under `/api/payouts`.
+#:
+#: They live on a separate router because `router` above was deliberately
+#: dropped from the app, and that took the callbacks with it — while
+#: `wallet_service.initiate_wallet_withdrawal` kept disbursing real money and
+#: pointing `MPESA_B2C_RESULT_URL` at what had become a 404. Every withdrawal
+#: was left `processing` forever, and a disbursement that failed *after*
+#: Safaricom queued it never refunded the balance it had already debited.
+callback_router = APIRouter()
 
 
 @router.post("/request", response_model=PayoutResponse)
@@ -61,7 +76,9 @@ async def _reconcile_wallet_transaction(session, conversation_id: str, success: 
         result = await session.execute(select(model).where(model.clerk_id == tx.user_id).with_for_update())
         user = result.scalars().first()
         if user:
-            user.wallet_balance = float(user.wallet_balance or 0) + float(tx.amount)
+            # `tx.amount` is signed and this was a debit, so returning it means
+            # subtracting a negative. Decimal, not float — this is money.
+            user.wallet_balance = Decimal(str(user.wallet_balance or 0)) - Decimal(str(tx.amount))
         tx.status = TransactionStatus.failed
         tx.failure_reason = result_desc
 
@@ -69,17 +86,15 @@ async def _reconcile_wallet_transaction(session, conversation_id: str, success: 
     return True
 
 
-@router.post("/mpesa/b2c_result")
-async def b2c_result_callback(request: Request, session: AsyncSession = Depends(get_db)):
+@callback_router.post("/mpesa/b2c_result")
+async def b2c_result_callback(request: Request, session: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
     """
     Safaricom B2C Result callback.
-    Updates the Payout record to 'completed' or 'failed' based on the result.
+    Reconciles the wallet withdrawal, or a legacy Payout row, from the result.
     """
-    # --- IP Whitelist Validation ---
-    client_ip = request.client.host if request.client else "unknown"
-    if not is_safaricom_ip(client_ip):
-        logger.warning(f"B2C result callback rejected from non-Safaricom IP: {client_ip}")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+    rejected = reject_mpesa_callback(request, secret, "B2C result callback")
+    if rejected:
+        return rejected
 
     try:
         data = await request.json()
@@ -99,13 +114,24 @@ async def b2c_result_callback(request: Request, session: AsyncSession = Depends(
         # Find the payout record by ConversationID
         from sqlalchemy.future import select
         from models.payout_model import Payout
-        stmt = select(Payout).where(Payout.conversation_id == conversation_id)
+        # Lock it: Safaricom retries this callback, and the failure branch now
+        # refunds the balance. Two concurrent deliveries of the same result must
+        # not both refund.
+        stmt = (
+            select(Payout)
+            .where(Payout.conversation_id == conversation_id)
+            .with_for_update()
+        )
         result_row = await session.execute(stmt)
         payout = result_row.scalars().first()
 
         if not payout:
             logger.error(f"B2C result: No payout found for ConversationID {conversation_id}")
             return JSONResponse(status_code=404, content={"message": "Payout not found"})
+
+        # Terminal already? Then a previous delivery of this callback settled it and
+        # any refund has already been issued.
+        already_terminal = payout.status in ("completed", "failed")
 
         if result_code == 0:
             # Extract receipt number from ResultParameters
@@ -136,6 +162,34 @@ async def b2c_result_callback(request: Request, session: AsyncSession = Depends(
             payout.status = "failed"
             payout.failure_reason = result_desc
 
+            # The balance was debited when the payout was created, so a failure at
+            # the callback stage — after a successful initiation — must return it.
+            # Guarded against replay: Safaricom retries callbacks, and a second
+            # refund would mint money.
+            if not already_terminal:
+                from models.deliverer_model import Deliverer
+                from models.vendor_model import Vendor
+                from models.wallet_transaction_model import TransactionType
+                from services.wallet_service import apply_wallet_delta
+
+                model = Vendor if payout.provider_type == "vendor" else Deliverer
+                owner = (
+                    await session.execute(
+                        select(model).where(model.id == payout.provider_id).with_for_update()
+                    )
+                ).scalars().first()
+                if owner:
+                    await apply_wallet_delta(
+                        session,
+                        owner=owner,
+                        clerk_id=owner.clerk_id,
+                        user_type=payout.provider_type,
+                        amount=Decimal(str(payout.amount)),
+                        transaction_type=TransactionType.refund,
+                        description=f"Withdrawal failed, amount returned ({result_desc})",
+                        reference_id=str(payout.id),
+                    )
+
             # Notify provider about failed payout
             try:
                 from services.notification_service import create_notification
@@ -161,17 +215,15 @@ async def b2c_result_callback(request: Request, session: AsyncSession = Depends(
         return JSONResponse(status_code=500, content={"message": "Processing error"})
 
 
-@router.post("/mpesa/b2c_timeout")
-async def b2c_timeout_callback(request: Request, session: AsyncSession = Depends(get_db)):
+@callback_router.post("/mpesa/b2c_timeout")
+async def b2c_timeout_callback(request: Request, session: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
     """
     Safaricom B2C Timeout callback.
     Marks the payout as failed due to timeout if it hasn't already been resolved.
     """
-    # --- IP Whitelist Validation ---
-    client_ip = request.client.host if request.client else "unknown"
-    if not is_safaricom_ip(client_ip):
-        logger.warning(f"B2C timeout callback rejected from non-Safaricom IP: {client_ip}")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+    rejected = reject_mpesa_callback(request, secret, "B2C timeout callback")
+    if rejected:
+        return rejected
 
     try:
         data = await request.json()

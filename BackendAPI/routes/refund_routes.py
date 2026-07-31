@@ -6,17 +6,19 @@ plus Safaricom M-Pesa Reversal callback handlers.
 """
 
 import logging
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
 from utils.verify_user_token import get_current_user
 from services.refund_service import process_all_pending_refunds
-from services.payment_service import is_safaricom_ip
+from services.payment_service import reject_mpesa_callback
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+import os
 
 
 @router.post("/process-refunds")
@@ -42,16 +44,14 @@ async def trigger_refund_processing(
 # ── M-Pesa Reversal Callback Endpoints ─────────────────────────────────────────
 
 @router.post("/mpesa/reversal_result")
-async def reversal_result_callback(request: Request, session: AsyncSession = Depends(get_db)):
+async def reversal_result_callback(request: Request, session: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
     """
     Safaricom Reversal Result callback.
     Updates the order payment_status to 'refunded' or 'refund_failed'.
     """
-    # --- IP Whitelist Validation ---
-    client_ip = request.client.host if request.client else "unknown"
-    if not is_safaricom_ip(client_ip):
-        logger.warning(f"Reversal result callback rejected from non-Safaricom IP: {client_ip}")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+    rejected = reject_mpesa_callback(request, secret, "Reversal result callback")
+    if rejected:
+        return rejected
 
     try:
         data = await request.json()
@@ -91,8 +91,7 @@ async def reversal_result_callback(request: Request, session: AsyncSession = Dep
 
             # Notify customer about successful refund
             try:
-                from services.notification_service import create_notification
-                from services.expo_push_service import send_push_message
+                from services.notification_service import create_notification, queue_push
                 from models.user_model import User
                 import asyncio
 
@@ -111,13 +110,12 @@ async def reversal_result_callback(request: Request, session: AsyncSession = Dep
                         action_url=action_url,
                         related_order_id=matched_order.id,
                     )
-                    if customer.push_token:
-                        asyncio.create_task(send_push_message(
-                            to=customer.push_token,
-                            title=title,
-                            body=body,
-                            data={"url": action_url},
-                        ))
+                    # `session`, not `db` — this handler's session parameter is
+                    # named `session`. The old `db` raised NameError straight
+                    # into the except below, so "Refund Complete" was written to
+                    # the notification table but never actually pushed.
+                    queue_push(session, to=customer.push_token, title=title, body=body,
+                               data={"url": action_url})
             except Exception as e:
                 logger.error(f"Refund success notification error: {e}")
 
@@ -136,16 +134,14 @@ async def reversal_result_callback(request: Request, session: AsyncSession = Dep
 
 
 @router.post("/mpesa/reversal_timeout")
-async def reversal_timeout_callback(request: Request, session: AsyncSession = Depends(get_db)):
+async def reversal_timeout_callback(request: Request, session: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
     """
     Safaricom Reversal Timeout callback.
     Marks the refund as failed due to timeout for targeted retry.
     """
-    # --- IP Whitelist Validation ---
-    client_ip = request.client.host if request.client else "unknown"
-    if not is_safaricom_ip(client_ip):
-        logger.warning(f"Reversal timeout callback rejected from non-Safaricom IP: {client_ip}")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+    rejected = reject_mpesa_callback(request, secret, "Reversal timeout callback")
+    if rejected:
+        return rejected
 
     try:
         data = await request.json()

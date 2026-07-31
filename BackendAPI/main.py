@@ -81,39 +81,56 @@ logging.getLogger("uvicorn.access").addFilter(TokenRedactFilter())
 
 from contextlib import asynccontextmanager
 
+# Running the ARQ worker inside the API process means every uvicorn worker and
+# every deployed instance runs its own copy of the cron schedule — the dispute
+# sweep, the auto-cancel sweep and the GPS flush all fire N times per tick. In
+# any environment with more than one instance that is both wasteful and unsafe.
+# Production must run `arq worker.WorkerSettings` as its own process (see
+# BackendAPI/README.md); set RUN_INLINE_WORKER=1 for a single-process dev machine.
+RUN_INLINE_WORKER = os.getenv("RUN_INLINE_WORKER", "0").lower() in ("1", "true", "yes")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from routes.websocket_routes import manager
     import asyncio
-    from arq.worker import create_worker
-    from worker import WorkerSettings
 
     # Start WebSocket PubSub
     await manager.start_pubsub()
 
-    # Test Redis before starting ARQ Worker
     from core.redis_client import get_redis
     import logging
-    r = get_redis()
+
     arq_task = None
-    if r:
-        try:
-            await r.ping()
-            # Start ARQ Worker as a background task safely using create_worker
-            arq_worker = create_worker(WorkerSettings)
-            arq_task = asyncio.create_task(arq_worker.main())
-            logging.info("ARQ Background Worker initialized successfully.")
-        except Exception as e:
-            logging.warning(f"Redis not reachable. Skipping ARQ Background Worker initialization. Error: {e}")
+    if RUN_INLINE_WORKER:
+        r = get_redis()
+        if r:
+            try:
+                await r.ping()
+                from arq.worker import create_worker
+                from worker import WorkerSettings
+
+                arq_worker = create_worker(WorkerSettings)
+                arq_task = asyncio.create_task(arq_worker.main())
+                logging.warning(
+                    "ARQ worker started INSIDE the API process (RUN_INLINE_WORKER=1). "
+                    "Never enable this with more than one API instance — cron jobs would run once per instance."
+                )
+            except Exception as e:
+                logging.warning(f"Redis not reachable. Skipping inline ARQ worker. Error: {e}")
+        else:
+            logging.warning("Redis not configured. Skipping inline ARQ worker.")
     else:
-        logging.warning("Redis not configured. Skipping ARQ Background Worker initialization.")
-    
+        logging.info(
+            "Inline ARQ worker disabled. Run background jobs with: arq worker.WorkerSettings"
+        )
+
     yield
-    
+
     # Graceful shutdown
     if manager.pubsub_task:
         manager.pubsub_task.cancel()
-    
+
     if arq_task:
         arq_task.cancel()
         try:
@@ -176,10 +193,17 @@ elif _env_mode == "development":
 else:
     ALLOWED_ORIGINS = []  # No wildcard in production — must be explicit
 
+# `allow_origins=["*"]` together with `allow_credentials=True` is rejected by
+# every browser, so the combination silently disables CORS instead of relaxing
+# it. Credentials are only meaningful for an explicit origin allow-list; the
+# mobile clients send a bearer token, not cookies, so dropping them in the
+# wildcard case costs nothing.
+_allow_credentials = "*" not in ALLOWED_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -230,13 +254,26 @@ app.include_router(review_routes.router, prefix="/api/reviews", tags=["Reviews"]
 app.include_router(favorites_routes.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(vendor_favorites_routes.router, prefix="/api/vendor-favorites", tags=["Vendor Favorites"])
 app.include_router(notification_routes.router, prefix="/api/notifications", tags=["Notifications"])
-    # Legacy payouts removed
+# Legacy payout endpoints stay removed — cashouts go through /api/wallet/withdraw.
+# Only Safaricom's B2C callbacks are mounted: they reconcile those withdrawals, and
+# dropping the whole module left them unrouted while money was still going out.
+from routes import payout_routes
+app.include_router(payout_routes.callback_router, prefix="/api/payouts", tags=["Payout Callbacks"])
 app.include_router(refund_routes.router, prefix="/api/refunds", tags=["Refunds"])
 app.include_router(sync_routes.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(sms_routes.router, prefix="/api/sms", tags=["SMS Fallback"])
 app.include_router(wallet_routes.router)
 from routes import contact_routes
 app.include_router(contact_routes.router, prefix="/api", tags=["Contacts"])
+from routes import payment_routes
+app.include_router(payment_routes.router, prefix="/api/payments", tags=["Payments"])
+from routes import maps_routes
+app.include_router(maps_routes.router, prefix="/api/maps", tags=["Maps"])
+
+# Scheduled work is triggered by cron-job.org, not by ARQ's internal scheduler —
+# see routes/cron_routes.py and docs/cron-jobs.md. Guarded by CRON_SECRET.
+from routes import cron_routes
+app.include_router(cron_routes.router, prefix="/api/cron", tags=["Scheduled Jobs"])
 
 
 # --- WebSocket Routes ---

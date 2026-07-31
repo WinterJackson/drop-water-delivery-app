@@ -1,6 +1,7 @@
 import base64
 import os
 import datetime
+import hmac
 import logging
 import httpx
 from dotenv import load_dotenv
@@ -92,6 +93,63 @@ def is_safaricom_ip(client_ip: str) -> bool:
     if env == "development":
         return True  # Skip in dev
     return any(client_ip.startswith(prefix) for prefix in SAFARICOM_IP_RANGES)
+
+
+def callback_client_ip(request) -> str:
+    """The caller's IP, preferring the proxy's forwarded header.
+
+    Render terminates TLS at its edge, so `request.client.host` is the proxy
+    unless `X-Forwarded-For` is read. Only the left-most entry is the original
+    client. This is advisory: the header is attacker-controlled, which is why
+    the shared secret below is the actual guard.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def reject_mpesa_callback(request, supplied_secret, label: str):
+    """Guard for every M-Pesa callback. Returns a `JSONResponse` to return, or None.
+
+    These endpoints mark orders paid, settle wallets and — on the B2C failure
+    path — refund a debited balance, all without an authenticated user. Two
+    layers apply, in this order:
+
+    1. **Shared secret**, compared in constant time. This is the real guard.
+    2. **Safaricom IP range**, as defence in depth. It cannot stand alone: the
+       app runs behind `ProxyHeadersMiddleware(trusted_hosts=["*"])`, so the
+       apparent client IP comes from a header any caller can set.
+
+    Fails closed when `MPESA_CALLBACK_SECRET` is unset outside development. The
+    five call sites previously each wrote `if SECRET and supplied != SECRET`,
+    which silently disabled the check whenever the variable was missing —
+    exactly the deployment where it was most needed.
+    """
+    from fastapi.responses import JSONResponse
+
+    secret = os.getenv("MPESA_CALLBACK_SECRET")
+    if not secret:
+        if os.getenv("ENV", "development").lower() != "development":
+            logger.error(
+                "%s refused: MPESA_CALLBACK_SECRET is not configured.", label
+            )
+            return JSONResponse(
+                status_code=503, content={"message": "Callback not configured"}
+            )
+        logger.warning(
+            "%s accepted without a shared secret — development only.", label
+        )
+    elif not supplied_secret or not hmac.compare_digest(str(supplied_secret), secret):
+        logger.warning("%s rejected: invalid or missing shared secret", label)
+        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+
+    client_ip = callback_client_ip(request)
+    if not is_safaricom_ip(client_ip):
+        logger.warning("%s rejected from non-Safaricom IP: %s", label, client_ip)
+        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+
+    return None
 
 
 async def check_payment(checkout_request_id: str, session: AsyncSession): 

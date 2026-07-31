@@ -2,14 +2,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import re
+
 from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from dependencies.dependencies import get_db
-from dependencies.auth_dependencies import get_current_customer
+from dependencies.auth_dependencies import get_current_customer, authorise_order_access
 from core.redis_client import redis_limiter as limiter
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from services.user_service import get_user
 from services.cart_services import add_to_cart_service, fetch_cart, fetch_detailed_cart, change_cart_item_quantity_service, delete_cart_item_service, delete_cart_service
+from services.dispatch_policy import DispatchPolicy
 from schemas.common_schemas import RequestBodyIdAndQuantity, RequestBodyId
 from schemas.cart_schemas import CartDetailed
 from services.payment_service import initiate_stk_push, check_payment
@@ -18,8 +21,8 @@ from uuid import UUID
 
 # payment imports
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from services.payment_service import is_safaricom_ip
+from pydantic import BaseModel, Field
+from services.payment_service import reject_mpesa_callback
 
 logger = logging.getLogger(__name__)
 
@@ -106,194 +109,266 @@ async def delete_cart_item(request_body: RequestBodyId, db: AsyncSession = Depen
     "message": "item deleted successfully"
   }
 
-# payment test
+ALLOWED_PAYMENT_METHODS = {"mpesa", "cash"}
+KENYAN_MSISDN = re.compile(r"^254[17]\d{8}$")
+
+
 class OrderRequest(BaseModel):
     phone: str  # Format: 2547XXXXXXXX
-    # NOTE: `amount` intentionally removed (F-018). Server calculates total from
-    # cart items + delivery fee to prevent client-side price manipulation.
+    # NOTE: `amount` is intentionally absent. The server prices the cart itself —
+    # a client-supplied total is a price-manipulation vector.
     id: UUID
-    lat: float
-    lng: float
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
     delivery_type: str = "quick_swap"
     payment_method: str = "mpesa"
+
+
+class QuoteRequest(BaseModel):
+    """Price the current cart for display. No side effects."""
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    delivery_type: str = "quick_swap"
+
+
+async def _load_priced_cart(db: AsyncSession, user_id, lat: float, lng: float, delivery_type: str):
+    """Fetch the cart, resolve its vendor, and price it.
+
+    Shared by `/quote` and `/mpesa_payment` so the number the customer sees in the
+    checkout sheet is produced by the identical code path that charges them.
+    """
+    from models.user_model import User
+    from models.vendor_model import Vendor
+    from services.cart_services import fetch_detailed_cart
+    from services.pricing_service import compute_order_quote, single_vendor_or_400
+
+    cart = await fetch_detailed_cart(user_id=user_id, session=db)
+    if not cart or not cart.cart_item:
+        raise HTTPException(
+            status_code=400,
+            detail="Your cart is empty. Add an item before checking out.",
+        )
+
+    vendor_id = single_vendor_or_400(cart.cart_item)
+    vendor = await db.get(Vendor, vendor_id)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="This vendor is no longer available.")
+
+    db_user = await db.get(User, user_id)
+
+    quote = await compute_order_quote(
+        db,
+        items=cart.cart_item,
+        user=db_user,
+        vendor=vendor,
+        delivery_type=delivery_type,
+        lat=lat,
+        lng=lng,
+    )
+    return cart, db_user, vendor, quote
+
+
+@router.post("/quote")
+@limiter.limit("30/minute")
+async def quote_cart(
+    request: Request,
+    body: QuoteRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_customer),
+):
+    """Authoritative, fully itemised price for the current cart.
+
+    The client renders this verbatim instead of recomputing the total locally.
+    Four independent implementations of this arithmetic used to disagree, so the
+    customer was shown one figure and charged another.
+    """
+    from services.pricing_service import validate_quote
+
+    db_user = await get_user(session=db, clerk_id=user["sub"])
+    if not db_user:
+        raise HTTPException(status_code=403, detail="Customer profile not found.")
+
+    cart, db_user, vendor, quote = await _load_priced_cart(
+        db, db_user.id, body.lat, body.lng, body.delivery_type
+    )
+
+    # Surface rule violations as advisory warnings rather than hard failures, so
+    # the cart screen can explain "you need 38 kg more" instead of showing an
+    # error page before the customer has even pressed Checkout.
+    warnings: list[str] = []
+    try:
+        validate_quote(quote, cart.cart_item, user=db_user)
+        checkout_ready = True
+    except HTTPException as exc:
+        checkout_ready = False
+        detail = exc.detail
+        warnings.append(detail if isinstance(detail, str) else str(detail))
+
+    payload = quote.as_dict()
+    payload["checkout_ready"] = checkout_ready
+    payload["warnings"] = warnings
+    payload["moq_kg"] = (
+        float(DispatchPolicy.WHOLESALE_MOQ_KG) if quote.vendor_type == "wholesale_b2b" else None
+    )
+    payload["max_units"] = 4 if quote.vendor_type == "retail_refill" else None
+    payload["max_distance_km"] = (
+        float(DispatchPolicy.RETAIL_MAX_DISTANCE_KM)
+        if quote.vendor_type == "retail_refill"
+        else float(DispatchPolicy.WHOLESALE_MAX_DISTANCE_KM)
+    )
+    return payload
+
 
 @router.post("/mpesa_payment")
 @limiter.limit("5/minute")
 async def payment_request(request: Request, order: OrderRequest, db: AsyncSession = Depends(get_db), user = Depends(get_current_customer)):
-    clerk_id = user["sub"]
-    db_user = await get_user(session=db, clerk_id=clerk_id)
+    """Price the cart, validate everything, then move money — in that order.
+
+    Sequencing matters: every gate runs *before* `initiate_stk_push`, because a
+    validation error raised after the push leaves the customer with a PIN prompt
+    for an order that will never exist. The single `quote` computed here is both
+    the amount pushed to M-Pesa and the amount written to `order.total_amount`,
+    which is what makes the callback's amount cross-check pass.
+    """
+    from services.pricing_service import validate_quote
+
+    if order.payment_method not in ALLOWED_PAYMENT_METHODS:
+        raise HTTPException(status_code=400, detail="Unsupported payment method.")
+
+    if not KENYAN_MSISDN.match(order.phone or ""):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a valid Kenyan M-Pesa number in the format 2547XXXXXXXX.",
+        )
+
+    db_user = await get_user(session=db, clerk_id=user["sub"])
     if not db_user:
         raise HTTPException(status_code=403, detail="Customer profile not found.")
     authenticated_user_id = db_user.id
 
-    # ── F-018 FIX: Calculate amount server-side from cart total ──────────
-    from services.cart_services import fetch_detailed_cart
-    from services.order_service import calculate_delivery_fee
-    from services.dispatch_policy import DispatchPolicy
-    cart = await fetch_detailed_cart(user_id=authenticated_user_id, session=db)
-    if cart and getattr(cart, 'is_locked', False):
+    cart, db_user, vendor, quote = await _load_priced_cart(
+        db, authenticated_user_id, order.lat, order.lng, order.delivery_type
+    )
+
+    if getattr(cart, "is_locked", False):
         raise HTTPException(
-            status_code=409, 
+            status_code=409,
             detail="A checkout is already in progress for this cart. Please wait for the M-PESA prompt or check your orders."
         )
 
-    cart_total = float(cart.total_amount) - float(cart.welcome_discount_amount)
-    
-    user_model = None
-    
-    # Get vendor coordinates for delivery fee calculation 
-    if cart.cart_item:
-        vendor_id = cart.cart_item[0].vendor_id
-        from models.vendor_model import Vendor
-        first_vendor = await db.get(Vendor, vendor_id)
-        
-        # --- Pre-flight Validation 1: Dispatch Policy Constraints ---
-        total_quantity = sum(item.quantity for item in cart.cart_item)
-        total_weight_kg = sum((item.product.weight_kg if item.product else 0.0) * item.quantity for item in cart.cart_item)
-        vendor_type_str = first_vendor.vendor_type.value if hasattr(first_vendor.vendor_type, 'value') else first_vendor.vendor_type
-        
-        delivery = calculate_delivery_fee(
-            lat_from=first_vendor.lat if first_vendor else 0,
-            lng_from=first_vendor.lng if first_vendor else 0,
-            lat_to=order.lat, lng_to=order.lng,
-            vendor_type=vendor_type_str,
-            vehicle_class=DispatchPolicy.get_vehicle_class(total_quantity) if total_quantity > 0 else "motorbike",
-            delivery_type=order.delivery_type
-        )
+    if str(cart.id) != str(order.id):
+        raise HTTPException(status_code=400, detail="Cart mismatch. Please refresh your cart and try again.")
 
-        try:
-            DispatchPolicy.validate_cart_preflight(
-                vendor_type=vendor_type_str,
-                distance_km=delivery["distance_km"],
-                total_quantity=total_quantity,
-                total_weight_kg=total_weight_kg
-            )
-        except Exception as e:
-            raise e
-            
-        # --- Pre-flight Validation 2: Stock Availability ---
-        for item in cart.cart_item:
-            product = item.product
-            if not product or product.stock < item.quantity:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Insufficient stock for product '{product.name if product else 'unknown'}'. Available: {product.stock if product else 0}"
-                )
+    # Every gate, before any money moves.
+    validate_quote(quote, cart.cart_item, user=db_user)
 
-        # Include service fee in server amount
-        vendor_type_str_for_fee = first_vendor.vendor_type.value if hasattr(first_vendor.vendor_type, 'value') else first_vendor.vendor_type
-        service_fee = 50.0 if vendor_type_str_for_fee == "wholesale_b2b" else 10.0
-        
-        # --- Surcharges (Must match order_service.py exactly) ---
-        payload_surcharge = 0.0
-        staircase_surcharge = 0.0
-        if total_quantity > 2:
-            payload_surcharge = float((total_quantity - 2) * 10.0)
-
-        # We need the user object to check floor level and welcome offer status
-        from models.user_model import User
-        user_model = await db.get(User, authenticated_user_id)
-        
-        # --- First-Time User Bottle Injection ---
-        bottle_fee_total = 0.0
-        welcome_discount = 0.0
-        if user_model and not getattr(user_model, 'has_used_welcome_offer', True) and order.delivery_type == "quick_swap":
-            highest_bottle_price = 0.0
-            for item in cart.cart_item:
-                product = item.product
-                if product:
-                    capacity = getattr(product, 'capacity', 0)
-                    if capacity == 20:
-                        bottle_fee_total += 300.0 * item.quantity
-                        highest_bottle_price = max(highest_bottle_price, 300.0)
-                    elif capacity == 10:
-                        bottle_fee_total += 150.0 * item.quantity
-                        highest_bottle_price = max(highest_bottle_price, 150.0)
-            
-            if highest_bottle_price > 0:
-                welcome_discount = highest_bottle_price * 0.30
-                
-        wallet_discount = 0.0
-        if user_model:
-            floor_level = getattr(user_model, 'floor_level', 0)
-            has_elevator = getattr(user_model, 'has_elevator', False)
-            if floor_level > 2 and not has_elevator:
-                staircase_surcharge = float((floor_level - 2) * 10.0)
-            
-            # --- Loyalty Wallet Cashback Application ---
-            if user_model.wallet_balance and user_model.wallet_balance > 0:
-                pre_discount = cart_total + bottle_fee_total - welcome_discount + delivery["fee"] + service_fee + payload_surcharge + staircase_surcharge
-                # Cap discount so STK Push never attempts <= 0
-                max_discount = max(0.0, float(pre_discount) - 1.0)
-                wallet_discount = min(float(user_model.wallet_balance), max_discount)
-
-        server_amount = int(cart_total + bottle_fee_total - welcome_discount + delivery["fee"] + service_fee + payload_surcharge + staircase_surcharge - wallet_discount)
-
-    else:
-        server_amount = int(cart_total)
-
-    # --- Pre-flight Validation 4: Debt Intercept ---
-    if user_model and getattr(user_model, 'debt_balance', 0) and float(user_model.debt_balance) > 0:
-        raise HTTPException(
-            status_code=402,
-            detail=f"You have an outstanding bottle deposit debt of KSH {float(user_model.debt_balance):.0f}. Please clear it before placing a new order."
-        )
-
-    if server_amount <= 0:
-        raise HTTPException(status_code=400, detail="Cart total must be greater than zero")
-
-    # Lock the cart to prevent race conditions during the STK Push window
+    # Lock the cart so it cannot be mutated during the STK Push window.
     cart.is_locked = True
     await db.commit()
 
+    checkout_request_id = None
     try:
         if order.payment_method == "cash":
-            # For Cash on Delivery, bypass STK Push and create order directly
-            logger.info(f"Cash order requested, server_amount: {server_amount}")
-            orders = await create_order(
-                session=db, id=order.id, type="cart", 
-                CheckoutRequestID=None, user_id=authenticated_user_id, 
-                phone=order.phone, lat=order.lat, lng=order.lng, 
-                delivery_type=order.delivery_type, payment_method="cash"
+            logger.info("Cash order requested, amount: %s", quote.total)
+            created = await create_order(
+                session=db, id=cart.id, type="cart",
+                CheckoutRequestID=None, user_id=authenticated_user_id,
+                phone=order.phone, lat=order.lat, lng=order.lng,
+                delivery_type=order.delivery_type, payment_method="cash",
+                quote=quote,
             )
-            if not orders:
-                raise HTTPException(status_code=400, detail="Orders not created. Something went wrong.")
-            
-            # Immediately delete cart for cash orders since payment is deferred
+            if not created:
+                raise HTTPException(status_code=400, detail="Order not created. Please try again.")
+
+            # Cash orders defer payment, so the cart is consumed immediately.
             try:
                 from services.cart_services import delete_cart_service
                 await delete_cart_service(cart_id=str(cart.id), db=db)
             except Exception as e:
-                logger.error(f"Failed to clear cart after cash order creation: {e}")
+                logger.error("Failed to clear cart after cash order creation: %s", e)
 
             return {
-              "message": "order created",
-              "payment_method": "cash",
-              "CheckoutRequestID": None
+                "message": "order created",
+                "payment_method": "cash",
+                "CheckoutRequestID": None,
+                "order_id": str(created.id),
+                "amount": float(quote.total),
             }
-        else:
-            # M-PESA STK Push Flow
-            response = await initiate_stk_push(phone=order.phone, amount=server_amount)
-            CheckoutRequestID = response.get("CheckoutRequestID")
-            logger.info(f"STK push initiated, CheckoutRequestID: {CheckoutRequestID}, server_amount: {server_amount}")
-            orders = await create_order(
-                session=db, id=order.id, type="cart", 
-                CheckoutRequestID=CheckoutRequestID, user_id=authenticated_user_id, 
-                phone=order.phone, lat=order.lat, lng=order.lng, 
-                delivery_type=order.delivery_type, payment_method="mpesa"
-            ) 
-            if not orders:
-                raise HTTPException(status_code=400, detail="Orders not created. Something went wrong.")
-            # F-018 & RACE CONDITION FIX: Delay cart deletion until /confirm_payment or /mpesa/callback succeeds.
-            return {
-              "message": "order created",
-              "payment_method": "mpesa",
-              "CheckoutRequestID": CheckoutRequestID
-            }
+
+        # ── M-PESA STK Push ────────────────────────────────────────────────
+        response = await initiate_stk_push(phone=order.phone, amount=quote.stk_amount)
+        checkout_request_id = response.get("CheckoutRequestID")
+        if not checkout_request_id:
+            # Safaricom refused the request outright — nothing was charged.
+            logger.error("STK push did not return a CheckoutRequestID: %s", response)
+            raise HTTPException(
+                status_code=502,
+                detail="M-PESA could not start this payment. Please try again in a moment.",
+            )
+
+        logger.info(
+            "STK push initiated: CheckoutRequestID=%s amount=%s", checkout_request_id, quote.stk_amount
+        )
+
+        created = await create_order(
+            session=db, id=cart.id, type="cart",
+            CheckoutRequestID=checkout_request_id, user_id=authenticated_user_id,
+            phone=order.phone, lat=order.lat, lng=order.lng,
+            delivery_type=order.delivery_type, payment_method="mpesa",
+            quote=quote,
+        )
+        if not created:
+            raise HTTPException(status_code=400, detail="Order not created. Please try again.")
+
+        # The cart is deleted only once payment settles (in /confirm_payment or
+        # the callback), so a failed payment leaves the customer's cart intact.
+        return {
+            "message": "order created",
+            "payment_method": "mpesa",
+            "CheckoutRequestID": checkout_request_id,
+            "order_id": str(created.id),
+            "amount": float(quote.total),
+        }
+
     except Exception as e:
-        # Unlock the cart if STK push fails immediately
-        cart.is_locked = False
-        await db.commit()
+        await db.rollback()
+        # Release the cart so the customer can retry.
+        try:
+            fresh_cart = await fetch_cart(user_id=authenticated_user_id, session=db)
+            if fresh_cart:
+                fresh_cart.is_locked = False
+                await db.commit()
+        except Exception as unlock_err:
+            logger.error("Failed to unlock cart after checkout failure: %s", unlock_err)
+
+        # If the push already went out, the customer may still be prompted for a
+        # PIN. Record the exposure so the refund sweep can reverse anything that
+        # actually gets collected — this must never be a silent loss.
+        if checkout_request_id:
+            logger.error(
+                "Order creation failed AFTER STK push %s — recording orphaned payment.",
+                checkout_request_id,
+            )
+            try:
+                from models.payment_model import Payment
+                db.add(Payment(
+                    order_id=None,
+                    checkout_request_id=checkout_request_id,
+                    phone=order.phone,
+                    amount=quote.total,
+                    status="orphaned",
+                    failure_reason=str(getattr(e, "detail", e))[:500],
+                ))
+                await db.commit()
+            except Exception as audit_err:
+                logger.error("Failed to record orphaned payment: %s", audit_err)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "We could not complete your order. If you were charged, the amount "
+                    "will be reversed automatically. Please check your orders before retrying."
+                ),
+            )
         raise e
 
 class RequestCheckoutRequestID(BaseModel):
@@ -353,19 +428,11 @@ async def fetch_active_order(
 
 import os
 
-MPESA_CALLBACK_SECRET = os.getenv("MPESA_CALLBACK_SECRET")
-
 @router.post("/mpesa/callback")
 async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
-    if MPESA_CALLBACK_SECRET and secret != MPESA_CALLBACK_SECRET:
-        logger.warning("M-PESA callback rejected: invalid or missing shared secret")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
-
-    forwarded_for = request.headers.get("x-forwarded-for")
-    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else "unknown")
-    if not is_safaricom_ip(client_ip):
-        logger.warning(f"M-PESA callback rejected from non-Safaricom IP: {client_ip}")
-        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+    rejected = reject_mpesa_callback(request, secret, "Order payment callback")
+    if rejected:
+        return rejected
 
     try:
         data = await request.json()
@@ -398,9 +465,15 @@ async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), s
                 logger.error(f"M-PESA callback phone mismatch: order={order.phone}, callback={callback_phone}")
                 return JSONResponse(status_code=400, content={"message": "Phone mismatch"})
 
-            # Validate amount matches (allow ±1 KSH tolerance for rounding)
+            # Validate amount matches. Since `pricing_service` quantizes the order
+            # total to whole shillings and hands that same integer to the STK push,
+            # this is now an exact comparison; the ±1 tolerance is kept only to
+            # absorb any rounding Safaricom applies on their side.
             if abs(float(order.total_amount) - float(callback_amount)) > 1.0:
-                logger.error(f"M-PESA callback amount mismatch: order={order.total_amount}, callback={callback_amount}")
+                logger.error(
+                    "M-PESA callback amount mismatch: order=%s, callback=%s, checkout=%s",
+                    order.total_amount, callback_amount, checkout_request_id,
+                )
                 return JSONResponse(status_code=400, content={"message": "Amount mismatch"})
 
             from utils.redaction import redact_phone
@@ -534,10 +607,50 @@ async def get_order_tracking_logs(
     db: AsyncSession = Depends(get_db),
     user = Depends(get_current_customer),
 ):
-    """Fetch tracking logs for an order (historical route)"""
+    """Fetch tracking logs for an order (historical route to draw the polyline)."""
     from services.order_service import fetch_order_tracking_logs
+
+    # Without this the endpoint took any order id from any signed-in customer and
+    # returned that order's GPS breadcrumb trail — i.e. somebody else's home.
+    await authorise_order_access(db, order_id, user["sub"], allowed_roles=("customer",))
+
     logs = await fetch_order_tracking_logs(session=db, order_id=order_id)
     return logs
+
+
+@router.get("/orders/{order_id}/rider-location")
+async def get_order_rider_location(
+    order_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_customer),
+):
+    """Current rider position for one of the caller's own orders.
+
+    The customer app needs this as the initial paint before its tracking socket
+    opens, and as the fallback when the socket cannot connect. It previously
+    called the rider app's equivalent under `/api/rider/...`, which is guarded by
+    `get_current_rider` and so returned 403 for every customer.
+    """
+    from models.deliverer_model import Deliverer
+    from models.order_model import Order
+
+    await authorise_order_access(db, order_id, user["sub"], allowed_roles=("customer",))
+
+    order = await db.get(Order, order_id)
+    if not order or not order.deliverer_id:
+        raise HTTPException(status_code=404, detail="No rider is assigned to this order yet.")
+
+    deliverer = await db.get(Deliverer, order.deliverer_id)
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    return {
+        "rider_id": str(deliverer.id),
+        "rider_name": getattr(deliverer, "name", None) or getattr(deliverer, "full_name", None) or "Rider",
+        "lat": deliverer.current_lat,
+        "lng": deliverer.current_lng,
+        "is_available": deliverer.is_available,
+    }
 
 
 class ResolveMismatchPayload(BaseModel):

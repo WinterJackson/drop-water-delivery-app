@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Form, Request
+import hmac
+import logging
+import os
+
+from fastapi import APIRouter, Form, Header, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.future import select
+
+from db.session import AsyncSessionLocal
 from models.deliverer_model import Deliverer
 from models.order_model import Order
-from db.session import AsyncSessionLocal
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -11,13 +16,36 @@ router = APIRouter()
 
 from core.redis_client import redis_limiter as limiter
 
+#: Shared secret configured on the SMS provider's webhook. Without it this
+#: endpoint is world-writable, and it completes deliveries — which credits the
+#: vendor, settles the rider's float and closes the customer's order. The sender
+#: phone number is not authentication: it travels in the request body and anyone
+#: can type a rider's number into it.
+SMS_WEBHOOK_SECRET = os.getenv("SMS_WEBHOOK_SECRET")
+
+
 @router.post("/webhook")
 @limiter.limit("5/minute")
-async def process_sms_webhook(request: Request, From: str = Form(...), Body: str = Form(...)):
+async def process_sms_webhook(
+    request: Request,
+    From: str = Form(...),
+    Body: str = Form(...),
+    x_webhook_secret: str | None = Header(default=None, alias="X-Webhook-Secret"),
+):
     """
     Parses incoming SMS payloads from telecommunication hooks.
     Format expected: "DELIVERED <order_id_first_8_chars>"
     """
+    # Fail closed. An unset secret in production would leave delivery completion
+    # open to anyone who can reach the URL.
+    if not SMS_WEBHOOK_SECRET:
+        if os.getenv("ENV", "development") != "development":
+            logger.error("SMS webhook called but SMS_WEBHOOK_SECRET is not configured")
+            return JSONResponse(status_code=503, content={"message": "Webhook not configured"})
+    elif not x_webhook_secret or not hmac.compare_digest(x_webhook_secret, SMS_WEBHOOK_SECRET):
+        logger.warning("SMS webhook rejected: bad or missing shared secret")
+        return JSONResponse(status_code=403, content={"message": "Forbidden"})
+
     logger.info(f"Received SMS Webhook from {From}: {Body}")
     body_clean = Body.strip().upper()
     
@@ -33,10 +61,17 @@ async def process_sms_webhook(request: Request, From: str = Form(...), Body: str
     # Open isolated database session natively specifically for external webhooks
     async with AsyncSessionLocal() as session:
         # Match Deliverer globally based on generic phone suffix bounds preventing country code clashes
-        phone_suffix = From[-9:] 
-        stmt = select(Deliverer).where(Deliverer.phone_number.like(f"%{phone_suffix}%"))
+        # Anchor on the suffix. `LIKE %digits%` can match a different rider whose
+        # number merely contains these digits, and `.first()` would then pick one
+        # arbitrarily — completing a stranger's delivery.
+        phone_suffix = From[-9:]
+        stmt = select(Deliverer).where(Deliverer.phone_number.like(f"%{phone_suffix}"))
         result = await session.execute(stmt)
-        deliverer = result.scalars().first()
+        matches = result.scalars().all()
+        if len(matches) > 1:
+            logger.error("SMS webhook: phone suffix %s matched %d riders; refusing", phone_suffix, len(matches))
+            return {"status": "error", "message": "ambiguous sender"}
+        deliverer = matches[0] if matches else None
         
         if not deliverer:
             logger.warning(f"SMS Webhook: Unrecognized deliverer phone {From}")
