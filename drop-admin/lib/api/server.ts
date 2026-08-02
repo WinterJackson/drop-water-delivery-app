@@ -120,6 +120,20 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
     });
   } catch (cause) {
     if (cause instanceof Error && cause.name === "AbortError") throw cause;
+
+    // The message an administrator sees stays the same — they cannot act on a
+    // hostname, and the URL of an internal API is not theirs to read. But in
+    // development this is almost always "the API is not running", and the
+    // generic wording sends people looking at their wifi. Log the cause once,
+    // server-side, where only the developer sees it.
+    if (process.env.NODE_ENV !== "production") {
+      console.error(
+        `[api] Could not reach ${BACKEND}${path} — is the backend running?\n` +
+          `      cd BackendAPI && source venv/bin/activate && uvicorn main:app --reload --port 8000\n` +
+          `      cause: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+
     throw new ApiError(0, "Could not reach the server. Check your connection.");
   }
 

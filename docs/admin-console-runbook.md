@@ -102,6 +102,30 @@ The worker is not optional if you intend to test **broadcast**: the send
 endpoint queues the campaign and returns; without a worker it stays `queued` for
 ever, which is the correct behaviour and looks like a bug.
 
+### "The console can't load right now — could not reach the server"
+
+Signing in works and then every screen says this. It means exactly what it says:
+the console reached Clerk, minted a token, and found **nothing listening on
+`BACKEND_BASE_URL`**. Almost always process 2 was never started, or it died.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8000/health   # want 200
+```
+
+Anything other than `200` — including no output at all — and the API is the
+problem, not the console. Start it, then reload the page; no sign-out needed,
+the Clerk session is unaffected.
+
+Since it is a *server-side* fetch, nothing appears in the browser's network tab —
+the request never leaves the Next server. The `pnpm dev` terminal now prints the
+URL it failed to reach and the command that starts it, in development only.
+
+**Redis is not required for this.** `redis-server` is not installed on this
+machine, and the API starts anyway: rate limiting falls back to in-memory and
+WebSockets to local-only mode, both of which it announces at startup. You need
+Redis for broadcast, the job queue and the config-version counter — not to open
+the console.
+
 ---
 
 ## 3. Get in
@@ -204,6 +228,55 @@ If Clerk rejects the password, it is one of two rules under **Configure →
 Password**: a minimum length (`Drop2026!!` is 10), or the compromised-password
 check against HaveIBeenPwned. Turn the latter off **on the development instance
 only**, or pick a different shared password and use it for all five.
+
+#### If the dashboard says "Something went wrong, please try again"
+
+It is a **Clerk dashboard UI fault, not a rejection.** The same payload — same
+addresses, same password, same instance — is accepted by Clerk's Backend API
+without complaint, which is how it was diagnosed: the first user creates fine and
+every subsequent one fails, so the data is not the problem.
+
+Reload the dashboard tab between creations and it usually clears. If it does not,
+create the remaining users through the API instead — same result, same instance,
+same audit trail:
+
+```bash
+cd BackendAPI && source venv/bin/activate
+python - <<'EOF'
+import os
+from dotenv import load_dotenv; load_dotenv()
+from clerk_backend_api import Clerk
+
+ROSTER = [
+    ("super-admin+clerk_test@example.com", "Super Admin"),
+    ("operations+clerk_test@example.com",  "Operations"),
+    ("finance+clerk_test@example.com",     "Finance"),
+    ("support+clerk_test@example.com",     "Support"),
+    ("analyst+clerk_test@example.com",     "Analyst"),
+]
+with Clerk(bearer_auth=os.environ["CLERK_SECRET_KEY"]) as c:
+    existing = {
+        e.email_address
+        for u in (c.users.list(request={"limit": 100}) or [])
+        for e in (u.email_addresses or [])
+    }
+    for email, name in ROSTER:
+        if email in existing:
+            print(f"  exists   {email}")
+            continue
+        u = c.users.create(request={
+            "email_address": [email],
+            "password": "Drop2026!!",
+            "first_name": name,
+        })
+        print(f"  created  {email:<36} {u.id}")
+EOF
+```
+
+This is deliberately a paste-once snippet rather than a committed script. A file
+that creates five privileged identities with a known password is a file that gets
+run against production by accident; a snippet in a runbook is read before it is
+used.
 
 #### Step 4 — sign in as each
 

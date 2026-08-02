@@ -398,6 +398,31 @@ breaks every deployed app until it is rebuilt and re-released, for infrastructur
 identifiers no customer ever sees. Retire them when you move to your own domain
 and a fresh Firebase project, not before.
 
+### `clerk-backend-api` 2.x changed `users.list`
+
+Not an environment variable, but it is found the same way — by running
+`check_clerk_secret.py` and misreading the result.
+
+SDK 2.x takes a **request object** where 1.x took keyword arguments:
+
+```python
+clerk.users.list(email_address=[email])              # TypeError on 2.x
+clerk.users.list(request={"email_address": [email]}) # correct
+```
+
+`users.get` and `users.delete` still take keywords, so admin binding
+(`bind_admin_for_caller`) and account deletion were never affected. Only
+`users.list` and `users.create` changed.
+
+The damage was in how it failed. `vendor_staff_service._lookup_clerk_id` wraps
+the SDK in `except Exception` and answers **502 "Could not reach the accounts
+service"** — so a signature mismatch presented itself as somebody else's outage,
+on every vendor staff invitation, indefinitely. `check_clerk_secret.py` reported
+the same thing about a key that was in fact perfectly good.
+
+`tests/test_vendor_staff.py` now walks the AST of every service, script and route
+and fails the build if `users.list` is called with anything but `request=`.
+
 ### `ADMIN_2FA_REQUIRED` — `false` now, `true` before real staff
 
 **Render only.** It is read by `dependencies/admin_dependencies.py:81` and by

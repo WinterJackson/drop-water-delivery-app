@@ -66,7 +66,12 @@ async def _lookup_clerk_id(email: str) -> str | None:
         from clerk_backend_api import Clerk
 
         clerk = Clerk(bearer_auth=secret)
-        response = clerk.users.list(email_address=[email])
+        # `clerk-backend-api` 2.x takes a request object here, not keyword
+        # arguments — `users.list(email_address=[…])` raises TypeError, which the
+        # `except Exception` below turned into "Could not reach the accounts
+        # service", so a signature change read as a network fault and every
+        # invitation 502'd. `users.get`/`users.delete` still take keywords.
+        response = clerk.users.list(request={"email_address": [email]})
         users = getattr(response, "data", response)
         return users[0].id if users else None
 

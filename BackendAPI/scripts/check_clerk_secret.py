@@ -134,7 +134,7 @@ def main() -> int:
             clerk = Clerk(bearer_auth=secret)
             # The exact call `vendor_staff_service._lookup_clerk_id` makes. The
             # address is not expected to exist; an empty list is a pass.
-            clerk.users.list(email_address=["nobody.check@drop.invalid"])
+            clerk.users.list(request={"email_address": ["nobody.check@drop.invalid"]})
             print("      users.list    ok")
         except Exception as e:  # noqa: BLE001 — surface whatever Clerk said
             problems.append(

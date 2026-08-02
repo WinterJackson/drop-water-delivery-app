@@ -288,3 +288,51 @@ def test_push_tokens_reach_every_staff_member_of_a_store():
     source = (BACKEND / "services" / "vendor_staff_service.py").read_text()
     assert "async def push_tokens_for_store" in source
     assert "async def set_push_token" in source
+
+
+def test_clerk_users_list_uses_the_request_object_form():
+    """`clerk-backend-api` 2.x moved `users.list` from keyword arguments to a
+    single `request` object. The old form raises `TypeError`, and both call sites
+    wrap the SDK in `except Exception` — so the signature change surfaced as
+    "Could not reach the accounts service" (502) on every staff invitation and as
+    a bogus network failure in `check_clerk_secret.py`. A wrong call that reports
+    itself as someone else's outage is the kind that survives for months.
+
+    `users.get` and `users.delete` still take keywords; only `list` and `create`
+    changed. This pins the distinction so a future SDK bump is caught here.
+    """
+    import ast
+    import inspect
+    import pathlib
+
+    from clerk_backend_api import Users
+
+    assert "request" in inspect.signature(Users.list).parameters, (
+        "the SDK changed again — re-check every users.list call site"
+    )
+
+    # Parsed, not grepped: both files *document* the broken form in prose to
+    # explain the fix, and a textual scan cannot tell an explanation from an
+    # offence. The AST only ever sees real calls.
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in list(root.glob("services/*.py")) + list(root.glob("scripts/*.py")) + list(
+        root.glob("routes/*.py")
+    ):
+        try:
+            tree = ast.parse(path.read_text(errors="ignore"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "list"):
+                continue
+            if not (isinstance(func.value, ast.Attribute) and func.value.attr == "users"):
+                continue
+            keywords = {kw.arg for kw in node.keywords}
+            if keywords and keywords != {"request"}:
+                offenders.append(f"{path.name}:{node.lineno} passes {sorted(keywords)}")
+
+    assert offenders == [], f"users.list called with keyword arguments: {offenders}"
