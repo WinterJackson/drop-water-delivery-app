@@ -539,6 +539,8 @@ def test_no_operational_page_is_only_a_table():
         "finance/payouts",
         "finance/reconciliation",
         "support",
+        "people/[kind]",
+        "platform/audit",
     ]
 
     bare = []

@@ -36,6 +36,7 @@ from core.redis_client import redis_limiter as limiter
 from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_ADMINS_MANAGE,
+    PERM_CUSTOMERS_READ,
     PERM_ANALYTICS_READ,
     PERM_DISPUTES_READ,
     PERM_FINANCE_PAYOUT_APPROVE,
@@ -899,5 +900,18 @@ async def queue_stats(
 
     if access.may(PERM_SUPPORT_READ):
         stats["support"] = await admin_queue_service.support(db)
+
+    # People are three populations behind one route, and each is gated by its
+    # own capability — `support` may read customers and not riders.
+    for kind, permission in (
+        ("customer", PERM_CUSTOMERS_READ),
+        ("rider", PERM_RIDERS_READ),
+        ("vendor", PERM_VENDORS_READ),
+    ):
+        if access.may(permission):
+            stats[f"people_{kind}"] = await admin_queue_service.people(db, kind)
+
+    if access.may(PERM_ADMINS_MANAGE):
+        stats["audit"] = await admin_queue_service.audit(db)
 
     return stats

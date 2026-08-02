@@ -2,9 +2,10 @@ import { Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Badge, Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
-import { formatMoney, timeAgo } from "@/lib/utils/format";
+import { formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
+import type { PeopleStats, QueueStats } from "@/lib/queue-stats";
 
 /** Plural in the URL, singular in the API — `/people/riders` → `kind=rider`. */
 const KINDS = {
@@ -58,8 +59,16 @@ export default async function PeopleListPage({
   if (status) query.set("status", status);
 
   let data: { items: Person[]; next_cursor: string | null };
+  // Population context, in its own catch — a slow aggregate must not blank the
+  // roster somebody opened this page to search.
+  let stats: QueueStats = {};
   try {
-    data = await get(`/api/admin/people/${config.kind}s?${query.toString()}`);
+    [data, stats] = await Promise.all([
+      get<{ items: Person[]; next_cursor: string | null }>(
+        `/api/admin/people/${config.kind}s?${query.toString()}`,
+      ),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
+    ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title={`Couldn't load ${config.title.toLowerCase()}`} detail={message} />;
@@ -71,6 +80,13 @@ export default async function PeopleListPage({
         <h1 className="text-2xl font-semibold tracking-tight">{config.title}</h1>
         <p className="mt-1 text-sm text-muted">{config.blurb}</p>
       </div>
+
+      <PopulationHeader
+        stats={
+          (stats as Record<string, PeopleStats | undefined>)[`people_${config.kind}`]
+        }
+        noun={config.title.toLowerCase()}
+      />
 
       {/* A plain GET form: search survives a reload, is linkable, and works
           before any JavaScript has run. */}
@@ -238,5 +254,53 @@ export default async function PeopleListPage({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Who is on the platform, and how that is changing.
+ *
+ * A roster answers "who" and never "how many of them can actually work", which
+ * on this platform is a completely different number — every rider defaults to
+ * `is_available = true` at sign-up, so a fleet that has passed no KYC at all
+ * still reads as available. `active` is deliberately the *deployable* count.
+ */
+function PopulationHeader({
+  stats,
+  noun,
+}: {
+  stats: PeopleStats | undefined;
+  noun: string;
+}) {
+  if (!stats) return null;
+
+  return (
+    <section aria-label="Population">
+      <h2 className="sr-only">Population</h2>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label={`Total ${noun}`} value={formatNumber(stats.total)} />
+        <Stat
+          label={stats.active_label}
+          value={formatNumber(stats.active)}
+          hint={
+            stats.active_rate === null
+              ? "Nobody registered yet"
+              : `${stats.active_rate}% of everyone registered`
+          }
+          tone={stats.active_rate !== null && stats.active_rate < 50 ? "warning" : "neutral"}
+        />
+        <Stat
+          label="Suspended"
+          value={formatNumber(stats.suspended)}
+          hint="Blocked from the platform"
+          tone={stats.suspended > 0 ? "warning" : "neutral"}
+        />
+        <Stat
+          label="Joined this week"
+          value={stats.joined_7d === null ? "—" : formatNumber(stats.joined_7d)}
+          hint={stats.joined_7d === null ? "No signup date recorded" : "Last 7 days"}
+        />
+      </div>
+    </section>
   );
 }

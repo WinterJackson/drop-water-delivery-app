@@ -29,10 +29,12 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.admin_model import AdminAuditLog
 from models.bottle_rejection_model import BottleRejectionTicket, RejectionStatus
 from models.deliverer_model import Deliverer, KYCStatus
 from models.payout_model import Payout
 from models.platform_setting_model import SupportTicket
+from models.user_model import User
 from models.vendor_model import Vendor
 
 
@@ -243,4 +245,102 @@ async def support(db: AsyncSession) -> dict[str, Any]:
             db, SupportTicket, SupportTicket.status == "open", SupportTicket.assigned_admin_id.is_(None)
         ),
         "total": await _count(db, SupportTicket),
+    }
+
+
+async def people(db: AsyncSession, kind: str) -> dict[str, Any]:
+    """Population shape for `/people/{kind}s`.
+
+    A roster of names answers "who is on the platform" and never "how is the
+    population changing", which is the question behind every growth decision.
+    Suspended and new-this-week are the two figures a list cannot show at all.
+    """
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    model = {"customer": User, "rider": Deliverer, "vendor": Vendor}.get(kind)
+    if model is None:
+        return {}
+
+    total = await _count(db, model)
+
+    if kind == "rider":
+        # `is_available` is not the same question. It defaults to true at sign-up,
+        # so counting it reports a healthy fleet on a platform where nobody has
+        # passed KYC. Deployability is the KYC state.
+        active = await _count(db, Deliverer, Deliverer.kyc_status == KYCStatus.approved)
+        suspended = await _count(db, Deliverer, Deliverer.suspended_at.isnot(None))
+        active_label = "Approved to work"
+    elif kind == "vendor":
+        active = await _count(db, Vendor, Vendor.is_active.is_(True))
+        suspended = await _count(db, Vendor, Vendor.suspended_at.isnot(None))
+        active_label = "Open for business"
+    else:
+        active = await _count(db, User, User.is_active.is_(True))
+        suspended = await _count(db, User, User.suspended_at.isnot(None))
+        active_label = "Active"
+
+    created = getattr(model, "created_at", None)
+    joined_7d = (
+        await _count(db, model, created >= week_ago) if created is not None else None
+    )
+
+    return {
+        "total": total,
+        "active": active,
+        "active_label": active_label,
+        "suspended": suspended,
+        "joined_7d": joined_7d,
+        "active_rate": _rate(active, total),
+    }
+
+
+async def audit(db: AsyncSession) -> dict[str, Any]:
+    """Administrator activity, by volume and by who.
+
+    An audit log read as a list is a list nobody reads. The value is in the
+    shape: how much happened today against the usual, and whether one account is
+    responsible for most of it.
+    """
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(days=1)
+    week_ago = now - timedelta(days=7)
+
+    day = await _count(db, AdminAuditLog, AdminAuditLog.created_at >= day_ago)
+    week = await _count(db, AdminAuditLog, AdminAuditLog.created_at >= week_ago)
+
+    # The busiest actor and the commonest action over the week. Both are
+    # `None` on an empty log rather than a fabricated "—" row.
+    busiest = (
+        await db.execute(
+            select(AdminAuditLog.admin_email, func.count().label("n"))
+            .where(AdminAuditLog.created_at >= week_ago)
+            .group_by(AdminAuditLog.admin_email)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+    ).first()
+
+    commonest = (
+        await db.execute(
+            select(AdminAuditLog.action, func.count().label("n"))
+            .where(AdminAuditLog.created_at >= week_ago)
+            .group_by(AdminAuditLog.action)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+    ).first()
+
+    return {
+        "total": await _count(db, AdminAuditLog),
+        "last_24h": day,
+        "last_7d": week,
+        # A daily average over the week, so today can be read against normal.
+        # Seven days is short enough to reflect the current team and long enough
+        # that one quiet Sunday does not define "normal".
+        "daily_average_7d": round(week / 7, 1) if week else 0.0,
+        "busiest_admin": busiest[0] if busiest else None,
+        "busiest_admin_actions": busiest[1] if busiest else None,
+        "commonest_action": commonest[0] if commonest else None,
+        "commonest_action_count": commonest[1] if commonest else None,
     }

@@ -67,10 +67,34 @@ export type SupportStats = {
   total: number;
 };
 
+export type PeopleStats = {
+  total: number;
+  active: number;
+  active_label: string;
+  suspended: number;
+  joined_7d: number | null;
+  active_rate: number | null;
+};
+
+export type AuditStats = {
+  total: number;
+  last_24h: number;
+  last_7d: number;
+  daily_average_7d: number;
+  busiest_admin: string | null;
+  busiest_admin_actions: number | null;
+  commonest_action: string | null;
+  commonest_action_count: number | null;
+};
+
 export type QueueStats = {
   rider_kyc?: RiderKycStats;
   vendor_verification?: VendorVerificationStats;
   disputes?: DisputeStats;
   payouts?: PayoutStats;
   support?: SupportStats;
+  people_customer?: PeopleStats;
+  people_rider?: PeopleStats;
+  people_vendor?: PeopleStats;
+  audit?: AuditStats;
 };

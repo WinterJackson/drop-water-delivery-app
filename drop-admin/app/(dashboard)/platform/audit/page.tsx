@@ -1,8 +1,9 @@
 import { ScrollText } from "lucide-react";
 
-import { Badge, Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
-import { formatDateTime } from "@/lib/utils/format";
+import { formatDateTime, formatNumber } from "@/lib/utils/format";
+import type { QueueStats } from "@/lib/queue-stats";
 
 export const metadata = { title: "Audit log" };
 
@@ -28,8 +29,12 @@ function toneFor(action: string): "danger" | "warning" | "neutral" {
 
 export default async function AuditPage() {
   let log: { items: Entry[]; next_cursor: string | null };
+  let stats: QueueStats = {};
   try {
-    log = await get("/api/admin/audit");
+    [log, stats] = await Promise.all([
+      get<{ items: Entry[]; next_cursor: string | null }>("/api/admin/audit"),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
+    ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the audit log" detail={message} />;
@@ -44,6 +49,54 @@ export default async function AuditPage() {
           identity documents. Append-only — nothing here can be edited or deleted.
         </p>
       </div>
+
+      {stats.audit ? (
+        <section aria-label="Activity">
+          <h2 className="sr-only">Activity</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Actions today"
+              value={formatNumber(stats.audit.last_24h)}
+              hint={
+                stats.audit.last_7d === 0
+                  ? "Nothing recorded this week, so there is no normal to compare against"
+                  : `${stats.audit.daily_average_7d}/day average over the week`
+              }
+              /* Twice the weekly average is not proof of anything — but it is
+                 the only signal a chronological list cannot give you at all. */
+              tone={
+                stats.audit.last_7d > 0 &&
+                stats.audit.last_24h > stats.audit.daily_average_7d * 2
+                  ? "warning"
+                  : "neutral"
+              }
+            />
+            <Stat
+              label="This week"
+              value={formatNumber(stats.audit.last_7d)}
+              hint={`${formatNumber(stats.audit.total)} recorded in total`}
+            />
+            <Stat
+              label="Busiest administrator"
+              value={stats.audit.busiest_admin ?? "—"}
+              hint={
+                stats.audit.busiest_admin_actions === null
+                  ? "No activity this week"
+                  : `${formatNumber(stats.audit.busiest_admin_actions)} action(s) in 7 days`
+              }
+            />
+            <Stat
+              label="Commonest action"
+              value={stats.audit.commonest_action ?? "—"}
+              hint={
+                stats.audit.commonest_action_count === null
+                  ? "No activity this week"
+                  : `${formatNumber(stats.audit.commonest_action_count)} time(s) in 7 days`
+              }
+            />
+          </div>
+        </section>
+      ) : null}
 
       {log.items.length === 0 ? (
         <Card>
