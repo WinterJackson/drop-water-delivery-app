@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  FileWarning,
   BadgeCheck,
   Banknote,
   BarChart3,
@@ -210,6 +211,16 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSIONS.financeRead,
         mobilePriority: 8,
         blurb: "Every movement of money, and what the platform kept.",
+      },
+      {
+        href: "/finance/reconciliation",
+        label: "Reconciliation",
+        short: "Recon",
+        icon: FileWarning,
+        permission: PERMISSIONS.financeRead,
+        mobilePriority: 9,
+        badge: "reconciliation",
+        blurb: "Payment callbacks that failed — money in, order still pending.",
       },
     ],
   },

@@ -33,7 +33,7 @@ from models.wallet_transaction_model import (
     TransactionType,
     WalletTransaction,
 )
-from services import admin_service, wallet_service
+from services import admin_reconciliation_service, admin_service, wallet_service
 from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -496,3 +496,68 @@ async def account_ledger(
             for row in rows
         ],
     }
+
+
+# ── Payment-callback reconciliation ───────────────────────────────────────
+#
+# `failed_webhooks` had no reader. A failed M-Pesa callback meant the customer
+# had paid Safaricom while the order stayed `pending`, and nothing on the
+# platform could say so. See `services/admin_reconciliation_service.py` for why
+# there is deliberately no replay action.
+
+
+@router.get("/reconciliation/webhooks", summary="Payment callbacks that failed")
+@limiter.limit("60/minute")
+async def failed_webhooks(
+    request: Request,
+    resolved: bool = False,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
+):
+    items = await admin_reconciliation_service.list_failures(
+        db, resolved=resolved, limit=limit
+    )
+    return {
+        "items": items,
+        "summary": await admin_reconciliation_service.summary(db),
+    }
+
+
+class ResolveWebhook(BaseModel):
+    reason: str = Field(min_length=8, max_length=500)
+
+
+@router.post("/reconciliation/webhooks/{webhook_id}/resolve", summary="Mark one handled")
+async def resolve_failed_webhook(
+    webhook_id: str,
+    body: ResolveWebhook,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
+):
+    """Record that a human dealt with this entry.
+
+    A reason is mandatory and not decoration: the next person needs to know
+    whether this was settled in the M-Pesa portal, refunded, or dismissed as a
+    duplicate. Marking it resolved with no explanation is indistinguishable from
+    hiding it.
+
+    It moves no money — the administrator does that through the ordinary
+    single-path tools, and this is the note saying they did.
+    """
+    row = await admin_reconciliation_service.resolve(db, webhook_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such entry.")
+
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="finance.webhook_resolve",
+        target_type="failed_webhook",
+        target_id=webhook_id,
+        before={"resolved": False},
+        after={"resolved": True, "reason": body.reason.strip()},
+    )
+    await db.commit()
+
+    return {"id": webhook_id, "resolved": True}

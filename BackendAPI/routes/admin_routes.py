@@ -50,6 +50,7 @@ from models.admin_model import (
     PERMISSION_LABELS,
 )
 from models.bottle_rejection_model import BottleRejectionTicket, RejectionStatus
+from models.failed_webhook_model import FailedWebhook
 from models.deliverer_model import Deliverer, KYCStatus
 from models.order_model import Order
 from models.payout_model import Payout
@@ -188,6 +189,14 @@ async def nav_counts(
         counts["disputes"] = await _count(
             BottleRejectionTicket,
             BottleRejectionTicket.status == RejectionStatus.PENDING_REVIEW,
+        )
+
+    if access.may(PERM_FINANCE_READ):
+        # A failed payment callback is money the customer may already have paid
+        # against an order still sitting unpaid. It badges under Finance because
+        # that is who reconciles it, not Operations.
+        counts["reconciliation"] = await _count(
+            FailedWebhook, FailedWebhook.resolved.is_(False)
         )
 
     if access.may(PERM_SUPPORT_READ):

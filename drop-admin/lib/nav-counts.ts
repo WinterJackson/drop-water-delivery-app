@@ -19,6 +19,8 @@ export type NavCounts = {
   support?: number;
   payouts?: number;
   payouts_stuck?: number;
+  /** Failed payment callbacks nobody has handled — money in, order pending. */
+  reconciliation?: number;
 };
 
 export type NavBadge = keyof NavCounts;

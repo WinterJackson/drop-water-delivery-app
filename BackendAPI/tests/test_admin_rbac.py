@@ -505,3 +505,69 @@ def test_every_dispute_status_literal_is_a_real_enum_value():
 
     # A decision must be able to say yes *and* no.
     assert len(found["ResolveDisputeRequest.outcome"]) >= 2
+
+
+def test_reconciliation_is_gated_on_finance_read():
+    """A failed payment callback carries the customer's amount and the M-Pesa
+    receipt. It is finance data and is gated like finance data — `support` and
+    `analyst` hold no `finance.read`, so neither can enumerate who paid what."""
+    import ast
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "routes"
+        / "admin_finance_routes.py"
+    ).read_text()
+
+    tree = ast.parse(source)
+    guarded = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if "reconciliation" not in ast.dump(node):
+            continue
+        guarded[node.name] = "PERM_FINANCE_READ" in ast.dump(node)
+
+    assert guarded, "no reconciliation handlers found — did the route move?"
+    unguarded = [name for name, ok in guarded.items() if not ok]
+    assert unguarded == [], f"reconciliation handlers with no capability check: {unguarded}"
+
+
+def test_the_reconciliation_screen_offers_no_replay():
+    """Replaying a payment callback would be a second path that moves money.
+
+    The platform refuses those on principle — `admin_orders_routes` leaves
+    refunding to `refund_service` for exactly this reason — and a replay that
+    raced the reconciliation sweep would credit a wallet twice. The screen
+    triages; the fix goes through the single-path tools.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    # Scoped to the reconciliation handlers, not the whole module: the wallet
+    # adjustment endpoint lives in the same file and *should* call
+    # `apply_wallet_delta` — that is the single path, and it is the one this
+    # screen deliberately does not become a second of.
+    checked = 0
+    for name in ("routes/admin_finance_routes.py", "services/admin_reconciliation_service.py"):
+        tree = ast.parse((root / name).read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            # Every module-level function in the service, plus the two route
+            # handlers. Matching on name fragments missed `list_failures`.
+            if name.endswith("admin_finance_routes.py") and "webhook" not in node.name:
+                continue
+            checked += 1
+            calls = {
+                child.func.attr
+                for child in ast.walk(node)
+                if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
+            }
+            assert "apply_wallet_delta" not in calls, f"{name}:{node.name} moves money"
+            assert "replay" not in node.name, f"{name}:{node.name} is a replay path"
+
+    assert checked >= 4, f"expected the reconciliation handlers, found {checked}"
