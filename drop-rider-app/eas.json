@@ -19,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_cGV0LWFpcmVkYWxlLTIyLmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA",
         "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com"
       }
     }

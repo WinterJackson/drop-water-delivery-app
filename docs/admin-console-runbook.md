@@ -218,10 +218,11 @@ where you were.
 
 #### Before this works: two settings
 
-- **`ADMIN_2FA_REQUIRED=false`** in `BackendAPI/.env`. These accounts have no
-  second factor, and with the default (`true`) every one of them gets
-  `two_factor_required` instead of a dashboard. Turn it back **on** before a real
-  administrator exists.
+- **`ADMIN_2FA_REQUIRED=false`** in `BackendAPI/.env`, and on **Render** for the
+  deployed console — never on Vercel, which does not read it. These accounts have
+  no second factor, and with the default (`true`) every one of them gets
+  `two_factor_required` instead of a dashboard. **Delete the variable** once a
+  real administrator exists; absence already means required.
 - **`CLERK_SECRET_KEY` on the backend.** Binding a row to a Clerk subject means
   reading the caller's email from Clerk's API. Without it every one of the five
   signs in successfully and is then refused as "not an administrator" — the

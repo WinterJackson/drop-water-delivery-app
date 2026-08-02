@@ -124,11 +124,24 @@ that can never bind.
 
 #### Setting it
 
-The key must come from **the same Clerk application as `CLERK_ISSUER`**. Both
-the local `.env` and all three apps' `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
-(`pk_test_cGV0LWFpcmVkYWxlLTIyLi4u`, which decodes to the instance hostname)
-point at **`pet-airedale-22.clerk.accounts.dev`** — a *development* instance. If
-Render's `CLERK_ISSUER` is that host, take the key from that application.
+The key must come from **the same Clerk application as `CLERK_ISSUER`**. The
+platform authenticates against **`safe-marmot-72.clerk.accounts.dev`**, instance
+`ins_3EVEIgEZGdiqvolZq2ZwKiYVfhS`, the application named **Drop** — a
+*development* instance.
+
+It was migrated there from `pet-airedale-22.clerk.accounts.dev`, which belonged
+to an email account that is no longer accessible. **Render must be updated to
+match**, or the API keeps verifying against a directory nobody can administer:
+
+```
+CLERK_ISSUER=https://safe-marmot-72.clerk.accounts.dev
+CLERK_JWKS_URL=https://safe-marmot-72.clerk.accounts.dev/.well-known/jwks.json
+FRONTEND_CLERK_API_KEY=pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA
+CLERK_SECRET_KEY=<from that application's API keys page>
+```
+
+All four together, in one save. Three of the four out of step with the fourth is
+the failure mode `check_clerk_secret.py` was written to name.
 
 1. Clerk dashboard → select the application whose domain matches
    `CLERK_ISSUER` → **API keys**.
@@ -384,6 +397,32 @@ Two `vepo` strings are **not** worth changing: the Render service hostname
 breaks every deployed app until it is rebuilt and re-released, for infrastructure
 identifiers no customer ever sees. Retire them when you move to your own domain
 and a fresh Firebase project, not before.
+
+### `ADMIN_2FA_REQUIRED` — `false` now, `true` before real staff
+
+**Render only.** It is read by `dependencies/admin_dependencies.py:81` and by
+nothing else. Vercel runs the console, which does not enforce this check at all;
+setting it there does nothing but mislead whoever reads the config next.
+
+| When | Value |
+|---|---|
+| Testing with the five shared-password `+clerk_test` accounts | `ADMIN_2FA_REQUIRED=false` |
+| The moment a real administrator has access | **delete the variable** |
+
+Deleting beats setting `true`, because `true` is already the default — the code
+reads `os.getenv("ADMIN_2FA_REQUIRED", "true") != "false"`, so absence means
+required, and a variable that only ever weakens things is safer gone than set to
+its own default.
+
+The five test accounts have no second factor, so with the default every one of
+them receives `two_factor_required` instead of a dashboard. That refusal is
+correct: this console reads national IDs and approves payouts. Turning it off is
+a deliberate, temporary loosening for accounts that hold no real trust, and it
+must not outlive them.
+
+The check reads a **session claim**, so enabling 2FA on a Clerk account does not
+affect a session that already exists — the administrator must sign out and back
+in for it to take effect.
 
 ### `SMS_WEBHOOK_SECRET` — keep it
 

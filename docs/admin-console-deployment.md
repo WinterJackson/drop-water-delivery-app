@@ -244,39 +244,101 @@ come from the backend, not from Google.
 
 ### Which Clerk application — read this first
 
-There are **two** Clerk applications on this account, and only one of them is the
-platform's identity provider.
+The platform used to authenticate against a Clerk application on an email
+account that is no longer accessible. It has been migrated. There is exactly one
+live instance now:
 
-| | Frontend API domain | Instance id | Used by |
-|---|---|---|---|
-| **The live one** | `pet-airedale-22.clerk.accounts.dev` | `ins_2x8bpcDIKN2T7cuquYzNfDWigYW` | all three apps' `.env` **and** all three `eas.json` production profiles, the backend's `CLERK_ISSUER` / `CLERK_JWKS_URL` / `FRONTEND_CLERK_API_KEY`, and the users already in Neon |
-| The other one | `safe-marmot-72.clerk.accounts.dev` | `ins_3EVEIgEZGdiqvolZq2ZwKiYVfhS` | nothing |
+| | Value |
+|---|---|
+| Application | **Drop** |
+| Frontend API | `safe-marmot-72.clerk.accounts.dev` |
+| Instance id | `ins_3EVEIgEZGdiqvolZq2ZwKiYVfhS` |
+| Publishable key | `pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA` |
 
-**Everything below happens in the `pet-airedale-22` application.** Switch to it
-with the application switcher at the top-left of the Clerk dashboard, then check
-**Configure → Domains → Primary domain** reads `pet-airedale-22.clerk.accounts.dev`
-before you touch anything.
+The retired one was `pet-airedale-22.clerk.accounts.dev`
+(`ins_2x8bpcDIKN2T7cuquYzNfDWigYW`). If that string appears anywhere again, it is
+a mistake.
 
-Take `CLERK_SECRET_KEY` from **that** application's **API keys** page and set it
-in three places: `BackendAPI/.env`, Render, and Vercel. Then:
+> **The publishable key is not a secret and is derivable.** It is literally
+> `pk_test_` + the Frontend API hostname, base64-encoded with a trailing `$`.
+> That is how the two instances were told apart in the first place, and it means
+> you can always check a key without looking it up:
+>
+> ```bash
+> python3 -c "import base64,sys; print(base64.b64decode(sys.argv[1].split('_',2)[2]+'==').decode())" pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA
+> ```
+
+`CLERK_SECRET_KEY` is the one value that cannot be derived. Take it from this
+application's **API keys** page and set it in three places — `BackendAPI/.env`,
+Render, and Vercel — then:
 
 ```bash
 cd BackendAPI && source venv/bin/activate
 python scripts/check_clerk_secret.py
 ```
 
-A key from the *other* application is the worst kind of wrong, because it looks
+A key from a different application is the worst kind of wrong, because it looks
 right: token verification keeps working (that reads `CLERK_JWKS_URL`), and only
 the *binding* fails. Every administrator signs in successfully and is then
 refused as "not an administrator", with nothing in the logs naming the cause.
 That script exists solely to catch this, and it compares instance ids rather than
-trusting the key's appearance — a secret key is an opaque string with no instance
-name in it.
+trusting appearances — a secret key is an opaque string with no instance name in
+it.
 
-The `pet-airedale-22` name is an auto-generated development subdomain. It is not
-customer-visible, it appears in no UI, and it is replaced by your own domain when
-you create a **production** instance. There is nothing to fix about it.
+The `safe-marmot-72` name is an auto-generated development subdomain. It is not
+customer-visible, appears in no UI, and is replaced by your own domain when you
+create a **production** instance. There is nothing to fix about it.
 
+#### What the migration touched
+
+| Where | Variable |
+|---|---|
+| `BackendAPI/.env` | `CLERK_ISSUER`, `CLERK_JWKS_URL`, `FRONTEND_CLERK_API_KEY` |
+| Three apps' `.env` **and** three `eas.json` | `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` |
+| `drop-admin/.env.local` | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` |
+| **Render** — you | the same three as `BackendAPI/.env`, plus `CLERK_SECRET_KEY` |
+| **Vercel** — you | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` |
+
+`FRONTEND_CLERK_API_KEY` is not a stray copy of the publishable key — it is
+passed as the JWT **audience** in `core/security.py:171`. Leaving it on the old
+value is a check that quietly stops meaning anything.
+
+#### Accounts the migration orphans
+
+A Clerk subject only exists inside the instance that minted it, and Clerk cannot
+translate one into another — the same person signing into the new application
+gets an unrelated id. So any stored `clerk_id` from the retired instance now
+points at nobody.
+
+```bash
+python scripts/clerk_rebind.py audit
+```
+
+On this database that is **two rows**, both in `Users`: one seed record
+(`ngong_customer@example.com`) that was never a person, and one real account,
+`winterjacksonwj@gmail.com`. Every rider, vendor, administrator and staff row is
+unbound, so nothing else is affected.
+
+`clerk_id` is `NOT NULL`, so the column cannot simply be cleared. Sign in once on
+the customer app against the new instance, read the new subject from the Clerk
+dashboard (Users → the account → **User ID**), then:
+
+```bash
+python scripts/clerk_rebind.py repoint --table Users \
+    --email winterjacksonwj@gmail.com --clerk-id user_<new subject>          # dry run
+python scripts/clerk_rebind.py repoint --table Users \
+    --email winterjacksonwj@gmail.com --clerk-id user_<new subject> --apply
+```
+
+The five **administrator** rows need none of this — they bind by email on first
+sign-in, so they attach themselves to the new accounts with no intervention.
+
+#### Everyone signed in right now is signed out
+
+Tokens minted by the retired instance no longer verify against the new JWKS. Any
+app session open on a phone will start returning 401 and the user re-signs in.
+With no released builds and one real account that is a non-event, but it is worth
+knowing rather than discovering.
 
 ### Why `424242` needs different addresses
 
