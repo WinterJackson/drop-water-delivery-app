@@ -93,18 +93,18 @@ export default async function OverviewPage() {
     {
       href: "/operations/orders",
       label: "Orders stuck",
-      count: counts.orders_stuck ?? 0,
+      count: counts.orders_stuck,
       hint: "Paused for a decision, or accepted and never dispatched",
       icon: AlertTriangle,
-      tone: (counts.orders_stuck ?? 0) > 0 ? ("warning" as const) : ("neutral" as const),
+      tone: (counts.orders_stuck ?? -1) > 0 ? ("warning" as const) : ("neutral" as const),
     },
     {
       href: "/operations/disputes",
       label: "Bottle disputes open",
-      count: counts.disputes ?? 0,
+      count: counts.disputes,
       hint: "A rider and a vendor disagree about the empties",
       icon: PackageSearch,
-      tone: (counts.disputes ?? 0) > 0 ? ("warning" as const) : ("neutral" as const),
+      tone: (counts.disputes ?? -1) > 0 ? ("warning" as const) : ("neutral" as const),
     },
     {
       href: "/support",
@@ -112,18 +112,18 @@ export default async function OverviewPage() {
       // already replied to is `pending` and waiting on the requester, so it is
       // not something anyone here can act on this morning.
       label: "Support tickets unanswered",
-      count: counts.support ?? 0,
+      count: counts.support,
       hint: "Nobody has replied to these yet",
       icon: LifeBuoy,
-      tone: (counts.support ?? 0) > 0 ? ("warning" as const) : ("neutral" as const),
+      tone: (counts.support ?? -1) > 0 ? ("warning" as const) : ("neutral" as const),
     },
     {
       href: "/operations/vendors",
       label: "Stores awaiting verification",
-      count: counts.vendor_verification ?? 0,
+      count: counts.vendor_verification,
       hint: "Confirm the paperwork before they trade at scale",
       icon: Store,
-      tone: (counts.vendor_verification ?? 0) > 0 ? ("warning" as const) : ("neutral" as const),
+      tone: (counts.vendor_verification ?? -1) > 0 ? ("warning" as const) : ("neutral" as const),
     },
     {
       href: "/finance/payouts",
@@ -143,7 +143,12 @@ export default async function OverviewPage() {
     },
   ];
 
-  const waiting = queue.filter((item) => item.count > 0);
+  // `undefined` means the caller may not open that queue, and `0` means it is
+  // clear. Both are hidden here, but they are hidden for different reasons and
+  // the distinction has to survive: flattening "not yours" to zero would put a
+  // badge on a page that refuses the caller the moment anyone relaxes this
+  // filter, leaking the size of a table they cannot see.
+  const waiting = queue.filter((item) => item.count !== undefined && item.count > 0);
   const points = pulse?.timeseries.points ?? [];
 
   // Sparklines are drawn from the same gap-filled series the chart uses, so a

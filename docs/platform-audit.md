@@ -114,9 +114,11 @@ only operational page that does.
 
 ## D. Data and correctness findings
 
-- **`Admin_Audit_Log` is empty (0 rows)** despite five administrators existing.
-  Either nothing audited has happened yet, or writes are not landing. Worth
-  confirming with a deliberate action before trusting the audit trail.
+- **`Admin_Audit_Log` is empty (0 rows) — and that is correct.** Re-checked
+  properly: every mutating admin route calls `record_audit`, across all eight
+  modules. The table is empty because no audited action has been taken on this
+  database yet, not because writes are missing. The original finding was drawn
+  from too narrow a grep.
 - **All 30 riders are `kyc_status='unsubmitted'` and none is bound to Clerk**, so
   coverage correctly reports 21/21 stores uncovered. Every dispatch path is
   therefore untested against real data.
@@ -132,11 +134,18 @@ only operational page that does.
 
 Ordered by value per unit of work.
 
-1. **Aggregate headers on the eight bare pages.** Highest value, lowest risk —
-   `/orders/counts` and `/finance/summary` already exist; the rest are one
-   service module. *(In progress — orders done, see below.)*
-2. **Failed-webhook reconciliation screen.** The only finding that silently
-   loses customer money.
+1. ~~**Aggregate headers on the bare pages.**~~ **Done** for orders, rider KYC,
+   vendor verification, disputes, payouts and support, plus the new
+   reconciliation screen. `services/admin_queue_service.py` computes depth, age,
+   throughput and outcome for every queue from one uniform shape, and
+   `GET /queues/stats` serves them capability-filtered like `/nav/counts` — a
+   missing key means "not yours", never zero. Two tests hold the line: one fails
+   the build if a queue page renders no aggregate, the other if a figure is
+   coerced with `?? 0`.
+
+   Still bare: `people/[kind]` and `platform/audit`.
+2. ~~**Failed-webhook reconciliation screen.**~~ **Done.** See
+   `services/admin_reconciliation_service.py` and `/finance/reconciliation`.
 3. **Bottle ledger views.** Makes dispute resolution defensible.
 4. **Catalogue moderation.**
 5. **Rider and vendor performance.** Turns suspension from a hunch into evidence.

@@ -57,7 +57,7 @@ from models.payout_model import Payout
 from models.platform_setting_model import SupportTicket
 from models.user_model import User
 from models.vendor_model import Vendor
-from services import admin_service
+from services import admin_queue_service, admin_service
 from services.notification_service import create_notification
 from utils.s3_utils import generate_presigned_url
 
@@ -864,3 +864,40 @@ async def audit_log(
         "items": items,
         "next_cursor": items[-1]["id"] if len(items) == limit else None,
     }
+
+
+@router.get("/queues/stats", summary="Depth, age and outcome for every queue")
+@limiter.limit("120/minute")
+async def queue_stats(
+    request: Request,
+    access: AdminAccess = Depends(current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """One figure set per queue **the caller may actually open**, and none of the rest.
+
+    Same contract as `/nav/counts`, for the same reason: a header reading
+    "21 waiting" above a page that would refuse the caller leaks the size of a
+    table they cannot see. A missing key means "not yours", never zero.
+
+    Assembled from `access.may(...)` rather than gated by one `require`, because
+    demanding a single capability up front would refuse a support agent the
+    support numbers they are entitled to.
+    """
+    stats: dict[str, dict] = {}
+
+    if access.may(PERM_RIDERS_READ):
+        stats["rider_kyc"] = await admin_queue_service.rider_kyc(db)
+
+    if access.may(PERM_VENDORS_READ):
+        stats["vendor_verification"] = await admin_queue_service.vendor_verification(db)
+
+    if access.may(PERM_DISPUTES_READ):
+        stats["disputes"] = await admin_queue_service.disputes(db)
+
+    if access.may(PERM_FINANCE_READ):
+        stats["payouts"] = await admin_queue_service.payouts(db)
+
+    if access.may(PERM_SUPPORT_READ):
+        stats["support"] = await admin_queue_service.support(db)
+
+    return stats

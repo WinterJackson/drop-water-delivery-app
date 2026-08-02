@@ -1,10 +1,11 @@
 import { Inbox } from "lucide-react";
 import Link from "next/link";
 
-import { Badge, Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import type { QueueStats } from "@/lib/queue-stats";
 import { cn } from "@/lib/utils/cn";
-import { formatNumber, timeAgo } from "@/lib/utils/format";
+import { formatDuration, formatNumber, timeAgo } from "@/lib/utils/format";
 
 export const metadata = { title: "Support" };
 
@@ -56,10 +57,12 @@ export default async function SupportPage({
 
   let data: { items: Ticket[] };
   let counts: Record<string, number>;
+  let stats: QueueStats = {};
   try {
-    [data, counts] = await Promise.all([
+    [data, counts, stats] = await Promise.all([
       get<{ items: Ticket[] }>(`/api/admin/support/tickets?${query.toString()}`),
       get<Record<string, number>>("/api/admin/support/counts"),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -69,6 +72,7 @@ export default async function SupportPage({
   const unanswered = data.items.filter(
     (ticket) => ticket.awaiting_first_reply && (ticket.age_hours ?? 0) > FIRST_REPLY_TARGET_HOURS,
   ).length;
+  const support = stats.support;
 
   return (
     <div className="space-y-6">
@@ -88,6 +92,41 @@ export default async function SupportPage({
           {formatNumber(unanswered)} ticket{unanswered === 1 ? " has" : "s have"} had no
           reply for over {FIRST_REPLY_TARGET_HOURS} hours.
         </p>
+      ) : null}
+
+
+      {support ? (
+        <section aria-label="Queue health">
+          <h2 className="sr-only">Queue health</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Open"
+              value={formatNumber(support.waiting)}
+              hint={
+                support.oldest_wait_minutes === null
+                  ? "Nothing waiting"
+                  : `Oldest open ${formatDuration(support.oldest_wait_minutes)}`
+              }
+              tone={support.waiting > 0 ? "warning" : "neutral"}
+            />
+            <Stat
+              label="Nobody has picked up"
+              value={formatNumber(support.unassigned)}
+              hint="Open and unassigned — the ones that fall between people"
+              tone={support.unassigned > 0 ? "danger" : "neutral"}
+            />
+            <Stat
+              label="Waiting on the requester"
+              value={formatNumber(support.awaiting_requester)}
+              hint="Replied to. Deliberately not counted as open — nobody can act on these"
+            />
+            <Stat
+              label="Closed in 24h"
+              value={formatNumber(support.resolved_24h)}
+              hint={`Of ${formatNumber(support.total)} tickets ever raised`}
+            />
+          </div>
+        </section>
       ) : null}
 
       <nav aria-label="Filter tickets" className="scroll-x -mx-1 px-1">

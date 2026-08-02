@@ -1,9 +1,11 @@
-import { BadgeCheck } from "lucide-react";
+import { AlarmClock, BadgeCheck, GaugeCircle, UserRoundX, Users } from "lucide-react";
 import Link from "next/link";
 
-import { Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { formatDuration, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
+import type { QueueStats } from "@/lib/queue-stats";
 import { ReviewCard, type QueueRider } from "./ReviewCard";
 
 export const metadata = { title: "Rider verification" };
@@ -26,11 +28,15 @@ export default async function KycQueuePage({
 
   let queue: Queue;
   let me: AdminMe;
+  // Header figures are context. Wrapped in their own catch so a slow aggregate
+  // cannot blank the queue somebody opened this page to work.
+  let stats: QueueStats = {};
   try {
-    // Two calls, one round trip each way — they do not depend on each other.
-    [queue, me] = await Promise.all([
+    // Three calls, one round trip each way — they do not depend on each other.
+    [queue, me, stats] = await Promise.all([
       get<Queue>(`/api/admin/kyc/queue?status=${active}`),
       get<AdminMe>("/api/admin/me"),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -39,6 +45,7 @@ export default async function KycQueuePage({
 
   const canReview = can(me, PERMISSIONS.ridersKycReview);
   const canViewPii = can(me, PERMISSIONS.piiView);
+  const kyc = stats.rider_kyc;
 
   return (
     <div className="space-y-6">
@@ -49,6 +56,59 @@ export default async function KycQueuePage({
           approved. Oldest first.
         </p>
       </div>
+
+      {kyc ? (
+        <section aria-label="Queue health">
+          <h2 className="sr-only">Queue health</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Waiting for review"
+              value={formatNumber(kyc.waiting)}
+              hint={
+                kyc.oldest_wait_minutes === null
+                  ? "Queue is clear"
+                  : `Oldest waiting ${formatDuration(kyc.oldest_wait_minutes)}`
+              }
+              tone={kyc.waiting > 0 ? "warning" : "neutral"}
+              icon={<AlarmClock className="h-4 w-4" />}
+            />
+            <Stat
+              label="Decided in 24h"
+              value={formatNumber(kyc.decided_24h)}
+              hint="Throughput — read the queue depth against this"
+              icon={<GaugeCircle className="h-4 w-4" />}
+            />
+            <Stat
+              label="Approval rate"
+              value={kyc.approval_rate === null ? "—" : `${kyc.approval_rate}%`}
+              hint={
+                kyc.approval_rate === null
+                  ? "Nothing decided yet, so there is no rate"
+                  : `${formatNumber(kyc.approved)} approved · ${formatNumber(kyc.rejected)} rejected`
+              }
+              icon={<BadgeCheck className="h-4 w-4" />}
+            />
+            <Stat
+              label="Signed up, never applied"
+              value={formatNumber(kyc.never_submitted)}
+              hint={`Of ${formatNumber(kyc.total)} riders — acquired and then lost`}
+              tone={kyc.never_submitted > kyc.total / 2 ? "warning" : "neutral"}
+              icon={<UserRoundX className="h-4 w-4" />}
+            />
+          </div>
+
+          {kyc.never_submitted === kyc.total && kyc.total > 0 ? (
+            <p className="mt-3 flex items-start gap-2 text-xs text-[var(--warning)]">
+              <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                Every rider on the platform has signed up and submitted nothing.
+                No rider can accept a delivery, so every store reads as uncovered
+                on the live map — that is the same fact, not two problems.
+              </span>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <nav aria-label="Filter by status" className="scroll-x -mx-1 px-1">
         <ul className="flex gap-1">

@@ -1,9 +1,11 @@
-import { Store } from "lucide-react";
+import { AlarmClock, BadgeCheck, Store, StoreIcon } from "lucide-react";
 import Link from "next/link";
 
-import { Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { formatDuration, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
+import type { QueueStats } from "@/lib/queue-stats";
 import { VerificationCard, type QueueVendor } from "./VerificationCard";
 
 export const metadata = { title: "Vendor verification" };
@@ -26,10 +28,12 @@ export default async function VendorVerificationPage({
 
   let data: { items: QueueVendor[] };
   let me: AdminMe;
+  let stats: QueueStats = {};
   try {
-    [data, me] = await Promise.all([
+    [data, me, stats] = await Promise.all([
       get<{ items: QueueVendor[] }>(`/api/admin/people/vendors?status=${view}&limit=100`),
       get<AdminMe>("/api/admin/me"),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -37,6 +41,49 @@ export default async function VendorVerificationPage({
   }
 
   const canApprove = can(me, PERMISSIONS.vendorsApprove);
+  const vendors = stats.vendor_verification;
+
+  const header = vendors ? (
+    <section aria-label="Queue health">
+      <h2 className="sr-only">Queue health</h2>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          label="Awaiting review"
+          value={formatNumber(vendors.waiting)}
+          hint={
+            vendors.oldest_wait_minutes === null
+              ? "No wait time recorded"
+              : `Oldest waiting ${formatDuration(vendors.oldest_wait_minutes)}`
+          }
+          tone={vendors.waiting > 0 ? "warning" : "neutral"}
+          icon={<AlarmClock className="h-4 w-4" />}
+        />
+        <Stat
+          label="Verified"
+          value={formatNumber(vendors.approved)}
+          hint={`Of ${formatNumber(vendors.total)} stores on the platform`}
+          icon={<BadgeCheck className="h-4 w-4" />}
+        />
+        <Stat
+          label="Approval rate"
+          value={vendors.approval_rate === null ? "—" : `${vendors.approval_rate}%`}
+          hint={
+            vendors.approval_rate === null
+              ? "Nothing decided yet, so there is no rate"
+              : `${formatNumber(vendors.approved)} approved · ${formatNumber(vendors.rejected)} rejected`
+          }
+          icon={<StoreIcon className="h-4 w-4" />}
+        />
+        <Stat
+          label="Suspended"
+          value={formatNumber(vendors.suspended)}
+          hint="Deactivated stores — invisible to customers"
+          tone={vendors.suspended > 0 ? "warning" : "neutral"}
+          icon={<Store className="h-4 w-4" />}
+        />
+      </div>
+    </section>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -62,6 +109,8 @@ export default async function VendorVerificationPage({
           .
         </p>
       ) : null}
+
+      {header}
 
       <nav aria-label="Verification status" className="scroll-x -mx-1 px-1">
         <ul className="flex gap-1">

@@ -518,3 +518,56 @@ def test_a_missing_maps_key_explains_itself():
     assert "loadError" in source, "the load failure is not surfaced at all"
     loader = (ADMIN / "lib" / "maps" / "google-maps.ts").read_text()
     assert "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY is not set" in loader
+
+
+def test_no_operational_page_is_only_a_table():
+    """Every queue page must carry aggregate context, not just rows.
+
+    A list answers "what is in the queue" and never "is the queue healthy",
+    which is the only question a supervisor has. Eight of thirteen pages were a
+    table and a search box; this fails the build if one regresses to that.
+
+    `Stat` is the marker because it is what the shared header is built from —
+    a page that renders one is a page that has told the reader something about
+    the shape of the work, not just its contents.
+    """
+    QUEUE_PAGES = [
+        "operations/orders",
+        "operations/kyc",
+        "operations/vendors",
+        "operations/disputes",
+        "finance/payouts",
+        "finance/reconciliation",
+        "support",
+    ]
+
+    bare = []
+    for route in QUEUE_PAGES:
+        path = ADMIN / "app" / "(dashboard)" / route / "page.tsx"
+        if not path.exists():
+            bare.append(f"{route} (missing)")
+            continue
+        if "<Stat" not in path.read_text():
+            bare.append(route)
+
+    assert bare == [], f"these queue pages render no aggregate: {bare}"
+
+
+def test_queue_headers_never_coerce_a_missing_figure_to_zero():
+    """`/queues/stats` omits any queue the caller may not open, and returns null
+    for a figure that is genuinely unanswerable — no oldest item because nothing
+    waits, no approval rate because nothing was decided.
+
+    `?? 0` on either would invent a number: a header reading "0 waiting" above a
+    page that would refuse the caller, or "0%" approval where the truth is that
+    no decision has ever been made.
+    """
+    import re
+
+    offenders = []
+    for path in _sources("app/(dashboard)/**/page.tsx"):
+        text = _code_only(path)
+        for match in re.finditer(r"(stats|counts)\.\w+[\w.]*\s*\?\?\s*0", text):
+            offenders.append(f"{path.relative_to(ADMIN).as_posix()}: {match.group(0)}")
+
+    assert offenders == [], f"queue figures coerced to zero: {offenders}"

@@ -1,9 +1,11 @@
-import { Banknote } from "lucide-react";
+import { AlarmClock, Banknote, CircleAlert, TrendingUp, Wallet } from "lucide-react";
 import Link from "next/link";
 
-import { Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
+import type { QueueStats } from "@/lib/queue-stats";
 import { PayoutCard, PayoutRow, type Payout } from "./PayoutRow";
 
 export const metadata = { title: "Payouts" };
@@ -27,10 +29,14 @@ export default async function PayoutsPage({
 
   let list: PayoutList;
   let me: AdminMe;
+  // Context, in its own catch — a slow aggregate must not hide the payout
+  // somebody opened this page to approve.
+  let stats: QueueStats = {};
   try {
-    [list, me] = await Promise.all([
+    [list, me, stats] = await Promise.all([
       get<PayoutList>(`/api/admin/payouts?status=${active}`),
       get<AdminMe>("/api/admin/me"),
+      get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -39,6 +45,7 @@ export default async function PayoutsPage({
 
   const canDecide = can(me, PERMISSIONS.financePayoutApprove);
   const canSeeDestination = can(me, PERMISSIONS.piiView);
+  const payouts = stats.payouts;
 
   return (
     <div className="space-y-6">
@@ -48,6 +55,57 @@ export default async function PayoutsPage({
           Money leaving the platform to vendors and riders.
         </p>
       </div>
+
+      {payouts ? (
+        <section aria-label="Payout position">
+          <h2 className="sr-only">Payout position</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Awaiting approval"
+              value={formatMoney(payouts.waiting_value)}
+              hint={`${formatNumber(payouts.waiting)} request(s) · largest ${formatMoney(payouts.largest_pending)}`}
+              tone={payouts.waiting > 0 ? "warning" : "neutral"}
+              icon={<Wallet className="h-4 w-4" />}
+            />
+            <Stat
+              label="Oldest request"
+              value={
+                payouts.oldest_wait_minutes === null
+                  ? "—"
+                  : formatDuration(payouts.oldest_wait_minutes)
+              }
+              hint={
+                payouts.oldest_wait_minutes === null
+                  ? "Nothing waiting"
+                  : "Somebody has been waiting to be paid this long"
+              }
+              tone={
+                payouts.oldest_wait_minutes !== null && payouts.oldest_wait_minutes > 2880
+                  ? "danger"
+                  : "neutral"
+              }
+              icon={<AlarmClock className="h-4 w-4" />}
+            />
+            <Stat
+              label="Paid in 24h"
+              value={formatMoney(payouts.paid_24h_value)}
+              hint={`${formatNumber(payouts.paid_24h)} settled · ${formatNumber(payouts.processing)} in flight`}
+              icon={<TrendingUp className="h-4 w-4" />}
+            />
+            <Stat
+              label="Failed"
+              value={formatMoney(payouts.failed_value)}
+              hint={
+                payouts.failed > 0
+                  ? `${formatNumber(payouts.failed)} people believe they were paid and were not`
+                  : "Nothing has failed"
+              }
+              tone={payouts.failed > 0 ? "danger" : "neutral"}
+              icon={<CircleAlert className="h-4 w-4" />}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <nav aria-label="Filter by status" className="scroll-x -mx-1 px-1">
         <ul className="flex gap-1">

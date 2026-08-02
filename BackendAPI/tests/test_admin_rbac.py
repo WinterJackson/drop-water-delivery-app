@@ -128,10 +128,12 @@ def test_current_admin_handlers_narrow_to_a_capability_themselves():
     * `nav_counts` returns one figure per queue the caller may actually work,
       and omits the rest. Requiring, say, `finance.read` for the whole call
       would leave a support agent with no dispute badge.
+    * `queue_stats` is `nav_counts` with more detail behind each figure and the
+      identical contract — a missing key means "not yours", never zero.
 
     Anything else taking `current_admin` must narrow explicitly.
     """
-    EXEMPT = {"admin_me", "search", "nav_counts"}
+    EXEMPT = {"admin_me", "search", "nav_counts", "queue_stats"}
 
     offenders = []
     for path in ADMIN_ROUTE_MODULES:
