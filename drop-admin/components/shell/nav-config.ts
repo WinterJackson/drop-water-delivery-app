@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Boxes,
   FileWarning,
   BadgeCheck,
   Banknote,
@@ -120,6 +121,15 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSIONS.geoView,
         mobilePriority: 6,
         blurb: "Where riders, stores, demand and live orders actually are.",
+      },
+      {
+        href: "/operations/catalogue",
+        label: "Catalogue",
+        short: "Products",
+        icon: Boxes,
+        permission: PERMISSIONS.vendorsRead,
+        mobilePriority: 10,
+        blurb: "Every product on sale, and the prices that look wrong.",
       },
       {
         href: "/operations/vendors",
