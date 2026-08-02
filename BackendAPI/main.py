@@ -277,6 +277,7 @@ app.include_router(vendor_rider_routes.router, prefix="/api/vendor", tags=["Vend
 from routes import (
     admin_routes,
     admin_analytics_routes,
+    admin_bottle_routes,
     admin_catalogue_routes,
     admin_config_routes,
     admin_finance_routes,
@@ -297,6 +298,7 @@ app.include_router(admin_geo_routes.router, prefix="/api/admin", tags=["Admin Ma
 app.include_router(admin_support_routes.router, prefix="/api/admin", tags=["Admin Support"])
 app.include_router(admin_finance_routes.router, prefix="/api/admin", tags=["Admin Finance"])
 app.include_router(admin_catalogue_routes.router, prefix="/api/admin", tags=["Admin Catalogue"])
+app.include_router(admin_bottle_routes.router, prefix="/api/admin", tags=["Admin Bottles"])
 
 # App-facing support intake. Without this the ticket queue is an inbox
 # nobody can write to.

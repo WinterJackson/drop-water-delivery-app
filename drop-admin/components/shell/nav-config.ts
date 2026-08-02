@@ -13,6 +13,7 @@ import {
   // `Map` constructor for the whole module.
   Map as MapIcon,
   Megaphone,
+  Package,
   PackageSearch,
   ScrollText,
   Settings,
@@ -131,6 +132,15 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSIONS.vendorsRead,
         mobilePriority: 10,
         blurb: "Every product on sale, and the prices that look wrong.",
+      },
+      {
+        href: "/operations/bottles",
+        label: "Bottle float",
+        short: "Bottles",
+        icon: Package,
+        permission: PERMISSIONS.ridersRead,
+        mobilePriority: 14,
+        blurb: "Empties riders are holding, and what the deposits are worth.",
       },
       {
         href: "/operations/vendors",

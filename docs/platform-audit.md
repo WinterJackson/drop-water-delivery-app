@@ -146,9 +146,20 @@ Ordered by value per unit of work.
    Still bare: `people/[kind]` and `platform/audit`.
 2. ~~**Failed-webhook reconciliation screen.**~~ **Done.** See
    `services/admin_reconciliation_service.py` and `/finance/reconciliation`.
-3. **Bottle ledger views.** Makes dispute resolution defensible.
-4. **Catalogue moderation.**
-5. **Rider and vendor performance.** Turns suspension from a hunch into evidence.
+3. ~~**Bottle ledger views.**~~ **Done.** `services/admin_bottle_service.py`
+   and `/operations/bottles`. The float is netted per (rider, vendor, capacity)
+   before it is totalled — a credit at one store must never cancel a debt at
+   another — and priced from `bottle_deposit_by_capacity`, the same deposit the
+   customer paid. `drift()` checks the invariant `bottle_ledger_service`
+   declares and nothing enforced: `SUM(quantity) == pending_{n}L_empties`. The
+   repair rewrites the counter from the ledger, never the reverse, and is a
+   button rather than automatic because drift means something wrote a counter
+   without a ledger row.
+4. ~~**Catalogue moderation.**~~ **Done.** `/operations/catalogue`.
+5. ~~**Rider and vendor performance.**~~ **Done.** `/people/performance`. Every
+   rate carries its denominator and nothing is ranked below five finished
+   orders; below that the console writes "under 5 orders" rather than a figure
+   it would have to caveat.
 6. **Review moderation.**
 7. **Refund and payout reconciliation.**
 8. **Delivery replay from `Order_Tracking_Logs`.**
