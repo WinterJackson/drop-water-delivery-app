@@ -29,7 +29,7 @@ from models.admin_model import (
     PERM_VENDORS_READ,
     PERM_VENDORS_SUSPEND,
 )
-from services import admin_people_service as people
+from services import admin_people_service as people, admin_performance_service
 from services import admin_service
 from services.notification_service import create_notification
 
@@ -310,3 +310,25 @@ async def review_vendor_verification(
 
     await db.commit()
     return {"id": str(vendor.id), "verification_status": vendor.verification_status}
+
+
+@router.get("/performance/riders", summary="Rider throughput and reliability")
+@limiter.limit("60/minute")
+async def rider_performance(
+    request: Request,
+    limit: int = Query(100, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
+):
+    return await admin_performance_service.riders(db, limit=limit)
+
+
+@router.get("/performance/vendors", summary="Store volume and fulfilment")
+@limiter.limit("60/minute")
+async def vendor_performance(
+    request: Request,
+    limit: int = Query(100, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_VENDORS_READ)),
+):
+    return await admin_performance_service.vendors(db, limit=limit)

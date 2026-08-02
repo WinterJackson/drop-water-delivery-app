@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Gauge,
   Boxes,
   FileWarning,
   BadgeCheck,
@@ -171,6 +172,15 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "People",
     items: [
+      {
+        href: "/people/performance",
+        label: "Performance",
+        short: "Perf",
+        icon: Gauge,
+        permission: PERMISSIONS.ridersRead,
+        mobilePriority: 11,
+        blurb: "Who is delivering, who is selling, and how reliably.",
+      },
       {
         href: "/people/customers",
         label: "Customers",
