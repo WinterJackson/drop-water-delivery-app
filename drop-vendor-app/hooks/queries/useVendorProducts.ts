@@ -1,54 +1,31 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { useAuth } from "@clerk/clerk-expo";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { retryTransientOnly } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
+import { useInfiniteQuery } from "@tanstack/react-query";
+
+/** Same honest envelope as `/orders` — see `VendorOrdersPage`. */
+export interface VendorProductsPage {
+	items: any[];
+	limit: number;
+	offset: number;
+	has_more: boolean;
+}
 
 export function useVendorProducts(searchQuery: string = "", stockFilter: string = "All", limit: number = 20) {
-	const { getToken, signOut } = useAuth();
+	const { get } = useApiRequest();
 
 	return useInfiniteQuery({
 		queryKey: ["vendorProducts", searchQuery, stockFilter, limit],
-		queryFn: async ({ pageParam = 0 }) => {
-			const token = await getToken();
-			if (!token) throw new Error("No token found");
+		queryFn: ({ pageParam = 0 }) => {
+			const qs = new URLSearchParams({ limit: String(limit), offset: String(pageParam) });
+			if (searchQuery.trim().length > 1) qs.append("search_query", searchQuery.trim());
+			if (stockFilter !== "All") qs.append("stock_filter", stockFilter);
 
-            const queryParams = new URLSearchParams({
-                limit: limit.toString(),
-                offset: pageParam.toString(),
-            });
-
-            if (searchQuery.trim().length > 1) {
-                queryParams.append("search_query", searchQuery.trim());
-            }
-
-            if (stockFilter !== "All") {
-                queryParams.append("stock_filter", stockFilter);
-            }
-
-            const url = `${VendorApiRoutes.GetProducts.path}?${queryParams.toString()}`;
-
-			const response = await fetch(url, {
-				method: "GET",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					"Content-Type": "application/json",
-				},
-			});
-
-            if (response.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-			if (!response.ok) {
-				throw new Error("Network response was not ok");
-			}
-
-			const data = await response.json();
-			return data.pages?.[0] || [];
+			return get<VendorProductsPage>(`${VendorApiRoutes.GetProducts.path}?${qs.toString()}`);
 		},
 		initialPageParam: 0,
-		getNextPageParam: (lastPage, allPages) => {
-			// If the last page has fewer items than the limit, we've reached the end
-			if (!lastPage || lastPage.length < limit) return undefined;
-			
-			// Otherwise, offset is the total number of items loaded so far
-			return allPages.flat().length;
-		},
+		getNextPageParam: (lastPage) =>
+			lastPage?.has_more ? (lastPage.offset ?? 0) + (lastPage.limit ?? limit) : undefined,
+		retry: retryTransientOnly(),
 	});
 }

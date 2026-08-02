@@ -64,6 +64,9 @@ pytest
 pytest-asyncio
 pytest-mock
 respx
+# tests/conftest.py runs the suite against sqlite+aiosqlite. Without this the
+# whole suite errors at collection on a clean checkout.
+aiosqlite
 sentry-sdk[fastapi]==2.1.1
 asgi-correlation-id==4.3.1
 prometheus-fastapi-instrumentator==7.0.0

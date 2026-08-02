@@ -1,8 +1,9 @@
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState } from "react";
 import { View, Text, StatusBar, FlatList, RefreshControl, Image, TouchableOpacity, ActivityIndicator, TextInput, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useRouter } from "expo-router";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
@@ -19,7 +20,8 @@ const FlashList = OriginalFlashList as any;
 export default function MyVendors() {
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+
+  const { get, del } = useApiRequest();
   const router = useRouter();
   
   const [vendors, setVendors] = useState<any[]>([]);
@@ -31,21 +33,11 @@ export default function MyVendors() {
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
   const fetchRegisteredVendors = async (search?: string) => {
-    const token = await getToken();
     try {
-      const route = RiderApiRoutes.RegisteredVendors(search);
-      const res = await fetch(route.path, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setVendors(data);
-      } else {
-        Toast.error("Error", "Failed to fetch vendors");
-      }
+      setVendors(await get<any[]>(RiderApiRoutes.RegisteredVendors(search).path));
     } catch (e) {
-      if (__DEV__) console.error(e);
-      Toast.error("Error", "Network connection failed");
+      if (e instanceof ApiError && e.status === 401) return;
+      Toast.error("Error", errorMessage(e, "Failed to fetch vendors"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -72,22 +64,11 @@ export default function MyVendors() {
           Popup.hide();
           setWithdrawingId(vendorId);
           try {
-            const token = await getToken();
-            const route = RiderApiRoutes.WithdrawApplication(vendorId);
-            const res = await fetch(route.path, {
-              method: route.method,
-              headers: { Authorization: `Bearer ${token}` }
-            });
-
-            if (res.ok) {
-              Toast.success("Success", "Application withdrawn");
-              setVendors(prev => prev.filter(v => v.vendor_id !== vendorId));
-            } else {
-              const data = await res.json();
-              Toast.error("Cannot Withdraw", data.detail || "Action failed");
-            }
+            await del(RiderApiRoutes.WithdrawApplication(vendorId).path);
+            Toast.success("Success", "Application withdrawn");
+            setVendors(prev => prev.filter(v => v.vendor_id !== vendorId));
           } catch (e) {
-            Toast.error("Error", "Network connection failed");
+            Toast.error("Cannot Withdraw", errorMessage(e, "Action failed"));
           } finally {
             setWithdrawingId(null);
           }

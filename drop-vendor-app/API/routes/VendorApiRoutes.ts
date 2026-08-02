@@ -2,7 +2,7 @@
 
 interface ApiRoute {
   path: string;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 }
 
 const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
@@ -53,6 +53,27 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/vendor/orders`,
     method: "GET",
   } as const satisfies ApiRoute,
+  /**
+   * One order with its items, customer and rider.
+   *
+   * `OrderDetail` used to find its order by scanning the list `GetOrders` had
+   * already returned, so anything past the first page rendered "Order not
+   * found" — including live orders reached from a search result.
+   */
+  GetOrder: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/vendor/orders/${id}`,
+    method: "GET",
+  }),
+  /**
+   * Why an order is parked in `pending_review` or `mismatch_pending` — the
+   * rider's stated reason and their photographs. Neither state appeared
+   * anywhere in this app before; the order showed a blank pill and the vendor
+   * had no way to see what was being reviewed.
+   */
+  GetOrderReview: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/vendor/orders/${id}/review`,
+    method: "GET",
+  }),
   UpdateOrderStatus: (id: string): ApiRoute => ({
     path: `${BASE_URL}/api/vendor/orders/${id}/status`,
     method: "PUT",
@@ -65,6 +86,28 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/vendor/orders/${id}/assign-rider`,
     method: "PUT",
   }),
+  // --- Uploads ---
+  /**
+   * Product photos and the store avatar. Replaces an unsigned Cloudinary preset
+   * that shipped in the app bundle, where anyone who unzipped the APK could
+   * upload arbitrary files to the account. Returns an S3 key, which the backend
+   * presigns on the way out.
+   */
+  UploadImage: {
+    path: `${BASE_URL}/api/vendor/upload-image`,
+    method: "POST",
+  } as const satisfies ApiRoute,
+  // --- Wallet summary ---
+  /**
+   * Balance, float committed to open cash orders, and what is actually
+   * withdrawable. The app used to show the raw `wallet_balance`, so a refusal
+   * from `POST /api/wallet/withdraw` read as the platform withholding money it
+   * had just displayed.
+   */
+  GetWalletSummary: {
+    path: `${BASE_URL}/api/vendor/wallet-summary`,
+    method: "GET",
+  } as const satisfies ApiRoute,
   // --- Dashboard ---
   GetDashboard: {
     path: `${BASE_URL}/api/vendor/dashboard`,
@@ -151,10 +194,59 @@ const VendorApiRoutes = {
     method: "GET",
   } as const satisfies ApiRoute,
   // --- Staff Management ---
-  AssignStaff: (email: string): ApiRoute => ({
-    path: `${BASE_URL}/api/vendor/staff?email=${encodeURIComponent(email)}`,
-    method: "PUT",
+  /**
+   * Staff are `Vendor_Staff` rows now, not `Vendor.staff_clerk_id`.
+   *
+   * That column held one id and was UNIQUE platform-wide, so a store could have
+   * one staff member, adding a second silently replaced the first, and one
+   * person could work for exactly one store on the whole platform — behind a
+   * screen called "Manage Staff". Access was also all-or-nothing: handing
+   * someone the till handed them the catalogue and the wallet balance.
+   */
+  GetStaff: {
+    path: `${BASE_URL}/api/vendor/staff`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  InviteStaff: {
+    path: `${BASE_URL}/api/vendor/staff`,
+    method: "POST",
+  } as const satisfies ApiRoute,
+  UpdateStaffPermissions: (staffId: string): ApiRoute => ({
+    path: `${BASE_URL}/api/vendor/staff/${staffId}`,
+    method: "PATCH",
   }),
+  RevokeStaff: (staffId: string): ApiRoute => ({
+    path: `${BASE_URL}/api/vendor/staff/${staffId}`,
+    method: "DELETE",
+  }),
+  // --- Support ---
+  //
+  // `user_type=vendor` names the account being acted on, exactly as the
+  // notification routes do. The *store* comes from the `X-Store-Id` header the
+  // API client already sends, so an owner with two branches files against the
+  // one they are looking at — and a staff member, who holds no `clerk_id` on any
+  // Vendor row, resolves through the same store membership every other vendor
+  // route uses rather than being told they have no account.
+  CreateSupportTicket: {
+    path: `${BASE_URL}/api/support/tickets?user_type=vendor`,
+    method: "POST",
+  } as const satisfies ApiRoute,
+  GetSupportTickets: {
+    path: `${BASE_URL}/api/support/tickets?user_type=vendor`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  GetSupportTicket: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/support/tickets/${id}?user_type=vendor`,
+    method: "GET",
+  }),
+  ReplyToSupportTicket: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/support/tickets/${id}/reply?user_type=vendor`,
+    method: "POST",
+  }),
+  SupportCategories: {
+    path: `${BASE_URL}/api/support/categories`,
+    method: "GET",
+  } as const satisfies ApiRoute,
 };
 
 export default VendorApiRoutes;

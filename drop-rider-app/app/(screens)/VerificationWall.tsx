@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, TextInput, TouchableOpacity, Image, ActivityIndicator, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { UIThemeContext } from '@/context/ThemeContext';
@@ -12,6 +12,9 @@ import { Toast } from '@/lib/toast';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Popup } from "@/lib/popup";
 import { RiderVerificationSkeleton } from '@/components/skeletons/ContextualSkeletons';
+import { useInvalidateKycStatus, useKycStatus } from '@/hooks/queries/useKycStatus';
+import { apiFetch } from '@/API/apiFetch';
+import { errorMessage } from '@/API/errors';
 
 export default function VerificationWall() {
   const { currentTheme } = useContext<any>(UIThemeContext);
@@ -19,10 +22,16 @@ export default function VerificationWall() {
   const { getToken } = useAuth();
   const router = useRouter();
 
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [kycStatus, setKycStatus] = useState("unsubmitted");
-  const [statusError, setStatusError] = useState(false);
+
+  // The same cache entry the `(screens)` gate reads. This screen used to hold
+  // the status in `useState` from its own fetch, so after an approval the wall
+  // saw "approved" and pushed to `/(screens)` while the gate's cache still said
+  // "pending" and pushed straight back — a redirect loop.
+  const { data: status, isPending, isError, refetch, isFetching } = useKycStatus();
+  const invalidateKycStatus = useInvalidateKycStatus();
+  const kycStatus = status?.kyc_status ?? "unsubmitted";
+  const checkStatus = () => { refetch(); };
 
   const [vehicleType, setVehicleType] = useState("motorbike");
   const [plateNumber, setPlateNumber] = useState("");
@@ -30,34 +39,19 @@ export default function VerificationWall() {
   const [idBack, setIdBack] = useState<string | null>(null);
   const [driverLicense, setDriverLicense] = useState<string | null>(null);
 
+  // Prefill from whatever the rider already told us, so a resubmission after a
+  // rejection is not a blank form.
+  const prefilled = useRef(false);
   useEffect(() => {
-    checkStatus();
-  }, []);
+    if (prefilled.current || !status) return;
+    prefilled.current = true;
+    if (status.vehicle_type) setVehicleType(status.vehicle_type);
+    if (status.plate_number) setPlateNumber(status.plate_number);
+  }, [status]);
 
-  const checkStatus = async () => {
-    setStatusError(false);
-    try {
-      const token = await getToken();
-      // Use the newly created status endpoint
-      const res = await fetch(process.env.EXPO_PUBLIC_BACKEND_BASE_URL + "/api/deliverer/kyc/status", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setKycStatus(data.kyc_status);
-        if (data.kyc_status === "approved") {
-           router.replace("/(screens)");
-        }
-      } else {
-        setStatusError(true);
-      }
-    } catch (e) {
-      if (__DEV__) console.log("Error checking KYC status", e);
-      setStatusError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (kycStatus === "approved") router.replace("/(screens)");
+  }, [kycStatus, router]);
 
   const pickImage = async (setter: React.Dispatch<React.SetStateAction<string | null>>) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -123,31 +117,30 @@ export default function VerificationWall() {
         } as any);
       }
 
-      const res = await fetch(process.env.EXPO_PUBLIC_BACKEND_BASE_URL + "/api/deliverer/kyc/upload", {
+      // Identity documents over a phone connection need more than the default
+      // 15s, and a timeout here restarts the whole submission.
+      await apiFetch(RiderApiRoutes.KycUpload.path, {
         method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}` 
-          // Note: Do NOT set Content-Type header manually when using FormData in React Native
-        },
-        body: formData
+        token,
+        formData,
+        timeoutMs: 120_000,
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setKycStatus(data.kyc_status || "pending");
-        Toast.success("Success", "Documents uploaded. Your profile is now under review.");
-      } else {
-        const errorData = await res.json();
-        Toast.error("Upload Failed", errorData.detail || "Something went wrong.");
-      }
+      // Refetch rather than patching local state: the gate reads this same
+      // cache entry and must move to "pending" with us.
+      await invalidateKycStatus();
+      Toast.success("Success", "Documents uploaded. Your profile is now under review.");
     } catch (e) {
-      Toast.error("Network Error", "Could not connect to the server.");
+      // The backend names the file it rejected — "ID card front must be a
+      // genuine JPG, PNG, or PDF file" — which is the only way the rider can
+      // fix it.
+      Toast.error("Upload Failed", errorMessage(e, "Could not connect to the server."));
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
+  if (isPending) {
     return (
       <SafeAreaView className={`flex-1 ${darkTheme ? "bg-[#0A0A0A]" : ""}`}>
         <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
@@ -164,7 +157,7 @@ export default function VerificationWall() {
     );
   }
 
-  if (statusError) {
+  if (isError) {
     return (
       <SafeAreaView className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-[#0A0A0A]" : ""}`}>
         <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
@@ -172,8 +165,10 @@ export default function VerificationWall() {
         <Text className={`text-lg font-bold mt-4 text-center ${darkTheme ? "text-white" : "text-black"}`}>
           Couldn't check your verification status
         </Text>
-        <PressableScale onPress={checkStatus} className="mt-6 h-[48px] px-8 rounded-full items-center justify-center bg-gray-100 dark:bg-gray-800" style={{ backgroundColor: BRAND.primary }}>
-          <Text className="text-white font-bold">Retry</Text>
+        <PressableScale onPress={checkStatus} disabled={isFetching} className="mt-6 h-[48px] px-8 rounded-full items-center justify-center bg-gray-100 dark:bg-gray-800" style={{ backgroundColor: BRAND.primary }}>
+          {isFetching
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Text className="text-white font-bold">Retry</Text>}
         </PressableScale>
       </SafeAreaView>
     );
@@ -193,8 +188,21 @@ export default function VerificationWall() {
           <Text className={`text-center text-base leading-relaxed ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
             Your documents have been received and are currently under review by our compliance team. This usually takes less than 24 hours.
           </Text>
-          <PressableScale onPress={checkStatus} className="mt-10 px-8 py-3 rounded-full bg-gray-100 dark:bg-gray-800">
-             <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>Refresh Status</Text>
+          <PressableScale onPress={checkStatus} disabled={isFetching} className="mt-10 px-8 py-3 rounded-full bg-gray-100 dark:bg-gray-800">
+             {isFetching
+               ? <ActivityIndicator size="small" color={BRAND.primary} />
+               : <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>Refresh Status</Text>}
+          </PressableScale>
+
+          {/* "Less than 24 hours" is a promise, and the rider on hour 70 has
+              nowhere to take it. This is the one way out of this screen. */}
+          <PressableScale
+            onPress={() => router.push("/(screens)/Support" as any)}
+            className="mt-4 px-6 py-3"
+          >
+            <Text className="font-semibold" style={{ color: BRAND.primary }}>
+              Waiting too long? Contact support
+            </Text>
           </PressableScale>
         </View>
       </SafeAreaView>
@@ -241,7 +249,15 @@ export default function VerificationWall() {
         {kycStatus === "rejected" && (
           <View className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl mb-6">
             <Text className="text-red-500 font-bold mb-1">Verification Failed</Text>
-            <Text className="text-red-400 text-sm">Your previous submission was rejected. Please ensure all documents are clear, valid, and unexpired.</Text>
+            {/* The reviewer's actual words, when we have them. The generic
+                sentence below is a fallback for rejections recorded before the
+                reason was stored — on its own it tells the rider nothing they
+                can act on, so they resubmit the same document and wait again. */}
+            <Text className="text-red-400 text-sm">
+              {status?.rejection_reason?.trim()
+                ? status.rejection_reason
+                : "Your previous submission was rejected. Please ensure all documents are clear, valid, and unexpired."}
+            </Text>
           </View>
         )}
 

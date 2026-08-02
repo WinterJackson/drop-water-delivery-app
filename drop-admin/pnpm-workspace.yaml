@@ -1,0 +1,12 @@
+# Native/postinstall builds, decided explicitly rather than left to a prompt.
+# sharp is Next's image optimiser; @clerk/shared's postinstall is trivial.
+allowBuilds:
+  '@clerk/shared': true
+  sharp: true
+
+# The npm registry is slow from here and the Next tarballs are ~35-45MB, which
+# blows past pnpm's 60s default and fails the install outright.
+fetchTimeout: 900000
+fetchRetries: 5
+fetchRetryMaxtimeout: 300000
+networkConcurrency: 4

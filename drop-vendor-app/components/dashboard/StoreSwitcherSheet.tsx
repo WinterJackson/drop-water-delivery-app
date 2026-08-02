@@ -15,7 +15,8 @@ export interface StoreSwitcherSheetRef {
 }
 
 interface StoreSwitcherSheetProps {
-  activeStoreId?: string;
+  /** `null` means "no explicit choice yet" — the backend then uses the first. */
+  activeStoreId?: string | null;
   onSelectStore: (storeId: string) => void;
 }
 

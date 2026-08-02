@@ -1,3 +1,5 @@
+import os
+
 import h3
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,15 +10,67 @@ from geoalchemy2.functions import ST_Distance, ST_DWithin
 from sqlalchemy import func , and_, or_
 from sqlalchemy.orm import joinedload
 from uuid import UUID
+from services import platform_config_service
 from services.dispatch_policy import DispatchPolicy
 
 
+#: Statuses that take a store out of the customer-facing app entirely.
+#:
+#: `deleted` is set by account deletion in `auth_routes`, which anonymises the
+#: row but leaves it in place for the orders that reference it.
+UNDISCOVERABLE_STATUSES = ("deleted",)
+
+
+def discoverable_vendor():
+  """The predicate every customer-facing vendor query must carry.
+
+  Nine discovery queries existed and **none of them filtered on account state**,
+  so a store whose owner had deleted their account — anonymised, status
+  `deleted` — still appeared in search, in "near you", and in the directory. The
+  same hole would have swallowed suspension the moment an administrator used it,
+  which is why the suspend action and this predicate ship together.
+
+  Written once and imported, rather than repeated per query: nine copies is nine
+  chances to write a subtly different one, and the one that gets missed is
+  invisible until a customer orders from a store that is not there.
+
+  Deliberately **not** filtered on `verification_status == "verified"`. Every
+  vendor on the platform is currently `pending`, so that predicate would empty
+  the customer app. Whether unverified stores may trade is a business decision,
+  not something to change silently inside a bug fix.
+  """
+  clauses = [
+      Vendor.is_active.is_(True),
+      Vendor.verification_status.notin_(UNDISCOVERABLE_STATUSES),
+  ]
+
+  # Off by default, and read per call rather than frozen at import so it can be
+  # turned on without a redeploy — and turned off again just as fast if it
+  # empties the app.
+  #
+  # This was an environment variable, which meant changing it needed a Render
+  # edit and a restart. It is a `Platform_Settings` row now, so an owner can
+  # switch it from the console and revert in seconds when they see the
+  # consequences. Reads are synchronous against the cached snapshot; callers
+  # that price or search have already refreshed it.
+  if platform_config_service.get_bool("require_vendor_verification"):
+      clauses.append(Vendor.verification_status == "verified")
+
+  return and_(*clauses)
+
+
 async def get_all_vendors(session: AsyncSession, limit: int = 20, offset: int = 0):
-  count_query = select(func.count()).select_from(Vendor)
+  count_query = select(func.count()).select_from(Vendor).where(discoverable_vendor())
   count_result = await session.execute(count_query)
   total = count_result.scalar() or 0
 
-  query = select(Vendor).order_by(Vendor.created_at.desc()).offset(offset).limit(limit)
+  query = (
+      select(Vendor)
+      .where(discoverable_vendor())
+      .order_by(Vendor.created_at.desc())
+      .offset(offset)
+      .limit(limit)
+  )
   result = await session.execute(query)
   vendors = result.scalars().all()
   return vendors, total
@@ -49,6 +103,7 @@ async def get_nearby_vendors(session : AsyncSession, lat : float, lng : float ) 
       select(Vendor)
       .where(
           and_(
+              discoverable_vendor(),
               Vendor.vendor_type == "retail_refill",
               Vendor.h3_index_res8.in_(neighbour_cells),
               Vendor.location.isnot(None),
@@ -70,6 +125,7 @@ async def get_top_rated_vendors(session: AsyncSession, lat : float, lng: float) 
       select(Vendor)
       .where(
           and_(
+              discoverable_vendor(),
               Vendor.vendor_type == "retail_refill",
               Vendor.rating >= 4,
               Vendor.h3_index_res8.in_(neighbour_cells),
@@ -103,6 +159,7 @@ async def get_vendors_by_type_service(session : AsyncSession, type: str, lng: fl
       select(Vendor)
       .where(
           and_(
+              discoverable_vendor(),
               Vendor.vendor_type == type,
               Vendor.h3_index_res8.in_(neighbour_cells),
               Vendor.location.isnot(None),
@@ -117,7 +174,14 @@ async def get_vendors_by_type_service(session : AsyncSession, type: str, lng: fl
   return vendors
 
 async def get_vendor_by_id_service(session: AsyncSession, id: UUID) -> VendorWithProductsFull:
-  query = select(Vendor).where(Vendor.id == id).options(joinedload(Vendor.products))
+  # A direct link (a bookmark, a shared product) must not bypass what the
+  # listings enforce, or suspension only hides a store from people who were not
+  # already looking for it.
+  query = (
+      select(Vendor)
+      .where(Vendor.id == id, discoverable_vendor())
+      .options(joinedload(Vendor.products))
+  )
   result = await session.execute(query)
   vendor = result.unique().scalar_one_or_none()
   return vendor
@@ -140,6 +204,7 @@ async def get_top_brands_service(session : AsyncSession, lat : float, lng : floa
       select(Vendor)
       .where(
           and_(
+              discoverable_vendor(),
               Vendor.vendor_type == "wholesale_b2b",
               Vendor.rating >= 4,
               Vendor.h3_index_res8.in_(neighbour_cells),
@@ -173,6 +238,7 @@ async def get_vendor_directory(
         select(Vendor)
         .options(joinedload(Vendor.products))
         .where(
+            discoverable_vendor(),
             Vendor.h3_index_res8.in_(neighbour_cells),
             Vendor.location.isnot(None),
             # Never list a vendor the customer cannot actually order from.

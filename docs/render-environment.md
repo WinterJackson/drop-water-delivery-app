@@ -117,6 +117,58 @@ Until the key is set, account deletion returns 503 rather than half-completing.
 That is the intended behaviour, and it is the one flow on the platform where a
 partial success is worse than a clean refusal.
 
+Staff invitations have since joined it: `vendor_staff_service._lookup_clerk_id`
+resolves the invited email to a Clerk subject so the grant binds to the right
+person, and it raises 503 without the key rather than recording an invitation
+that can never bind.
+
+#### Setting it
+
+The key must come from **the same Clerk application as `CLERK_ISSUER`**. Both
+the local `.env` and all three apps' `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
+(`pk_test_cGV0LWFpcmVkYWxlLTIyLi4u`, which decodes to the instance hostname)
+point at **`pet-airedale-22.clerk.accounts.dev`** — a *development* instance. If
+Render's `CLERK_ISSUER` is that host, take the key from that application.
+
+1. Clerk dashboard → select the application whose domain matches
+   `CLERK_ISSUER` → **API keys**.
+2. Copy the **Secret key** (`sk_test_…` for a development instance, `sk_live_…`
+   for production). It is shown once. Do **not** copy the publishable key —
+   `pk_…` is a different value and will not authenticate.
+3. Render → the API service → **Environment** → **Add Environment Variable**:
+   `CLERK_SECRET_KEY` = the copied value. Add it to the **worker** service too
+   if you run one; it is read per call, not at import.
+4. Save. Render restarts the service.
+
+Then verify — from a Render shell, or locally with the value exported:
+
+```bash
+python scripts/check_clerk_secret.py
+```
+
+It confirms the key is present, that Clerk accepts it, that `users.list` (the
+call every invitation makes) actually works, and — the part worth having —
+that the key belongs to the **same instance** as `CLERK_ISSUER`.
+
+That last check exists because a key from the wrong Clerk application fails
+*silently*. Token verification would keep working, since that reads
+`CLERK_JWKS_URL`, but every invitation would look the invited email up in the
+other instance's directory, find nothing, and record a pending invitation that
+never binds. The owner sees "invitation sent", the member signs in, and nothing
+happens. A secret key is an opaque string with no instance name in it, so there
+is no way to eyeball this; the script compares the JWKS `kid` returned by
+`GET https://api.clerk.com/v1/jwks` (authenticated with the key) against the
+public JWKS, because for Clerk that `kid` *is* the instance id.
+
+#### Before public release
+
+`pet-airedale-22` is a development instance. Its user directory, rate limits and
+session security are all separate from a production instance's, and moving to
+production is not just a new secret: `CLERK_ISSUER`, `CLERK_JWKS_URL`,
+`CLERK_SECRET_KEY` and every app's `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` must move
+together, or the mismatch above is exactly what you get. `check_clerk_secret.py`
+prints a note when it sees `ENV=production` against a `sk_test_…` key.
+
 ## Missing — payouts (M-Pesa B2C)
 
 > The callbacks these point at were unrouted until recently — see
@@ -205,13 +257,183 @@ For each, look up the `ConversationID` (`reference_id`) in the portal. Paid →
 set `completed`. Failed → set `failed` and credit `wallet_balance` back by the
 signed amount, the same arithmetic `_reconcile_wallet_transaction` now performs.
 
+## Set on Render today that should change
+
+Four variables are configured and wrong, or configured and doing nothing. None
+of them is an emergency; all four are worth ten minutes.
+
+### `ALLOWED_ORIGINS = *` — narrow it
+
+`main.py` splits this on commas, and a lone `*` takes the wildcard branch. The
+code then sets `allow_credentials=False`, because a browser rejects wildcard
+plus credentials outright — so this is **not** the account-takeover shape it
+looks like. The mobile clients send a bearer token, not cookies, and no site can
+read an authenticated response without that token.
+
+What it does cost:
+
+- Any web page can call the **unauthenticated** endpoints — vendor search, the
+  price quote, `/api/support/categories` — from a visitor's browser and their
+  IP. Rate limits are per-IP, so a third party can spend a real user's budget.
+- It disables the fail-closed design in `main.py`, which deliberately allows
+  **no** origin in production unless one is named.
+- It is a trap for later: the day anyone adds a cookie or sets
+  `allow_credentials=True`, the wildcard silently becomes the real vulnerability.
+
+Set it to the origins that actually run in a browser:
+
+```
+ALLOWED_ORIGINS=https://drop-admin.vercel.app
+```
+
+**The three mobile apps are unaffected** — React Native's `fetch` does not
+enforce CORS, so no native client needs an entry here. The admin console does
+not strictly need one either (its browser never calls FastAPI; the Next server
+does), but naming it costs nothing and covers a future client-side call. Add an
+Expo **web** origin only if you actually deploy one.
+
+#### No domain bought yet — what to put there today
+
+You do not need to own a domain to set this correctly. Every host that can run a
+Next.js app gives you a permanent HTTPS hostname on **their** domain, for free,
+and that hostname is a perfectly valid CORS origin.
+
+**Use Vercel.** This console is a Next.js 16 App Router app with Server Actions,
+middleware and per-request server rendering; Vercel is the reference deployment
+for exactly that, on a free Hobby plan. GitHub Pages cannot host it at all — it
+serves static files, and half of this app is server code that mints Clerk tokens.
+Render can (as a second web service), but you would be paying attention to a
+build pipeline that Vercel does for nothing.
+
+The steps, once:
+
+1. Vercel → **Add New → Project** → import this GitHub repository.
+2. **Root directory: `drop-admin`.** The repo is a monorepo; without this the
+   build runs at the root and finds no Next app.
+3. Environment variables (Production): `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+   `CLERK_SECRET_KEY`, `BACKEND_BASE_URL=https://vepo-backend.onrender.com`,
+   `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY`.
+4. Deploy. You get `https://<project>.vercel.app` — stable, HTTPS, yours until
+   you delete the project.
+5. Put that exact origin in `ALLOWED_ORIGINS` on Render, in the Google Maps key's
+   website restrictions, and in Clerk's allowed origins.
+
+The project name decides the hostname, so name it `drop-admin` and the origin is
+`https://drop-admin.vercel.app`. If that name is taken globally you will get a
+suffix — read the real URL off the deployment before you paste it anywhere.
+
+**Preview deployments.** Vercel builds every branch and every pull request at a
+*different* hostname (`drop-admin-<hash>-<scope>.vercel.app`). Those origins are
+not in `ALLOWED_ORIGINS`, are not in the Maps key restriction, and are not in
+Clerk — a preview will sign in and then show a map that will not load. Three
+options, in order of preference:
+
+- **Turn previews off** for this project (Settings → Git → deploy production
+  branch only). An operations console does not benefit from per-PR previews, and
+  each one is a live door to production data.
+- Add a wildcard `https://drop-admin-*.vercel.app` to the Maps key and to Clerk.
+  Note that `ALLOWED_ORIGINS` does **not** support wildcards — `main.py` compares
+  strings — so previews would still fail any browser-side call.
+- Point previews at a separate backend. Correct and the most work.
+
+**When you do buy a domain**, nothing about this changes shape: add it in Vercel,
+then add the new origin to the same three places and remove the `.vercel.app`
+one. Because CORS is a list, you can run both during the switch-over.
+
+> Do **not** put the Render backend's own URL in `ALLOWED_ORIGINS`. It is not an
+> origin any browser loads a page from; the value is a list of *sites that may
+> call this API*, not of the API itself.
+
+### `ADMIN_CLERK_IDS = user_admin1,user_admin2` — delete it
+
+Those are placeholder strings, and the variable grants nobody anything:
+`seed_first_admin` is the only reader and **nothing calls `seed_first_admin`**.
+`tests/test_admin_rbac.py` enforces that it can never gate a request again.
+
+Delete it. A variable that reads like an access list and is not one is worse
+than no variable — it invites somebody to wire it up, and it would then mint
+super admins for two ids that do not exist.
+
+Administrators are rows in `Admin_Users`. Grant the first one with
+`scripts/admin_access.py`, then use the console's roster screen.
+
+### `EMAIL_FROM = Drop <onboarding@resend.dev>` — verify a domain
+
+`onboarding@resend.dev` is Resend's shared sender, and Resend only delivers from
+it to **the address that owns the Resend account**. Every broadcast email and
+every support-reply email to a customer is refused. The in-app notification is
+still written, which is why this fails quietly.
+
+Verify a domain in Resend, then:
+
+```
+EMAIL_FROM=Drop <no-reply@yourdomain>
+```
+
+`_resend_available` is decided at **import**, so a key or sender change needs a
+restart, not just a save.
+
+The local `.env` used to say `Vepo <…>`; it now matches Render. **The platform is
+called Drop.** Check `PLATFORM_NAME` on Render too — it is read at
+`payment_service.py:53` and `:244`, and it reaches customers in the M-Pesa STK
+push prompt and the B2C payout remark, which is the most visible text this
+platform produces. If it says `Vepo`, that is what appears on their phone.
+
+Two `vepo` strings are **not** worth changing: the Render service hostname
+`vepo-backend.onrender.com` and the Firebase project `vepo-001`. Renaming either
+breaks every deployed app until it is rebuilt and re-released, for infrastructure
+identifiers no customer ever sees. Retire them when you move to your own domain
+and a fresh Firebase project, not before.
+
+### `SMS_WEBHOOK_SECRET` — keep it
+
+Correct and required. `routes/sms_routes.py` compares it with
+`hmac.compare_digest` and refuses the webhook without it. Nothing to do.
+
+---
+
 ## Deliberately left unset
 
 | Variable | Why |
 |---|---|
 | `ARQ_INTERNAL_CRON` | **Must stay unset.** Setting it alongside cron-job.org runs every sweep twice — double refunds, double cancellations. Development only. |
-| `RUN_INLINE_WORKER` | Runs the ARQ worker inside the web process. Only for a single-dyno setup with no separate worker service. |
 | `SQL_ECHO` | You have it set; make sure the value is not `true` in production — it logs every statement, including parameters. |
+
+## `RUN_INLINE_WORKER` — safe here, and it is what makes broadcast email work
+
+Background jobs normally run as their own process (`arq worker.WorkerSettings`).
+`RUN_INLINE_WORKER=1` starts that worker **inside** the API process instead.
+
+The usual objection is the cron schedule: an in-process scheduler fires once per
+instance, so two instances means every sweep runs twice. **That does not apply
+to this deployment.** The schedule is external — cron-job.org calls
+`/api/cron/{slug}` — and `ARQ_INTERNAL_CRON` is unset, so
+`WorkerSettings.cron_jobs` is empty. An inline worker here only *consumes the
+queue*, and ARQ hands each queued job to exactly one worker, however many are
+listening. Several consumers is safe; several schedulers is not.
+
+So on a single web service with no separate worker:
+
+```
+RUN_INLINE_WORKER=1
+```
+
+That is what makes **broadcast campaigns** actually send: the endpoint queues the
+campaign and returns, and without any worker it stays `queued` for ever. It is
+also why `RESEND_API_KEY` must be on whichever service runs the worker — with
+`RUN_INLINE_WORKER=1` that is the web service, so one copy is enough.
+
+Two things to know:
+
+- **Never set `ARQ_INTERNAL_CRON=1` and `RUN_INLINE_WORKER=1` together on more
+  than one instance.** The startup log warns when it sees both.
+- A worker task that dies takes background processing with it while the API keeps
+  answering normally. It now logs `INLINE_ARQ_WORKER_DIED` when that happens —
+  worth an alert, because the symptom otherwise is "pushes stopped" with nothing
+  in the log.
+
+A separate worker service is still the better shape once traffic justifies it: a
+long broadcast shares an event loop with request handling.
 
 ## Does not belong here
 
@@ -221,6 +443,9 @@ it; `EXPO_PUBLIC_*` is an Expo build-time convention. The server uses
 environment that never reads it is one more copy to rotate.
 
 ## Already configured
+
+(`ADMIN_CLERK_IDS`, `ALLOWED_ORIGINS` and `EMAIL_FROM` are set but should
+change — see "Set on Render today that should change" above.)
 
 `ADMIN_CLERK_IDS`, `ALLOWED_ORIGINS`, `CLERK_ISSUER`, `CLERK_JWKS_URL`,
 `DB_ENCRYPTION_KEY`, `EMAIL_FROM`, `ENV`, `FRONTEND_CLERK_API_KEY`,

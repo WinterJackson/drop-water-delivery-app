@@ -1,88 +1,134 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@clerk/clerk-expo";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { retryTransientOnly } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
+import { useAuth } from "@clerk/clerk-expo";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+export interface WalletTransaction {
+  id: string;
+  amount: number;
+  transaction_type: string;
+  status: string;
+  description?: string;
+  mpesa_receipt_number?: string;
+  reference_id?: string;
+  created_at?: string;
+}
+
+interface TransactionsPage {
+  data: WalletTransaction[];
+  nextCursor: number | null;
+  hasNextPage: boolean;
+  total: number;
+}
+
+/**
+ * `user_type` is not optional and not cosmetic.
+ *
+ * `WalletTransaction.user_id` holds ids from three tables and carries no foreign
+ * key, so the backend filters on `user_type` to tell the three ledgers apart —
+ * and it defaults to `"customer"`. Every call from this app omitted it, so the
+ * vendor's transaction list queried the *customer* ledger for a clerk id that
+ * has no customer rows and came back empty every time. The screen rendered its
+ * "No transactions yet" empty state over a wallet with a live balance.
+ */
+const TRANSACTIONS_USER_TYPE = "vendor";
+
+function transactionsUrl(params: Record<string, string | number | undefined>) {
+  const qs = new URLSearchParams({ user_type: TRANSACTIONS_USER_TYPE });
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") qs.append(key, String(value));
+  }
+  return `${VendorApiRoutes.GetTransactions.path}?${qs.toString()}`;
+}
 
 export const useWalletTransactions = (limit = 50, offset = 0) => {
-  const { getToken } = useAuth();
+  const { get } = useApiRequest();
 
-  return useQuery({
+  return useQuery<TransactionsPage, Error>({
     queryKey: ["walletTransactions", limit, offset],
-    queryFn: async () => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
-      const res = await fetch(`${VendorApiRoutes.GetTransactions.path}?limit=${limit}&offset=${offset}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to fetch transactions");
-      }
-
-      return res.json();
-    },
+    queryFn: () => get<TransactionsPage>(transactionsUrl({ limit, offset })),
+    retry: retryTransientOnly(),
   });
 };
 
 export const useWalletTransactionsPaginated = (search: string, type: string, limit = 20) => {
-  const { getToken } = useAuth();
+  const { get } = useApiRequest();
 
   return useInfiniteQuery({
     queryKey: ["walletTransactions", search, type, limit],
-    queryFn: async ({ pageParam = 0 }) => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
-      let url = `${VendorApiRoutes.GetTransactions.path}?limit=${limit}&offset=${pageParam}`;
-      if (search) url += `&search=${encodeURIComponent(search)}`;
-      if (type && type !== "All") url += `&type=${encodeURIComponent(type)}`;
-
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to fetch transactions");
-      }
-
-      return res.json();
-    },
+    queryFn: ({ pageParam = 0 }) =>
+      get<TransactionsPage>(
+        transactionsUrl({
+          limit,
+          offset: pageParam,
+          search: search || undefined,
+          type: type && type !== "All" ? type : undefined,
+        })
+      ),
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
     initialPageParam: 0,
+    retry: retryTransientOnly(),
+  });
+};
+
+export interface WalletSummary {
+  wallet_balance: number;
+  /** Held against open cash orders — the vendor's, but not theirs to withdraw. */
+  committed_cash_float: number;
+  available_for_withdrawal: number;
+  /** Negative balance: the store owes the platform and must settle. */
+  is_in_arrears: boolean;
+}
+
+/**
+ * What the vendor can actually withdraw, and why it differs from the balance.
+ *
+ * On a wholesale cash order the vendor's own rider collects the cash and the
+ * platform's cut is debited from the vendor's wallet at delivery, so it is
+ * committed from the moment the order is accepted. `settlement_service` has
+ * enforced that against withdrawals all along; the app simply had no way to
+ * *show* it and displayed the raw `wallet_balance`, so a refusal read as the
+ * platform withholding money it had just displayed.
+ */
+export const useWalletSummary = (enabled = true) => {
+  const { isLoaded, isSignedIn } = useAuth();
+  const { get } = useApiRequest();
+
+  return useQuery<WalletSummary, Error>({
+    queryKey: ["vendor", "wallet-summary"],
+    queryFn: () => get<WalletSummary>(VendorApiRoutes.GetWalletSummary.path),
+    // Gated on `view_finances`: an owner may withhold the balance from a staff
+    // member, and asking anyway would 403 on every open of the wallet screen.
+    enabled: enabled && isLoaded && isSignedIn,
+    staleTime: 30 * 1000,
+    retry: retryTransientOnly(),
   });
 };
 
 export const useWalletWithdraw = () => {
-  const { getToken } = useAuth();
+  const { post } = useApiRequest();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ amount, phoneNumber, userType }: { amount: number, phoneNumber: string, userType: string }) => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
-      const res = await fetch(VendorApiRoutes.WalletWithdraw.path, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ amount, phone_number: phoneNumber, user_type: userType }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(data?.detail || "Withdrawal failed");
-      }
-
-      return data;
-    },
+    mutationFn: ({
+      amount,
+      phoneNumber,
+      userType,
+    }: {
+      amount: number;
+      phoneNumber: string;
+      userType: string;
+    }) =>
+      post(VendorApiRoutes.WalletWithdraw.path, {
+        amount,
+        phone_number: phoneNumber,
+        user_type: userType,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["walletTransactions"] });
-      queryClient.invalidateQueries({ queryKey: ["vendorProfile"] });
+      queryClient.invalidateQueries({ queryKey: ["vendor", "profile"] });
+      queryClient.invalidateQueries({ queryKey: ["vendor", "wallet-summary"] });
     },
   });
 };

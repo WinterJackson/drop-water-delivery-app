@@ -1,82 +1,91 @@
+/**
+ * Drives the offline replay queue.
+ *
+ * The flush itself lives in `services/offlineQueue` so it can be called from
+ * anywhere; this hook is only about *when*. It used to be the other way round —
+ * the entire flush was the body of a `NetInfo` listener, which meant a replay
+ * that failed waited for the next connectivity *transition* before trying again.
+ * On a device that stayed online the whole time that transition never came, and
+ * a delivered order sat unsynced indefinitely: the rider unpaid, the customer
+ * un-notified, the order stuck at `picked_up`, and nothing on screen about it.
+ *
+ * Four triggers now:
+ *   1. connectivity restored (the original one, still the fastest signal),
+ *   2. the app returning to the foreground,
+ *   3. a timer, while anything is still queued,
+ *   4. the rider tapping retry on the Pending Sync screen (not here).
+ */
 import { useAuth } from '@clerk/clerk-expo';
 import NetInfo from '@react-native-community/netinfo';
-import { useEffect } from 'react';
-import { getQueuedActions, removeQueuedAction } from '../config/database';
 import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
+import { flushOfflineQueue, getQueueStatus } from '@/services/offlineQueue';
+
+/** While the queue is non-empty. Short enough to clear a backlog promptly. */
+const RETRY_INTERVAL_MS = 60_000;
 
 export function useNetworkQueue() {
     const { getToken } = useAuth();
     const queryClient = useQueryClient();
+    const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+    /** So a run of failures does not re-toast on every one of the four triggers. */
+    const warnedAt = useRef(0);
 
     useEffect(() => {
-        const unsubscribe = NetInfo.addEventListener(async (state: any) => {
-            if (state.isConnected && state.isInternetReachable) {
-                const queued_actions = await getQueuedActions() as any[];
-                if (!queued_actions || queued_actions.length === 0) return;
+        let cancelled = false;
 
-                if (__DEV__) console.log(`Network restored! Flushing ${queued_actions.length} queued action(s)...`);
-
-                const token = await getToken();
-                if (!token) return;
-
-                for (let action of queued_actions) {
-                    try {
-                        const payload = JSON.parse(action.payload);
-
-                        if (action.type === "UPDATE_DELIVERY_STATUS") {
-                            const res = await fetch(`${BASE_URL}/api/rider/orders/${action.id}/status`, {
-                                method: 'PUT',
-                                headers: {
-                                    Authorization: `Bearer ${token}`,
-                                    "Content-Type": "application/json"
-                                },
-                                body: JSON.stringify(payload)
-                            });
-
-                            if (res.ok) {
-                                await removeQueuedAction(action.row_id);
-                                if (__DEV__) console.log(`Successfully flushed queued action: ${action.row_id}`);
-                                queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
-                            } else if (res.status === 400 || res.status === 404 || res.status === 409) {
-                                await removeQueuedAction(action.row_id);
-                                const err = await res.json().catch(() => ({}));
-                                import('@/lib/toast').then(({ Toast }) => {
-                                    Toast.error("Sync Failed", err.detail || "A queued delivery update was rejected by the server.");
-                                });
-                                if (__DEV__) console.log(`Dropped invalid queued action: ${action.row_id} due to ${res.status}`);
-                            }
-                        } else if (action.type === "REJECT_BOTTLE") {
-                            const res = await fetch(`${BASE_URL}/api/rider/orders/${action.id}/bottle-rejection`, {
-                                method: 'POST',
-                                headers: {
-                                    Authorization: `Bearer ${token}`,
-                                    "Content-Type": "application/json"
-                                },
-                                body: JSON.stringify(payload)
-                            });
-
-                            if (res.ok) {
-                                await removeQueuedAction(action.row_id);
-                                if (__DEV__) console.log(`Successfully flushed queued action: ${action.row_id}`);
-                                queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
-                            } else if (res.status === 400 || res.status === 404 || res.status === 409) {
-                                await removeQueuedAction(action.row_id);
-                                const err = await res.json().catch(() => ({}));
-                                import('@/lib/toast').then(({ Toast }) => {
-                                    Toast.error("Sync Failed", err.detail || "A queued bottle rejection was rejected by the server.");
-                                });
-                                if (__DEV__) console.log(`Dropped invalid queued action: ${action.row_id} due to ${res.status}`);
-                            }
-                        }
-                    } catch (e) {
-                        if (__DEV__) console.error('Failed to flush queued action: ', e);
-                    }
-                }
+        /** Only keep a timer alive while there is actually something waiting. */
+        const rescheduleTimer = async () => {
+            const { pending } = await getQueueStatus();
+            if (cancelled) return;
+            if (pending > 0 && !timer.current) {
+                timer.current = setInterval(run, RETRY_INTERVAL_MS);
+            } else if (pending === 0 && timer.current) {
+                clearInterval(timer.current);
+                timer.current = null;
             }
+        };
+
+        const run = async () => {
+            if (cancelled) return;
+            const result = await flushOfflineQueue(getToken, () => {
+                queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
+            });
+            if (cancelled) return;
+
+            if (result.needsAttention > 0 && Date.now() - warnedAt.current > 15 * 60_000) {
+                warnedAt.current = Date.now();
+                // Never a silent drop: an action that cannot replay is the
+                // rider's completed work, and they have to be able to see it.
+                const { Toast } = await import('@/lib/toast');
+                Toast.error(
+                    'Sync needs attention',
+                    `${result.needsAttention} saved action${result.needsAttention === 1 ? '' : 's'} could not sync. Open Pending Sync from Settings to review.`
+                );
+            }
+            await rescheduleTimer();
+        };
+
+        const unsubscribe = NetInfo.addEventListener((state: any) => {
+            if (state.isConnected && state.isInternetReachable) run();
         });
 
-        return () => unsubscribe();
-    }, [getToken]);
+        const appState = AppState.addEventListener('change', (status: AppStateStatus) => {
+            if (status === 'active') run();
+        });
+
+        run();
+
+        return () => {
+            cancelled = true;
+            unsubscribe();
+            appState.remove();
+            if (timer.current) {
+                clearInterval(timer.current);
+                timer.current = null;
+            }
+        };
+    }, [getToken, queryClient]);
 }

@@ -1,7 +1,8 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { UIThemeContext } from "@/context/ThemeContext";
 import useWebSocket from "@/hooks/useWebSocket";
-import { useAuth } from "@clerk/clerk-expo";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { useCallback, useContext, useEffect, useState } from "react";
 import {
     FlatList,
@@ -45,7 +46,7 @@ const STATUS_TEXT: Record<string, string> = {
 export default function Orders() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken, signOut } = useAuth();
+  const { get, post } = useApiRequest();
   const router = useRouter();
   const { data: profile } = useRiderProfile();
 
@@ -98,23 +99,14 @@ export default function Orders() {
   });
 
   const fetchOrders = async () => {
-    const token = await getToken();
     try {
-      const res = await fetch(RiderApiRoutes.GetOrders().path, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      if (res.ok) { 
-        const data = await res.json(); 
-        if (Array.isArray(data)) {
-          setOrders(data); 
-        }
-      } else if (res.status === 401) {
-        Toast.error("Session Expired", "Please log in again to continue.");
-        signOut();
-        router.replace("/(Auth)/sign-in/screen");
-      }
-    } catch (e) { if (__DEV__) console.error("Caught Unhandled Exception:", e); }
-    finally { setLoading(false); }
+      const data = await get<any[]>(RiderApiRoutes.GetOrders().path);
+      if (Array.isArray(data)) setOrders(data);
+    } catch (e) {
+      // The client signs out on a 401 itself; everything else is transient here
+      // and the pull-to-refresh is the retry.
+      if (__DEV__) console.warn("[Orders] fetch failed:", errorMessage(e));
+    } finally { setLoading(false); }
   };
 
   const onRefresh = useCallback(async () => { setRefreshing(true); await fetchOrders(); setRefreshing(false); }, []);
@@ -130,23 +122,14 @@ export default function Orders() {
     if (claimingOrder) return;
     setClaimingOrder(orderId);
     try {
-      const token = await getToken();
-      const res = await fetch(RiderApiRoutes.AcceptDelivery(orderId).path, {
-        method: RiderApiRoutes.AcceptDelivery(orderId).method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      
-      const data = await res.json();
-      if (!res.ok) {
-        Toast.error("Radar Update", data.detail || "Failed to claim order");
-        setRadarOrders(prev => prev.filter(o => o.id !== orderId));
-      } else {
-        Toast.success("Success", "Delivery claimed successfully!");
-        setRadarOrders(prev => prev.filter(o => o.id !== orderId));
-        fetchOrders();
-      }
+      await post(RiderApiRoutes.AcceptDelivery(orderId).path);
+      Toast.success("Success", "Delivery claimed successfully!");
+      setRadarOrders(prev => prev.filter(o => o.id !== orderId));
+      fetchOrders();
     } catch (e: unknown) {
-      Toast.error("Error", (e as Error).message || "Network error");
+      if (e instanceof ApiError && e.status === 401) return;
+      Toast.error("Radar Update", errorMessage(e, "Failed to claim order"));
+      setRadarOrders(prev => prev.filter(o => o.id !== orderId));
     } finally {
       setClaimingOrder(null);
     }

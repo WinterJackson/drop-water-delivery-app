@@ -311,6 +311,17 @@ export default function SettingsMain() {
                 </View>
 
                 <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                    Help
+                </Text>
+                <View className="mb-8">
+                    <SettingItem
+                        title="Help & Support"
+                        iconName="help-buoy-outline"
+                        onPress={() => router.push("/(screens)/Support" as any)}
+                    />
+                </View>
+
+                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     System
                 </Text>
                 <View className="mb-8">

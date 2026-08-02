@@ -18,8 +18,14 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
+import { retryTransientOnly } from "@/API/errors";
 import { useSessionCleanup } from "@/hooks/useSessionCleanup";
 import { initDB } from "../config/database";
+// Imported for its side effect: `TaskManager.defineTask` must run before the OS
+// delivers a location update, including when Android relaunches the app
+// headlessly to feed the foreground service. Registering it inside the screen
+// that starts tracking would be too late.
+import "@/services/locationTracking";
 import ThemeContextProvider from "../context/ThemeContext";
 import "../global.css";
 import { BRAND } from "../constants/brandColors";
@@ -35,8 +41,15 @@ const queryClient = new QueryClient({
         queries: {
             staleTime: 1000 * 60 * 2,
             gcTime: 1000 * 60 * 10,
-            retry: 2,
+            // A 4xx is a refusal, not a dropped packet. A plain `retry: 2` made
+            // every refusal cost three round-trips before the rider saw it —
+            // and, because the client signs out on a 401, fired the sign-out
+            // handler three times for one expired session.
+            retry: retryTransientOnly(2),
             refetchOnWindowFocus: true, // Enables refetch on app foreground
+        },
+        mutations: {
+            retry: retryTransientOnly(0),
         },
     },
 });

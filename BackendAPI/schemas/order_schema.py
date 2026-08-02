@@ -122,7 +122,20 @@ class OrderWithDetails(BaseOrder):
 
 
 class PaginatedOrders(BaseModel):
-    pages: List[List[OrderWithDetails]]
-    
+    """One page of orders, described honestly.
+
+    This used to be `pages: List[List[OrderWithDetails]]` — the server imitating
+    React Query's `InfiniteData` envelope. It carried no page metadata at all, so
+    the client inferred "there is more" from `page.length === limit` *after*
+    unwrapping `data.pages[0]`, and one caller dropped every page but the first.
+    """
+
+    items: List[OrderWithDetails]
+    limit: int
+    offset: int
+    #: A full page implies there may be another. Deliberately not a COUNT(*):
+    #: an exact total costs a second scan of the orders table on every poll.
+    has_more: bool
+
     model_config = {"from_attributes": True}
 

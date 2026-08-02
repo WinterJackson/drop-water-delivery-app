@@ -20,43 +20,17 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useUpdateOrderStatus, useVendorOrdersPaginated } from "@/hooks/queries/useVendorOrders";
 import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { PERMISSIONS, useCan, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useDebounce } from "@/hooks/useDebounce";
 import { trackEvent } from "@/utils/analytics";
+import { errorMessage } from "@/API/errors";
+import { ORDER_FILTERS, isUnderReview, orderStatusStyle } from "@/constants/orderStatus";
+import { Toast } from "@/lib/toast";
 import SearchBar from "@/components/common/Search";
 import { ScrollView } from "react-native-gesture-handler";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-yellow-500/20",
-  accepted: "bg-accentbg/20",
-  preparing: "bg-purple-500/20",
-  ready: "bg-green-500/20",
-  rejected: "bg-red-500/20",
-  unassigned: "bg-orange-500/20",
-
-  picked_up: "bg-blue-500/20",
-  delivered: "bg-green-500/20",
-  cancelled: "bg-red-500/20",
-  refund_pending: "bg-orange-500/20",
-  refunded: "bg-slate-500/20",
-};
-
-const STATUS_TEXT: Record<string, string> = {
-  pending: "text-yellow-600",
-  accepted: "text-accentbg",
-  preparing: "text-purple-600",
-  ready: "text-green-600",
-  rejected: "text-red-600",
-  unassigned: "text-orange-600",
-
-  picked_up: "text-blue-600",
-  delivered: "text-green-600",
-  cancelled: "text-red-600",
-  refund_pending: "text-orange-600",
-  refunded: "text-slate-600",
-};
 
 // Memoized order item to prevent unnecessary re-renders during WebSocket updates
 const OrderItem = memo(({ item, darkTheme, updatingOrder, onUpdateStatus, router, vendorProfile }: any) => {
@@ -77,12 +51,24 @@ const OrderItem = memo(({ item, darkTheme, updatingOrder, onUpdateStatus, router
         <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>
           Order #{item.id?.substring(0, 8)}
         </Text>
-        <View className={`px-4 py-1.5 rounded-full ${STATUS_COLORS[item.order_status] || "bg-slate-200"}`}>
-          <Text className={`text-xs font-bold uppercase ${STATUS_TEXT[item.order_status] || "text-slate-600"}`}>
-            {item.order_status}
+        <View className={`px-4 py-1.5 rounded-full ${orderStatusStyle(item.order_status).pill}`}>
+          <Text className={`text-xs font-bold uppercase ${orderStatusStyle(item.order_status).text}`}>
+            {orderStatusStyle(item.order_status).label}
           </Text>
         </View>
       </View>
+
+      {/* A paused order is the one kind a vendor most needs explained: their
+          stock is committed and their money is pending, and nothing on this
+          card previously said why it had stopped. */}
+      {isUnderReview(item.order_status) && (
+        <View className={`flex-row items-start gap-2 p-3 mb-3 rounded-2xl ${darkTheme ? "bg-amber-500/10" : "bg-amber-50"}`}>
+          <Ionicons name="alert-circle-outline" size={18} color="#d97706" style={{ marginTop: 1 }} />
+          <Text className={`flex-1 text-xs leading-relaxed ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>
+            {orderStatusStyle(item.order_status).explanation}
+          </Text>
+        </View>
+      )}
       <Text className={`text-sm font-semibold mb-1 ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
         KSH {item.total_amount} <Text className={`font-normal ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>· {item.order_item?.length || 0} item(s)</Text>
       </Text>
@@ -193,11 +179,13 @@ export default function Orders() {
   } = useVendorOrdersPaginated(searchState, statusFilter, 20);
   
   const { mutateAsync: updateStatusMutation } = useUpdateOrderStatus();
+  const canManageOrders = useCan(PERMISSIONS.manageOrders);
   const { data: dashboard } = useDashboard();
   const { data: vendorProfile } = useVendorProfile();
   const vendorId = dashboard?.vendor_id;
 
-  const filteredOrders = ordersData?.pages?.flatMap(page => page) || [];
+  // `page.items` — the server no longer pretends to be an `InfiniteData`.
+  const filteredOrders = ordersData?.pages?.flatMap((page) => page.items ?? []) || [];
 
   // WebSocket hook for real-time order updates
   const { connected } = useWebSocket('vendor', vendorId || "", (updateData) => {
@@ -216,16 +204,25 @@ export default function Orders() {
 
   const updateStatus = useCallback(async (orderId: string, status: string) => {
     if (updatingOrder === orderId) return;
+    if (!canManageOrders) {
+      Toast.error("Not allowed", "Ask the store owner to enable order management for you.");
+      return;
+    }
     setUpdatingOrder(orderId);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     try {
       await updateStatusMutation({ orderId, status });
     } catch (e) {
-      if (__DEV__) console.error("Caught Unhandled Exception:", e);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // The optimistic update has already rolled back. Without this the row
+      // simply snapped to its old status and the vendor was told nothing —
+      // typically because the customer cancelled first (409) or the order had
+      // already moved on.
+      Toast.error("Couldn't update", errorMessage(e, "That order didn't change. Please refresh."));
     } finally {
       setUpdatingOrder(null);
     }
-  }, [updatingOrder, updateStatusMutation]);
+  }, [updatingOrder, updateStatusMutation, canManageOrders]);
 
   const onRefresh = useCallback(async () => {
     await refetch();
@@ -277,14 +274,7 @@ export default function Orders() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
             >
-              {[
-                { id: "All", label: "All Orders" }, 
-                { id: "Pending", label: "Pending" }, 
-                { id: "Accepted", label: "Accepted" },
-                { id: "Preparing", label: "Preparing" },
-                { id: "Ready", label: "Ready" },
-                { id: "Cancelled", label: "Cancelled" }
-              ].map(f => (
+              {ORDER_FILTERS.map(f => (
                 <PressableScale
                   key={f.id}
                   onPress={() => {

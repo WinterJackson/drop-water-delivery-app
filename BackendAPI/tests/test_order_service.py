@@ -49,7 +49,6 @@ def _vendor(vendor_id, vendor_type="retail_refill"):
     vendor = MagicMock()
     vendor.id = vendor_id
     vendor.clerk_id = "vendor_clerk"
-    vendor.staff_clerk_id = None
     vendor.lat = -1.28
     vendor.lng = 36.82
     vendor.vendor_type = MagicMock()
@@ -76,12 +75,46 @@ def _build_session(user, vendor, items):
     cart_items = MagicMock()
     cart_items.unique.return_value.scalars.return_value.all.return_value = items
 
-    stock_update = MagicMock()
-    stock_update.fetchone.return_value = (9, "Water 20L", vendor.id)
+    # The self-dealing check asks whether the buyer staffs this store. Staff used
+    # to be a column already loaded with the vendor row; it is a membership table
+    # now, so it is a query — and a bare `AsyncMock` answers every query truthily,
+    # which would make every order look self-dealt.
+    not_staff = MagicMock()
+    not_staff.scalars.return_value.first.return_value = None
 
-    session.execute = AsyncMock(
-        side_effect=[idempotency, locked_user, cart_items] + [stock_update] * len(items)
-    )
+    # `UPDATE ... RETURNING id, stock, name, vendor_id, low_stock_threshold,
+    # low_stock_notified_at` — the last two drive the low-stock warning, which is
+    # now per product and fires once per crossing rather than on every sale.
+    stock_update = MagicMock()
+    stock_update.fetchone.return_value = (uuid4(), 9, "Water 20L", vendor.id, 5, None)
+
+    # Pricing reads `Platform_Settings` — the fees and commissions are rows an
+    # administrator can change, not module constants. Empty means "everything is
+    # still the shipped default", which is what the arithmetic below assumes.
+    platform_settings = MagicMock()
+    platform_settings.scalars.return_value.all.return_value = []
+
+    # Dispatched on the statement rather than by position. A positional list has
+    # to be re-counted every time `create_order` gains a query — and when it is
+    # wrong, the *stock update* silently receives some other query's result and
+    # the failure surfaces nowhere near the cause.
+    def _for(statement) -> MagicMock:
+        sql = str(statement)
+        if "Platform_Settings" in sql:
+            return platform_settings
+        if sql.startswith("UPDATE"):
+            return stock_update
+        if "Vendor_Staff" in sql:
+            return not_staff
+        if "Cart_Items" in sql:
+            return cart_items
+        if '"Users"' in sql:
+            return locked_user
+        if '"Orders"' in sql:
+            return idempotency
+        raise AssertionError(f"unexpected query in create_order:\n{sql}")
+
+    session.execute = AsyncMock(side_effect=lambda statement, *a, **k: _for(statement))
 
     async def _get(model, ident):
         if model.__name__ == "Vendor":

@@ -169,3 +169,72 @@ def rider_approved(name: str) -> str:
         </div>
     """
     return _base_template(content, preheader="Your Drop Rider account has been approved.")
+
+
+def _escape(value: str) -> str:
+    """HTML-escape untrusted text before it goes into an email body.
+
+    An administrator's message is not hostile, but it is free text typed into a
+    console and dropped into HTML — an unescaped `<` silently swallows the rest
+    of the paragraph, and a stray `&` renders as a broken entity. This is a
+    correctness fix before it is a security one.
+    """
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def broadcast(name: str, subject: str, body: str) -> str:
+    """A message an administrator composed, in the platform's wrapper.
+
+    Line breaks are converted to paragraphs rather than `<br>` runs: someone
+    typing into a textarea separates thoughts with a blank line, and honouring
+    that is the difference between a readable email and a wall.
+    """
+    paragraphs = "".join(
+        f'<p style="color: #374151; font-size: 15px; line-height: 1.7; margin: 0 0 16px;">{_escape(block.strip())}</p>'
+        for block in body.split("\n\n")
+        if block.strip()
+    )
+
+    return f"""
+    <div style="padding: 32px;">
+        <h1 style="color: #111827; font-size: 22px; margin: 0 0 8px;">{_escape(subject)}</h1>
+        <p style="color: #6b7280; font-size: 14px; margin: 0 0 24px;">Hi {_escape(name)},</p>
+        {paragraphs}
+        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
+            You are receiving this because you have a Drop account.
+            Manage what we send you in the app under Settings &rarr; Notifications.
+        </p>
+        <p style="color: #9ca3af; font-size: 12px;">&copy; Drop Water Delivery</p>
+    </div>
+    """
+
+
+def support_reply(name: str, subject: str, body: str, ticket_id: str) -> str:
+    """A response to a support ticket."""
+    paragraphs = "".join(
+        f'<p style="color: #374151; font-size: 15px; line-height: 1.7; margin: 0 0 16px;">{_escape(block.strip())}</p>'
+        for block in body.split("\n\n")
+        if block.strip()
+    )
+
+    return f"""
+    <div style="padding: 32px;">
+        <p style="color: #6b7280; font-size: 14px; margin: 0 0 4px;">Re: your message to Drop support</p>
+        <h1 style="color: #111827; font-size: 20px; margin: 0 0 24px;">{_escape(subject)}</h1>
+        <p style="color: #6b7280; font-size: 14px; margin: 0 0 16px;">Hi {_escape(name)},</p>
+        {paragraphs}
+        <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin-top: 24px;">
+            Reply in the Drop app to continue this conversation &mdash; that keeps
+            everything in one place and reaches us fastest.
+        </p>
+        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">
+            Reference {_escape(ticket_id[:8])} &middot; &copy; Drop Water Delivery
+        </p>
+    </div>
+    """

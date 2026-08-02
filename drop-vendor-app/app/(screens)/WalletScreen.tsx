@@ -9,23 +9,34 @@ import { BRAND } from "@/constants/brandColors";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { format } from "date-fns";
-import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { PERMISSIONS, useCan, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useWalletTransactions, useWalletWithdraw } from "@/hooks/queries/useWallet";
+import { useWalletSummary, useWalletTransactions, useWalletWithdraw } from "@/hooks/queries/useWallet";
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
 
 export default function WalletScreen() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
-  
+  const { post } = useApiRequest();
+
   const { data: vendor, isLoading, refetch: refetchProfile, isRefetching } = useVendorProfile();
   const { data: dashboardData, isLoading: isLoadingDashboard, refetch: refetchDashboard } = useDashboard();
-  const { data: transactions, isLoading: isLoadingTx, refetch: refetchTx } = useWalletTransactions();
+  const { data: txPage, isLoading: isLoadingTx, refetch: refetchTx } = useWalletTransactions();
+  // `GET /wallet-summary` requires `view_finances`, which an owner may withhold
+  // from a staff member. Asking anyway would 403 on every open of this screen.
+  const canSeeFinances = useCan(PERMISSIONS.viewFinances);
+  const { data: summary, refetch: refetchSummary } = useWalletSummary(canSeeFinances);
   const withdrawMutation = useWalletWithdraw();
+
+  // `/api/wallet/transactions` answers `{data, nextCursor, hasNextPage, total}`.
+  // This screen treated the envelope itself as the array — `transactions.filter`
+  // on an object throws, so the wallet crashed on render the moment the request
+  // succeeded.
+  const transactions = txPage?.data ?? [];
 
   const [topUpAmount, setTopUpAmount] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -35,7 +46,14 @@ export default function WalletScreen() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isWithdrawModalVisible, setIsWithdrawModalVisible] = useState(false);
 
-  const balance = vendor?.wallet_balance || 0;
+  // The wallet summary is authoritative: it is the same arithmetic
+  // `settlement_service` uses to *refuse* a withdrawal, so showing anything else
+  // guarantees the two disagree. The profile balance is only a fallback for the
+  // first frame before the summary lands.
+  const balance = summary?.wallet_balance ?? vendor?.wallet_balance ?? 0;
+  const committed = summary?.committed_cash_float ?? 0;
+  const available = summary?.available_for_withdrawal ?? balance;
+  const isInArrears = summary?.is_in_arrears ?? balance < 0;
   const isWholesale = vendor?.vendor_type === "wholesale_b2b";
   const freeCashoutThreshold = isWholesale ? 5000 : 2500;
   const progress = Math.min((balance / freeCashoutThreshold) * 100, 100);
@@ -45,6 +63,7 @@ export default function WalletScreen() {
     refetchProfile();
     refetchDashboard();
     refetchTx();
+    refetchSummary();
   };
 
   const handleTopUp = async () => {
@@ -60,32 +79,17 @@ export default function WalletScreen() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsProcessingTopUp(true);
-      const token = await getToken();
-      const response = await fetch(VendorApiRoutes.WalletTopUp.path, {
-        method: VendorApiRoutes.WalletTopUp.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: Number(topUpAmount),
-          phone_number: phoneNumber,
-          user_type: "vendor"
-        })
+      await post(VendorApiRoutes.WalletTopUp.path, {
+        amount: Number(topUpAmount),
+        phone_number: phoneNumber,
+        user_type: "vendor",
       });
-
-      const data = await response.json().catch(() => null);
-
-      if (response.ok && !data?.error) {
-        Alert.alert("STK Push Sent", "Please check your phone and enter your M-Pesa PIN to complete the top up.");
-        setTopUpAmount("");
-        setIsTopUpModalVisible(false);
-      } else {
-        Alert.alert("Top Up Failed", data?.error || data?.detail || "An error occurred during top up.");
-      }
+      Alert.alert("STK Push Sent", "Please check your phone and enter your M-Pesa PIN to complete the top up.");
+      setTopUpAmount("");
+      setIsTopUpModalVisible(false);
     } catch (err) {
-      console.error(err);
-      Alert.alert("Error", "Could not process top up at this time.");
+      // The backend rejects a malformed number with the exact format it wants.
+      Alert.alert("Top Up Failed", errorMessage(err, "Could not start that top up."));
     } finally {
       setIsProcessingTopUp(false);
       handleRefresh();
@@ -112,8 +116,10 @@ export default function WalletScreen() {
       Alert.alert("Withdrawal Successful", "Funds have been disbursed to your M-Pesa number.");
       setWithdrawAmount("");
       setIsWithdrawModalVisible(false);
-    } catch (err: any) {
-      Alert.alert("Withdrawal Failed", err.message || "An error occurred during withdrawal.");
+    } catch (err: unknown) {
+      // "Insufficient wallet balance" vs. the float refusal are different
+      // problems with different fixes, and the backend distinguishes them.
+      Alert.alert("Withdrawal Failed", errorMessage(err, "That withdrawal didn't go through."));
     }
   };
 
@@ -145,17 +151,45 @@ export default function WalletScreen() {
         {/* Balance Card */}
         <View className="rounded-[24px] overflow-hidden mb-6" style={{ backgroundColor: BRAND.primary }}>
           <View className="px-6 pt-8 pb-10 items-center">
-            <Text className="text-white/80 font-medium text-base mb-2">Available Float Balance</Text>
+            <Text className="text-white/80 font-medium text-base mb-2">Float Balance</Text>
             {isLoading ? (
               <Skeleton width={180} height={48} borderRadius={8} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
             ) : (
               <Text className="text-white font-bold text-5xl tracking-tight">KSH {balance.toLocaleString()}</Text>
             )}
-            
-            <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">
-              <Ionicons name="shield-checkmark" size={16} color="white" />
-              <Text className="text-white font-medium ml-2">Zero-Fraud Protection Active</Text>
-            </View>
+
+            {/* Balance minus what open cash orders have already claimed. The app
+                used to show only the balance, so a refusal from the withdrawal
+                endpoint read as the platform withholding money it had just
+                displayed — the number and the rule disagreed on screen. */}
+            {committed > 0 && (
+              <View className="w-full mt-5 bg-white/10 rounded-2xl px-4 py-3">
+                <View className="flex-row justify-between items-center mb-1">
+                  <Text className="text-white/80 font-medium">Committed to open cash orders</Text>
+                  <Text className="text-white font-bold">− KSH {committed.toLocaleString()}</Text>
+                </View>
+                <View className="h-px bg-white/20 my-2" />
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-white font-bold">Available to withdraw</Text>
+                  <Text className="text-white font-bold text-lg">KSH {available.toLocaleString()}</Text>
+                </View>
+                <Text className="text-white/70 text-xs mt-2 leading-relaxed">
+                  Your rider collects the cash on these orders, and the platform&apos;s cut comes out of this balance when they&apos;re delivered.
+                </Text>
+              </View>
+            )}
+
+            {isInArrears ? (
+              <View className="flex-row items-center mt-6 bg-red-500/25 px-4 py-2 rounded-full">
+                <Ionicons name="alert-circle" size={16} color="white" />
+                <Text className="text-white font-medium ml-2">Top up to accept cash orders again</Text>
+              </View>
+            ) : (
+              <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">
+                <Ionicons name="shield-checkmark" size={16} color="white" />
+                <Text className="text-white font-medium ml-2">Zero-Fraud Protection Active</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -184,7 +218,7 @@ export default function WalletScreen() {
               <Ionicons name="card-outline" size={20} color={BRAND.primary} />
             </View>
             <Text className={`text-sm font-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Withdrawals</Text>
-            <Text className={`text-xl font-bold mt-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>{transactions?.filter((t: any) => t.transaction_type === "withdrawal").length || 0}</Text>
+            <Text className={`text-xl font-bold mt-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>{transactions.filter((t: any) => t.transaction_type === "withdrawal").length}</Text>
           </View>
         </View>
 
@@ -290,7 +324,7 @@ export default function WalletScreen() {
             <Skeleton width="100%" height={70} borderRadius={16} />
             <Skeleton width="100%" height={70} borderRadius={16} />
           </View>
-        ) : !transactions || transactions.length === 0 ? (
+        ) : transactions.length === 0 ? (
           <View className={`items-center justify-center p-8 rounded-3xl mb-8 ${darkTheme ? "bg-surface-container" : "bg-slate-50"}`}>
             <Ionicons name="receipt-outline" size={48} color={darkTheme ? "#475569" : "#cbd5e1"} />
             <Text className={`mt-4 font-bold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No transactions yet</Text>

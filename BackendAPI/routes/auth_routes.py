@@ -348,6 +348,7 @@ async def delete_account(
     clerk_secret = _require_clerk_secret()
 
     from models.order_model import Order
+    from services.order_service import ACTIVE_ORDER_STATUSES, IN_FLIGHT_DELIVERY_STATUSES
 
     if body.app_type == "customer":
         result = await session.execute(select(User).where(User.clerk_id == clerk_id))
@@ -359,7 +360,7 @@ async def delete_account(
         pending = await session.execute(
             select(Order).where(
                 Order.customer_id == db_user.id,
-                Order.status.in_(["pending", "confirmed", "preparing", "out_for_delivery"])
+                Order.order_status.in_(ACTIVE_ORDER_STATUSES)
             )
         )
         if pending.scalars().first():
@@ -391,36 +392,52 @@ async def delete_account(
         )
 
     elif body.app_type == "vendor":
-        result = await session.execute(select(Vendor).where(Vendor.clerk_id == clerk_id))
-        db_vendor = result.scalar_one_or_none()
-        if not db_vendor:
+        # Every store this account owns, not one of them. `scalar_one_or_none()`
+        # raised MultipleResultsFound for an owner with a second store, so
+        # deleting the account 500'd; and had it not, the request would have
+        # anonymised one store and left the other trading under an account whose
+        # Clerk identity was about to be destroyed.
+        result = await session.execute(
+            select(Vendor)
+            .where(Vendor.clerk_id == clerk_id)
+            .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        )
+        stores = result.scalars().all()
+        if not stores:
             raise HTTPException(status_code=404, detail="Vendor not found")
 
-        # Block if unfulfilled orders exist
+        # Block if unfulfilled orders exist — on any of them.
         pending = await session.execute(
             select(Order).where(
-                Order.vendor_id == db_vendor.id,
-                Order.status.in_(["pending", "confirmed", "preparing", "out_for_delivery"])
+                Order.vendor_id.in_([s.id for s in stores]),
+                Order.order_status.in_(ACTIVE_ORDER_STATUSES)
             )
         )
         if pending.scalars().first():
             raise HTTPException(status_code=400, detail="Cannot delete account while you have unfulfilled orders. Please complete or cancel all pending orders first.")
 
-        # Anonymize PII
-        db_vendor.owners_name = "Deleted Vendor"
-        db_vendor.business_name = "Deleted Store"
-        db_vendor.email = f"deleted_{db_vendor.id}@drop.local"
-        db_vendor.phone_number = None
-        db_vendor.profile_pic = None
-        db_vendor.clerk_id = f"deleted_{db_vendor.id}"
-        db_vendor.push_token = None
-        db_vendor.verification_status = "deleted"
-        db_vendor.location_address = None
-        db_vendor.lat = None
-        db_vendor.lng = None
-        db_vendor.location = None
-        db_vendor.business_license = None
-        db_vendor.payment_methods = []
+        from services.vendor_staff_service import revoke_all_for_store
+
+        for db_vendor in stores:
+            # Anonymize PII
+            db_vendor.owners_name = "Deleted Vendor"
+            db_vendor.business_name = "Deleted Store"
+            db_vendor.email = f"deleted_{db_vendor.id}@drop.local"
+            db_vendor.phone_number = None
+            db_vendor.profile_pic = None
+            db_vendor.clerk_id = f"deleted_{db_vendor.id}"
+            # Otherwise every staff member keeps a live grant to a deleted
+            # store: the resolver matches their membership row and never looks
+            # at `verification_status`.
+            await revoke_all_for_store(session, db_vendor.id)
+            db_vendor.push_token = None
+            db_vendor.verification_status = "deleted"
+            db_vendor.location_address = None
+            db_vendor.lat = None
+            db_vendor.lng = None
+            db_vendor.location = None
+            db_vendor.business_license = None
+            db_vendor.payment_methods = []
 
         await session.commit()
         
@@ -442,7 +459,7 @@ async def delete_account(
         pending = await session.execute(
             select(Order).where(
                 Order.deliverer_id == db_rider.id,
-                Order.status.in_(["out_for_delivery", "preparing"])
+                Order.order_status.in_(IN_FLIGHT_DELIVERY_STATUSES)
             )
         )
         if pending.scalars().first():
@@ -498,8 +515,26 @@ async def get_profile_status(app_type: str, db: AsyncSession = Depends(get_db), 
         return {"exists": True, "missing_fields": missing_fields, "data": safe_serialize(db_user)}
         
     elif app_type == "vendor":
-        result = await db.execute(select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id)))
-        db_vendor = result.scalar_one_or_none()
+        # Ordered + `.first()`, never `scalar_one_or_none()`: an owner may hold
+        # several stores and `GET /api/vendor/stores` exists to list them.
+        # `scalar_one_or_none` raised MultipleResultsFound on the second one, so
+        # opening a branch turned app startup — which calls this first — into a
+        # 500, and the client's `catch` sent the vendor back through onboarding.
+        from services.vendor_management_service import get_all_vendors_by_clerk_id
+
+        stores = await get_all_vendors_by_clerk_id(db, clerk_id)
+
+        if not stores:
+            # Signing in is where a pending staff invitation becomes real: the
+            # owner invited an email address, and only now can the Clerk subject
+            # behind it be learned. Attempted only on the no-store path, so the
+            # Clerk round trip stays off every other request.
+            from services.vendor_staff_service import bind_invitations_for_caller
+
+            if await bind_invitations_for_caller(db, clerk_id):
+                stores = await get_all_vendors_by_clerk_id(db, clerk_id)
+
+        db_vendor = stores[0] if stores else None
         if not db_vendor:
             return {"exists": False, "missing_fields": ["business_name", "phone_number", "vendor_type", "location", "shift"]}
             
@@ -573,15 +608,32 @@ async def register_push_token(
             return {"message": "Push token registered"}
             
     elif app_type == "vendor":
-        result = await db.execute(select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id)))
-        db_vendor = result.scalar_one_or_none()
-        if db_vendor:
-            if db_vendor.staff_clerk_id == clerk_id:
-                db_vendor.staff_push_token = token
-            else:
-                db_vendor.push_token = token
+        # Every store this account can reach, not one of them. The token belongs
+        # to the *device*, and `Vendor.push_token` is per store — so an owner
+        # with two branches only ever received notifications for whichever row
+        # came back first, and `scalar_one_or_none` made the request 500 anyway.
+        from services.vendor_staff_service import set_push_token
+
+        owned = await db.execute(
+            select(Vendor)
+            .where(Vendor.clerk_id == clerk_id)
+            .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        )
+        stores = owned.scalars().all()
+        for store in stores:
+            store.push_token = token
+
+        # Staff hold their token on their own membership row, so a store with
+        # several of them can reach all of them. `Vendor.staff_push_token` was
+        # one column on the *store* and addressed whoever registered last.
+        staffed = await set_push_token(db, clerk_id=clerk_id, token=token)
+
+        if stores or staffed:
             await db.commit()
-            logger.info(f"Push token saved for vendor {clerk_id} (role={'staff' if db_vendor.staff_clerk_id == clerk_id else 'owner'})")
+            logger.info(
+                "Push token saved for vendor %s across %d owned / %d staffed store(s)",
+                clerk_id, len(stores), staffed,
+            )
             return {"message": "Push token registered"}
             
     elif app_type == "rider":
@@ -603,13 +655,14 @@ async def clear_push_token(
 ):
     clerk_id = user["sub"]
     if app_type == "vendor":
-        result = await session.execute(select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id)))
-        entity = result.scalar_one_or_none()
-        if entity:
-            if entity.clerk_id == clerk_id:
-                entity.push_token = None
-            else:
-                entity.staff_push_token = None
+        # Mirror of registration: clear it everywhere it was written, or signing
+        # out on one device leaves a second store still pushing to it.
+        from services.vendor_staff_service import set_push_token
+
+        result = await session.execute(select(Vendor).where(Vendor.clerk_id == clerk_id))
+        for entity in result.scalars().all():
+            entity.push_token = None
+        await set_push_token(session, clerk_id=clerk_id, token=None)
     elif app_type == "rider":
         result = await session.execute(select(Deliverer).where(Deliverer.clerk_id == clerk_id))
         entity = result.scalar_one_or_none()

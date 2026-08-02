@@ -701,7 +701,9 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
         if order.user and order.user.clerk_id == clerk_id:
             await session.rollback()
             raise HTTPException(status_code=403, detail="Self-dealing prohibited. You cannot deliver your own personal order.")
-        if order.vendor and (order.vendor.clerk_id == clerk_id or order.vendor.staff_clerk_id == clerk_id):
+        from services.vendor_staff_service import is_store_member
+
+        if await is_store_member(session, clerk_id, order.vendor):
             await session.rollback()
             raise HTTPException(status_code=403, detail="Self-dealing prohibited. You cannot deliver for a store you manage.")
 
@@ -740,9 +742,13 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
         # FIN-01 FIX: Use Decimal for currency precision
         if deliverer.is_platinum and order.rider_commission and order.rider_commission > 0:
             from decimal import Decimal, ROUND_HALF_UP
-            from services.order_service import GIG_PLATINUM_COMMISSION
+            from services import platform_config_service as config
+
+            await config.ensure_fresh(session)
             delivery_fee_d = Decimal(str(order.delivery_fee))
-            new_commission = (delivery_fee_d * Decimal(str(GIG_PLATINUM_COMMISSION))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            new_commission = (
+                delivery_fee_d * config.get_decimal("gig_platinum_rider_commission_rate")
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             old_commission = Decimal(str(order.rider_commission))
             commission_diff = old_commission - new_commission
             if commission_diff > 0:
@@ -1188,3 +1194,170 @@ async def flush_tracking_logs():
             await session.rollback()
             # If we wanted to guarantee no data loss, we could RPUSH them back, 
             # but for tracking data it's okay to drop them to prevent endless poison loops.
+
+
+# ── Background location pings ────────────────────────────────────────────────
+
+#: One database write per rider per this many seconds. A background task
+#: reporting every 25 m produces a ping every few seconds in traffic; writing
+#: `Deliverer.current_lat/lng` (which also recomputes the PostGIS point and the
+#: H3 cell) on every one of them is the expensive part. The individual pings are
+#: still all recorded — they go to the Redis tracking list, which the GPS flush
+#: job drains in bulk.
+LOCATION_PING_WRITE_INTERVAL_SECONDS = 10
+
+#: A batch bigger than this is either a bug or an attempt to flood the tracking
+#: list. Ten minutes of pings at the fastest sane rate.
+MAX_LOCATION_PINGS_PER_BATCH = 120
+
+
+def _is_plausible_coordinate(lat: float, lng: float) -> bool:
+    """Null Island and out-of-range values mean "no fix", not "at (0,0)"."""
+    if lat is None or lng is None:
+        return False
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return False
+    return not (lat == 0.0 and lng == 0.0)
+
+
+async def record_location_pings(session: AsyncSession, clerk_id: str, pings: list[dict]) -> dict:
+    """Durable path for rider positions, used by the background location task.
+
+    The app used to broadcast position over the WebSocket alone. A backgrounded
+    app has no live socket — and backgrounding the app is the *entire* delivery,
+    because the rider taps "Navigate" and switches to their maps app. Every
+    coordinate from that point on was dropped by a `try/except` that only logged,
+    so the customer's live map froze at the last position the rider happened to
+    be looking at the screen for.
+
+    This endpoint is now the path that must not lose data; the socket stays as
+    the low-latency optimisation on top of it. Pings arrive batched, because a
+    background task that wakes up without connectivity buffers and flushes later.
+    """
+    deliverer = await get_deliverer_by_clerk_id(session, clerk_id)
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    if not pings:
+        return {"accepted": 0, "rejected": 0}
+    if len(pings) > MAX_LOCATION_PINGS_PER_BATCH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many pings in one batch (max {MAX_LOCATION_PINGS_PER_BATCH}).",
+        )
+
+    accepted = [p for p in pings if _is_plausible_coordinate(p.get("lat"), p.get("lng"))]
+    rejected = len(pings) - len(accepted)
+    if not accepted:
+        return {"accepted": 0, "rejected": rejected}
+
+    # A ping may name an order, which is what puts it in that order's tracking
+    # history. Riders may only write to orders assigned to them — otherwise any
+    # rider could forge another rider's delivery trail. An unowned order id is
+    # stripped rather than rejected: the coordinate itself is still legitimate.
+    named_order_ids = {p["order_id"] for p in accepted if p.get("order_id")}
+    owned_order_ids: set[str] = set()
+    if named_order_ids:
+        try:
+            rows = await session.execute(
+                select(Order.id).where(
+                    Order.id.in_([UUID(str(o)) for o in named_order_ids]),
+                    Order.deliverer_id == deliverer.id,
+                )
+            )
+            owned_order_ids = {str(row) for row in rows.scalars().all()}
+        except (ValueError, TypeError):
+            owned_order_ids = set()
+
+    accepted.sort(key=lambda p: p.get("timestamp") or 0)
+    newest = accepted[-1]
+
+    import json
+    import time
+
+    from core.redis_client import get_redis
+
+    redis = get_redis()
+    now = time.time()
+
+    entries = [
+        {
+            "rider_id": str(deliverer.id),
+            "lat": float(p["lat"]),
+            "lng": float(p["lng"]),
+            "heading": float(p.get("heading") or 0.0),
+            "speed": float(p.get("speed") or 0.0),
+            "order_id": str(p["order_id"]) if str(p.get("order_id") or "") in owned_order_ids else None,
+            "timestamp": p.get("timestamp") or now,
+        }
+        for p in accepted
+    ]
+
+    should_write_through = True
+    if redis:
+        try:
+            await redis.rpush("gps_tracking_logs", *[json.dumps(e) for e in entries])
+            # Throttle the row write, not the history. `nx` means the first ping
+            # of each window wins and the rest cost nothing.
+            should_write_through = bool(
+                await redis.set(
+                    f"rider:loc:{deliverer.id}",
+                    "1",
+                    ex=LOCATION_PING_WRITE_INTERVAL_SECONDS,
+                    nx=True,
+                )
+            )
+        except Exception as e:
+            logger.warning("Redis unavailable for location pings (rider %s): %s", deliverer.id, e)
+            redis = None
+            should_write_through = True
+
+    if should_write_through:
+        # Reuse the same guarded writer the socket path uses, so the PostGIS
+        # point and the H3 dispatch cell can never be updated by one path and
+        # not the other.
+        await update_deliverer_location_by_id(
+            session=session,
+            deliverer_id=str(deliverer.id),
+            lat=float(newest["lat"]),
+            lng=float(newest["lng"]),
+        )
+
+    if not redis:
+        # No queue, so the per-order trail has to be written here or it is lost.
+        from models.order_tracking_log_model import OrderTrackingLog
+
+        records = [
+            OrderTrackingLog(
+                order_id=UUID(e["order_id"]),
+                lat=e["lat"],
+                lng=e["lng"],
+                heading=e["heading"],
+                speed=e["speed"],
+            )
+            for e in entries
+            if e["order_id"]
+        ]
+        if records:
+            session.add_all(records)
+            await session.commit()
+
+    # Fan out to whoever is watching this rider. Best effort: a tracking socket
+    # that is down must never fail the write that keeps the history correct.
+    try:
+        from routes.websocket_routes import manager
+
+        await manager.update_rider_location(
+            str(deliverer.id),
+            {
+                "lat": float(newest["lat"]),
+                "lng": float(newest["lng"]),
+                "heading": float(newest.get("heading") or 0.0),
+                "speed": float(newest.get("speed") or 0.0),
+                "order_id": str(newest["order_id"]) if newest.get("order_id") else None,
+            },
+        )
+    except Exception as e:
+        logger.warning("Could not relay location ping for rider %s: %s", deliverer.id, e)
+
+    return {"accepted": len(accepted), "rejected": rejected}

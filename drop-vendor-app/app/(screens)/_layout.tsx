@@ -2,10 +2,12 @@ import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { useStoreScopedCache } from "@/hooks/useStoreScopedCache";
+import { useActiveStore } from "@/stores/activeStoreStore";
 import { useAuth } from "@clerk/clerk-expo";
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
-import { useContext } from "react";
-import { View, Dimensions } from "react-native";
+import { useContext, useEffect } from "react";
+import { ActivityIndicator, View, Dimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import VendorTabIcon from "@/components/ui/VendorTabIcon";
@@ -17,10 +19,23 @@ const { width } = Dimensions.get("window");
 export default function ScreensLayout() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, isLoaded } = useAuth();
 
   // NOTIF-02 FIX: Register push notifications for the vendor app
   usePushNotifications('vendor');
+
+  // Switching stores must not leave the previous store's orders, products and
+  // wallet in the cache — see `useStoreScopedCache`.
+  useStoreScopedCache();
+
+  // Belt and braces with `app/index.tsx`, which hydrates before routing here.
+  // A deep link straight into this group skips that entirely, and an unhydrated
+  // store means the first requests silently act on the vendor's *first* store.
+  const hydrateActiveStore = useActiveStore((s) => s.hydrate);
+  const storeHydrated = useActiveStore((s) => s.hydrated);
+  useEffect(() => {
+    if (!storeHydrated) hydrateActiveStore();
+  }, [storeHydrated, hydrateActiveStore]);
 
   const router = useRouter();
   const path = usePathname();
@@ -36,12 +51,22 @@ export default function ScreensLayout() {
     router.push(route);
   };
 
-  // The customer and rider apps both gate this group; the vendor app did not, so
-  // a deep link — or simply staying put after a session ended — rendered the
-  // whole store dashboard shell with no session behind it. `=== false` rather
-  // than `!isSignedIn`: the value is `undefined` until Clerk resolves, and
-  // redirecting then would bounce a signed-in vendor back to the sign-in screen
-  // on every cold start.
+  // Nothing in this group may mount until Clerk has resolved. Every vendor query
+  // fires on mount, and while `isLoaded` is false `getToken()` yields nothing —
+  // so a deep link straight into this group sent a burst of token-less requests,
+  // each 401'd, and each 401 handler calls `signOut()`. Opening a link destroyed
+  // a valid session. Fixed in the customer app, then the rider app; this was the
+  // last one.
+  if (!isLoaded || !storeHydrated) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: darkTheme ? BRAND.bgDark : BRAND.bgLight }}>
+        <ActivityIndicator size="large" color={BRAND.primary} />
+      </View>
+    );
+  }
+
+  // `=== false` rather than `!isSignedIn`: `undefined` is the pre-resolution
+  // value, already handled above.
   if (isSignedIn === false) {
     return <Redirect href={'/(Auth)'} />;
   }
@@ -67,6 +92,8 @@ export default function ScreensLayout() {
         <Stack.Screen name="MyMap" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="AddProduct" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="Notifications" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="Support" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="SupportTicket" options={{ animation: 'slide_from_right' }} />
 
         <Stack.Screen name="OwnerProfile" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="business/OperatingHours" options={{ animation: 'slide_from_right' }} />

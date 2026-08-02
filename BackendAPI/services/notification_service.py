@@ -99,11 +99,13 @@ async def _resolve_user_id(session: AsyncSession, clerk_id: str, user_type: str 
     """Resolve database user ID from clerk_id based on entity type."""
     user_type = _normalise_user_type(user_type)
     if user_type == "vendor":
-        # A staff member signs in with their own Clerk id against the same store.
-        result = await session.execute(
-            select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id))
-        )
-        entity = result.scalar_one_or_none()
+        # A staff member signs in with their own Clerk id against the same
+        # store, so a vendor notification addressed to them must resolve to the
+        # store row. Ordered `.first()`, never `scalar_one_or_none()`: an owner
+        # may hold several stores and that raises on the second one.
+        from services.vendor_management_service import get_vendor_by_clerk_id
+
+        entity = await get_vendor_by_clerk_id(session, clerk_id)
     elif user_type == "rider":
         result = await session.execute(select(Deliverer).where(Deliverer.clerk_id == clerk_id))
         entity = result.scalar_one_or_none()

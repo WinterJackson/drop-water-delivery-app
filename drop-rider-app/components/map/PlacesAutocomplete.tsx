@@ -19,6 +19,8 @@ import {
 } from "react-native";
 import { Toast } from "@/lib/toast";
 import { useAuth } from "@clerk/clerk-expo";
+import { apiFetch } from "@/API/apiFetch";
+import { ApiError } from "@/API/errors";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { BRAND } from "@/constants/brandColors";
 
@@ -158,16 +160,17 @@ export default function PlacesAutocomplete({
 				const country = countryFromComponents(components);
 				if (country) params.append("country", country);
 
-				const res = await fetch(`${AUTOCOMPLETE_URL}?${params.toString()}`, {
-					headers: { Authorization: `Bearer ${token}` },
-					signal: controller.signal,
-				});
-
-				if (!res.ok) {
+				let payload: { predictions?: PlacePrediction[] };
+				try {
+					payload = await apiFetch<{ predictions?: PlacePrediction[] }>(
+						`${AUTOCOMPLETE_URL}?${params.toString()}`,
+						{ token, signal: controller.signal }
+					);
+				} catch (err) {
 					// 503 means the server has no Maps key, or Google has cut us
 					// off for quota — both are operator problems the user cannot
 					// act on, so say something true and short rather than nothing.
-					if (res.status === 503) {
+					if (err instanceof ApiError && err.status === 503) {
 						Toast.error("Search unavailable", "Address search is temporarily unavailable. Enter your location on the map instead.");
 					}
 					setPredictions([]);
@@ -175,12 +178,11 @@ export default function PlacesAutocomplete({
 					return;
 				}
 
-				const json = await res.json();
-				const results: PlacePrediction[] = json?.predictions ?? [];
+				const results: PlacePrediction[] = payload?.predictions ?? [];
 				setPredictions(results);
 				setShowList(results.length > 0);
 			} catch (e: unknown) {
-				if ((e as Error).name !== "AbortError") {
+				if (__DEV__ && (e as Error).name !== "AbortError") {
 					console.warn("PlacesAutocomplete: prediction fetch failed", e);
 				}
 			} finally {
@@ -214,19 +216,19 @@ export default function PlacesAutocomplete({
 					session_token: sessionToken.current,
 				});
 
-				const res = await fetch(`${DETAILS_URL}?${params.toString()}`, {
-					headers: { Authorization: `Bearer ${token}` },
-				});
+				const details = await apiFetch<PlaceDetails>(
+					`${DETAILS_URL}?${params.toString()}`,
+					{ token }
+				);
 
 				// The session ends when a prediction is resolved. Rotating here is
 				// what makes Google bill the whole search as one session instead
 				// of one charge per keystroke.
 				sessionToken.current = makeSessionToken();
 
-				if (!res.ok) return null;
-				return (await res.json()) as PlaceDetails;
+				return details;
 			} catch (e) {
-				console.warn("PlacesAutocomplete: details fetch failed", e);
+				if (__DEV__) console.warn("PlacesAutocomplete: details fetch failed", e);
 				return null;
 			}
 		},

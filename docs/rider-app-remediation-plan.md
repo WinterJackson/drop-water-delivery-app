@@ -3,6 +3,11 @@
 Audit date: 2026-07-31. Scope: `drop-rider-app` (14,031 LOC) and the backend paths
 it depends on. Verified against the running code, not inferred.
 
+> **Status: phases 1–4 implemented on 2026-07-31.** Every finding below is
+> addressed in code; see "Implementation record" at the end for what landed where
+> and what still needs a physical device. The findings are kept in their original
+> wording so the reasoning behind each fix stays readable.
+
 Findings are ordered by consequence, not by effort. Severity means:
 
 | | Meaning |
@@ -374,3 +379,103 @@ Each phase lands with:
 - Phase 2 additionally: a physical Android device and a physical iPhone, screen
   locked, app backgrounded, full order lifecycle, battery measured over a 30-minute
   delivery.
+
+
+---
+
+## Implementation record — 2026-07-31
+
+All four phases landed together. `npx tsc --noEmit` is clean on all three apps
+and the backend suite is 347 passing / 1 skipped.
+
+### Phase 1 — security
+
+| Finding | Where |
+|---|---|
+| S1-1 | `dependencies/auth_dependencies.py::get_verified_rider`, applied to the ten state-changing routes in `routes/deliverer_routes.py`. Pinned by `tests/test_rider_kyc_enforcement.py` (9 tests), whose `test_the_route_inventory_is_complete` fails if a new rider route is added without being classified. |
+| S1-2 | `app/(screens)/_layout.tsx`. The gate now blocks unless approval is *positively* confirmed, with a retry screen and a sign-out escape hatch so an outage cannot strand a working rider. |
+| S2-5 | Same file: one `useAuth()` destructure including `isLoaded`, and a spinner until Clerk resolves. |
+| S3-1, S3-5 | `RECORD_AUDIO` removed from `app.json`; the duplicate `useAuth()` merged. |
+
+Two things surfaced while implementing this that the audit had not recorded:
+
+- **The KYC status endpoint was fetched by hand in three places** with three
+  different failure behaviours, and `VerificationWall` kept its answer in
+  `useState`. On approval the wall pushed to `/(screens)` while the layout's
+  cache still said `pending` and pushed straight back — a redirect loop that only
+  broke when the 60s `staleTime` expired. Now one hook, `hooks/queries/useKycStatus`.
+- **`GET /api/rider/orders/{id}/rider-location` had no order-scoped check.** Any
+  registered rider could read any other rider's live position, name and
+  availability by guessing an order id. It now calls `authorise_order_access`.
+
+### Phase 2 — delivery tracking
+
+`services/locationTracking.ts` defines `RIDER_LOCATION_TASK` (registered from
+`app/_layout.tsx`, so it survives a headless relaunch), buffers every fix to
+SQLite before sending, and flushes batches to the new
+`POST /api/rider/location-ping`. `hooks/useRiderLocationTracking` bridges Clerk's
+token into the task and drains the buffer on foreground.
+
+- **S1-3** — background updates start at `picked_up` and stop at
+  `delivered`/`cancelled`, behind an Android foreground service and the iOS
+  `location` background mode. Background permission is requested at first pickup
+  after an explanation, never at launch.
+- **S1-4** — the buffer is the durable path; the socket is now the low-latency
+  optimisation on top of it. A fix produced with the socket down is kept, not
+  logged and discarded.
+- **S3-2** — positions are only *reported* from `picked_up`. The foreground
+  watch still runs earlier, because the map needs the rider's own position.
+- **S3-3** — `Accuracy.Balanced` at 25 m, with deferred updates while stationary.
+
+Server side, `record_location_pings` throttles the row write to one per rider per
+10 s while still recording every sample, and strips an `order_id` the rider does
+not own so nobody can forge another rider's trail.
+`tests/test_rider_location_pings.py` covers all of it (13 tests).
+
+**Not yet verified:** everything in this phase needs a physical Android device
+and a physical iPhone — screen locked, app backgrounded, full order lifecycle,
+battery measured over a 30-minute delivery. Simulators do not exercise the
+foreground service or iOS background suspension.
+
+### Phase 3 — client debt
+
+`API/errors.ts` and `API/useApiClient.ts` are ported from `drop-customer-app`;
+`API/apiFetch.ts` is the non-hook equivalent for the Zustand store, the replay
+queue and the background task. All 52 hand-rolled `fetch` call sites are gone —
+`tests/test_rider_api_client.py` fails the build if one reappears, or if any
+screen formats a raw HTTP status into a message. The root `QueryClient` uses
+`retryTransientOnly`, so a 4xx no longer costs three round-trips and three
+sign-out calls.
+
+Also found in passing: **rider sign-up was broken.** `POST /api/auth/create_rider`
+takes the caller's identity from the verified token, and
+`app/(Auth)/sign-up/screen.tsx` sent no `Authorization` header at all, so every
+sign-up ended on "Failed to save rider details". It now attaches the token
+`setActive` has just established.
+
+### Phase 4 — reliability
+
+- **S2-2** — `services/offlineQueue.ts` replaces the flush that lived inside the
+  NetInfo callback. Four triggers (connectivity, foreground, a timer while the
+  queue is non-empty, manual), exponential backoff, `attempts`/`last_error`/
+  `needs_attention` columns added by ALTER rather than a table rebuild, and a
+  mutex so overlapping events cannot double-replay a delivery. A `delivered`
+  action is never deleted automatically; it surfaces on the new **Pending Sync**
+  screen (`app/(screens)/PendingSync.tsx`, linked from Settings) with the
+  server's reason, a retry, and an explicit discard.
+- **S2-3** — `useRiderOrdersPaginated` / `useEarningsHistoryPaginated` on
+  `useInfiniteQuery`, wired to `SectionList`'s `onEndReached`, with an explicit
+  "that's your full delivery history" footer instead of a silent cut-off.
+- **S2-4** — the radar poll is now a reconciliation pass: 120 s while the socket
+  is connected, 15 s only while it is not.
+- **S3-4** — the remaining unconditional `console` calls are `__DEV__`-gated.
+  `ErrorBoundary`'s fatal log stays, deliberately: it feeds crash reporting.
+
+### Configuration
+
+`.env.example` already documented every variable the app reads, and still does —
+no new ones were introduced. `scripts/preflight.js` gained checks for the
+WebSocket scheme matching the backend scheme, the three Android background
+location permissions, the iOS `UIBackgroundModes`, the
+`locationAlwaysAndWhenInUsePermission` string, and a hard failure if
+`RECORD_AUDIO` ever comes back.

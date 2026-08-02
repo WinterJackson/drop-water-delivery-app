@@ -108,8 +108,26 @@ async def stale_asset_monitor_task(ctx):
     return "Swept stale assets"
 
 
+async def run_broadcast_campaign(ctx, campaign_id: str):
+    """Send an admin broadcast to its whole audience, in batches.
+
+    Here rather than in the request because a campaign to ten thousand people
+    would time out somewhere around the thirtieth and leave nobody able to say
+    how far it got. The service commits per batch and updates the campaign's
+    counters as it goes, so a run that dies leaves evidence of what was sent.
+    """
+    from uuid import UUID
+
+    from dependencies.dependencies import get_db_session
+    from services import broadcast_service
+
+    async with get_db_session() as session:
+        return await broadcast_service.run_campaign(session, UUID(campaign_id))
+
+
 class WorkerSettings:
     functions = [
+        run_broadcast_campaign,
         send_push_message_task,
         flush_gps_tracking_logs_task,
         auto_resolve_bottle_rejections_task,

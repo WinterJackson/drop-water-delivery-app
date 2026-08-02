@@ -81,12 +81,20 @@ logging.getLogger("uvicorn.access").addFilter(TokenRedactFilter())
 
 from contextlib import asynccontextmanager
 
-# Running the ARQ worker inside the API process means every uvicorn worker and
-# every deployed instance runs its own copy of the cron schedule — the dispute
-# sweep, the auto-cancel sweep and the GPS flush all fire N times per tick. In
-# any environment with more than one instance that is both wasteful and unsafe.
-# Production must run `arq worker.WorkerSettings` as its own process (see
-# BackendAPI/README.md); set RUN_INLINE_WORKER=1 for a single-process dev machine.
+# Running the ARQ worker inside the API process.
+#
+# The hazard is the **cron schedule**, not the queue: ARQ pulls each queued job
+# to exactly one worker, so several consumers is safe, while an in-process cron
+# fires once per instance — the dispute sweep, the auto-cancel sweep and the GPS
+# flush all N times per tick.
+#
+# This deployment's schedule is external (cron-job.org calls `/api/cron/{slug}`)
+# and `ARQ_INTERNAL_CRON` is unset, so `WorkerSettings.cron_jobs` is empty and an
+# inline worker only consumes the queue. That makes `RUN_INLINE_WORKER=1` a
+# legitimate single-service setup, not merely a dev shortcut — see
+# `docs/render-environment.md`. Setting `ARQ_INTERNAL_CRON` **and**
+# `RUN_INLINE_WORKER` together on a multi-instance service is the combination to
+# avoid.
 RUN_INLINE_WORKER = os.getenv("RUN_INLINE_WORKER", "0").lower() in ("1", "true", "yes")
 
 
@@ -112,9 +120,35 @@ async def lifespan(app: FastAPI):
 
                 arq_worker = create_worker(WorkerSettings)
                 arq_task = asyncio.create_task(arq_worker.main())
+
+                def _report_worker_exit(task: "asyncio.Task") -> None:
+                    """A background task that dies takes the queue with it, silently.
+
+                    Without this the exception sits in the task object until
+                    shutdown awaits it — so broadcast campaigns, push sends and
+                    every sweep simply stop being processed while the API keeps
+                    answering requests normally, and nothing in the log says why.
+                    """
+                    if task.cancelled():
+                        return
+                    error = task.exception()
+                    if error is not None:
+                        logging.error(
+                            "INLINE_ARQ_WORKER_DIED: background jobs are no longer being "
+                            "processed in this instance. Restart the service.",
+                            exc_info=error,
+                        )
+
+                arq_task.add_done_callback(_report_worker_exit)
+
+                if os.getenv("ARQ_INTERNAL_CRON", "0").lower() in ("1", "true", "yes"):
+                    logging.warning(
+                        "RUN_INLINE_WORKER=1 with ARQ_INTERNAL_CRON=1: every sweep will "
+                        "run once per API instance. Safe only on a single instance."
+                    )
                 logging.warning(
                     "ARQ worker started INSIDE the API process (RUN_INLINE_WORKER=1). "
-                    "Never enable this with more than one API instance — cron jobs would run once per instance."
+                    "Queued jobs are consumed here; the schedule stays external."
                 )
             except Exception as e:
                 logging.warning(f"Redis not reachable. Skipping inline ARQ worker. Error: {e}")
@@ -240,8 +274,32 @@ from routes import vendor_rider_routes
 app.include_router(vendor_rider_routes.router, prefix="/api/vendor", tags=["Vendor Rider Registry"])
 
 # --- Admin Routes ---
-from routes import admin_routes
+from routes import (
+    admin_routes,
+    admin_analytics_routes,
+    admin_config_routes,
+    admin_finance_routes,
+    admin_geo_routes,
+    admin_orders_routes,
+    admin_people_routes,
+    admin_support_routes,
+)
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin Dashboard"])
+# Split by concern rather than one growing module, but all under the same prefix
+# so `tests/test_admin_rbac.py` can assert that everything below /api/admin is
+# gated, and so the console has one base URL.
+app.include_router(admin_analytics_routes.router, prefix="/api/admin", tags=["Admin Analytics"])
+app.include_router(admin_people_routes.router, prefix="/api/admin", tags=["Admin People"])
+app.include_router(admin_orders_routes.router, prefix="/api/admin", tags=["Admin Orders"])
+app.include_router(admin_config_routes.router, prefix="/api/admin", tags=["Admin Configuration"])
+app.include_router(admin_geo_routes.router, prefix="/api/admin", tags=["Admin Map"])
+app.include_router(admin_support_routes.router, prefix="/api/admin", tags=["Admin Support"])
+app.include_router(admin_finance_routes.router, prefix="/api/admin", tags=["Admin Finance"])
+
+# App-facing support intake. Without this the ticket queue is an inbox
+# nobody can write to.
+from routes import support_routes
+app.include_router(support_routes.router, prefix="/api", tags=["Support"])
 
 # --- Rider-facing Routes ---
 from routes import deliverer_routes, rider_vendor_routes, deliverer_kyc_routes

@@ -4,11 +4,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, KeyboardTypeOptions } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useAuth } from "@clerk/clerk-expo";
-import { useQueryClient } from "@tanstack/react-query";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
-import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { errorMessage } from "@/API/errors";
 import { Toast } from "@/lib/toast";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,10 +18,11 @@ export default function PayoutSettings() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
-    const { data: dashboard } = useDashboard();
+    // Payout details live on the store profile. The dashboard never returned
+    // `preferred_payment_method`, so this screen opened on the default method
+    // every time and a save silently replaced whatever was configured.
     const { data: vendorProfile } = useVendorProfile();
-    const queryClient = useQueryClient();
-    const { getToken } = useAuth();
+    const updateProfile = useUpdateVendorProfile();
 
     useEffect(() => {
         if (vendorProfile?.role === "staff") {
@@ -49,8 +47,8 @@ export default function PayoutSettings() {
 
     // Hydration
     useEffect(() => {
-        if (dashboard?.preferred_payment_method && dashboard.preferred_payment_method.length > 0) {
-            const prefs = dashboard.preferred_payment_method;
+        if (vendorProfile?.preferred_payment_method && vendorProfile.preferred_payment_method.length > 0) {
+            const prefs = vendorProfile.preferred_payment_method;
             const type = prefs[0] as PayoutMethod;
             setActiveMethod(type);
             if (type === "MPESA_PHONE") setPhoneNo(prefs[1] || "");
@@ -65,7 +63,7 @@ export default function PayoutSettings() {
                 setBankAccountName(prefs[3] || "");
             }
         }
-    }, [dashboard]);
+    }, [vendorProfile]);
 
     // Validation
     const validate = (): boolean => {
@@ -107,27 +105,14 @@ export default function PayoutSettings() {
             if (activeMethod === "MPESA_PAYBILL") payloadArr = ["MPESA_PAYBILL", paybillBusinessNo, paybillAccountNo.trim()];
             if (activeMethod === "BANK_TRANSFER") payloadArr = ["BANK_TRANSFER", bankName.trim(), bankAccountNo.trim(), bankAccountName.trim()];
 
-            const token = await getToken();
-            const res = await fetch(VendorApiRoutes.UpdateProfile.path, {
-                method: VendorApiRoutes.UpdateProfile.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ preferred_payment_method: payloadArr })
-            });
-
-            if (res.ok) {
-                queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
-                Toast.success("Saved", "Payout details updated successfully.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                setTimeout(() => router.back(), 500);
-            } else {
-                Toast.error("Error", "Could not update payout instructions.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            }
+            await updateProfile.mutateAsync({ preferred_payment_method: payloadArr });
+            Toast.success("Saved", "Payout details updated successfully.");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setTimeout(() => router.back(), 500);
         } catch (error) {
-            Toast.error("Network Error", "Unable to reach servers.");
+            // Owner-only on the server; a staff member gets the `owner_only`
+            // sentence rather than a flat "Unable to reach servers".
+            Toast.error("Error", errorMessage(error, "Could not update payout instructions."));
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setIsSaving(false);

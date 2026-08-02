@@ -16,7 +16,7 @@ from models.vendor_model import Vendor
 from models.user_model import User
 from schemas.order_schema import BaseOrder
 from services.expo_push_service import send_push_message
-from services.notification_service import create_notification, queue_push
+from services.notification_service import create_notification, push_allowed, queue_push
 from services.dispatch_policy import DispatchPolicy
 import asyncio
 
@@ -39,6 +39,36 @@ class OrderStatusEnum(str, PyEnum):
     REJECTED = "rejected"
     PENDING_REVIEW = "pending_review"
     MISMATCH_PENDING = "mismatch_pending"
+
+#: Statuses in which an order is still live — goods, money or a delivery are
+#: outstanding. Anything not here is finished (`delivered`, `cancelled`,
+#: `rejected`) or not yet real (`pending` awaiting payment is handled per caller).
+#:
+#: Account deletion reads this. It used to inline
+#: `["pending", "confirmed", "preparing", "out_for_delivery"]` — two of which are
+#: not statuses this platform has ever used — against `Order.status`, a column
+#: that does not exist either (`order_status` does). The query raised
+#: AttributeError before it could run, so "delete my account" answered 500 for
+#: every user type, and the guard it was supposed to provide never existed.
+ACTIVE_ORDER_STATUSES = (
+    OrderStatusEnum.UNASSIGNED.value,
+    OrderStatusEnum.ACCEPTED.value,
+    OrderStatusEnum.PREPARING.value,
+    OrderStatusEnum.READY.value,
+    OrderStatusEnum.PICKED_UP.value,
+    OrderStatusEnum.PENDING_REVIEW.value,
+    OrderStatusEnum.MISMATCH_PENDING.value,
+)
+
+#: An order actually out with a rider. Narrower than the above: a rider may close
+#: their account with orders sitting at the vendor, but not mid-delivery.
+IN_FLIGHT_DELIVERY_STATUSES = (
+    OrderStatusEnum.PICKED_UP.value,
+    OrderStatusEnum.READY.value,
+    OrderStatusEnum.PENDING_REVIEW.value,
+    OrderStatusEnum.MISMATCH_PENDING.value,
+)
+
 
 # Valid transitions: from_status -> allowed_to_statuses
 VALID_TRANSITIONS = {
@@ -64,36 +94,65 @@ def validate_status_transition(current: str, new: str) -> bool:
         return False
     return new_enum in VALID_TRANSITIONS.get(current_enum, set())
 
-# Revenue split constants
-RETAIL_VENDOR_COMMISSION = 0.05   # 5% of product price
-WHOLESALE_VENDOR_COMMISSION = 0.025  # 2.5% of product price
-RETAIL_SERVICE_FEE_KSH = 12.0    # Flat service fee for retail orders
-WHOLESALE_SERVICE_FEE_KSH = 50.0
-GIG_RIDER_COMMISSION = 0.10       # 10% of delivery fee
-GIG_PLATINUM_COMMISSION = 0.07    # 7% of delivery fee for Platinum riders
-IN_HOUSE_RIDER_COMMISSION = 0.0   # 0% — vendor owns the fleet
-WHOLESALE_DELIVERY_MARKUP = 0.05  # 5% platform surcharge on wholesale delivery fees
-SURGE_FEE_KSH = 10.0             # KSH 10 surcharge during peak hours
+# ── Revenue splits ────────────────────────────────────────────────────────
+#
+# These were module constants. They are now rows in `Platform_Settings`, so the
+# owners can change the business model from the admin console and have it live
+# in all three apps on the next quote — the apps render the server's quote
+# verbatim, so nothing ships to a client.
+#
+# The names below are kept as *module attributes* via `__getattr__` at the
+# bottom of this section, because several modules and tests do
+# `from services.order_service import SURGE_FEE_KSH`. Each such lookup now reads
+# the live configuration rather than a value frozen at import.
+#
+# Anything inside this module must call `_config.get_decimal(...)` directly:
+# module-level `__getattr__` is only consulted for attribute access *on the
+# module object*, never for a bare global name inside one of its own functions.
 
-# Peak hour windows (Nairobi local time)
-PEAK_HOURS = [(6, 8), (17, 19)]   # 6:00-8:00 AM and 5:00-7:00 PM
+from services import platform_config_service as _config
+
+#: Legacy constant name -> configuration key.
+_LEGACY_SETTING_NAMES = {
+    "RETAIL_VENDOR_COMMISSION": "retail_vendor_commission_rate",
+    "WHOLESALE_VENDOR_COMMISSION": "wholesale_vendor_commission_rate",
+    "RETAIL_SERVICE_FEE_KSH": "retail_service_fee",
+    "WHOLESALE_SERVICE_FEE_KSH": "wholesale_service_fee",
+    "GIG_RIDER_COMMISSION": "gig_rider_commission_rate",
+    "GIG_PLATINUM_COMMISSION": "gig_platinum_rider_commission_rate",
+    "IN_HOUSE_RIDER_COMMISSION": "in_house_rider_commission_rate",
+    "WHOLESALE_DELIVERY_MARKUP": "wholesale_delivery_markup_rate",
+    "SURGE_FEE_KSH": "surge_fee",
+    "PEAK_HOURS": "peak_hours",
+}
+
+
+def __getattr__(name: str):
+    """Resolve the retired pricing constants against the live configuration."""
+    key = _LEGACY_SETTING_NAMES.get(name)
+    if key is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return _config.get(key)
 
 
 NAIROBI_TZ_OFFSET_HOURS = 3  # EAT = UTC+3, no DST
 
 
 def is_surge_active(now=None) -> bool:
-    """Is the current East Africa Time inside a documented peak window?
+    """Is the current East Africa Time inside a configured peak window?
 
     `now` is injectable so the surge windows can be asserted deterministically
     instead of only when the suite happens to run at 07:00 or 18:00.
+
+    An empty window list switches surge off, which is the honest way to disable
+    it — setting the fee to zero would still mark the order as surged.
     """
     from datetime import datetime, timezone, timedelta
 
     nairobi_tz = timezone(timedelta(hours=NAIROBI_TZ_OFFSET_HOURS))
     moment = now.astimezone(nairobi_tz) if now is not None else datetime.now(nairobi_tz)
     current_hour = moment.hour
-    return any(start <= current_hour < end for start, end in PEAK_HOURS)
+    return any(start <= current_hour < end for start, end in _config.get("peak_hours"))
 
 def _haversine_km(lat_from: float, lng_from: float, lat_to: float, lng_to: float) -> float:
     """Pure Haversine distance in km between two GPS points."""
@@ -183,33 +242,35 @@ def calculate_revenue_splits(
     TWO = Decimal("0.01")
 
     # ── Vendor Commission ──
+    # Every rate here is read from the live platform configuration. Reads are
+    # synchronous; the caller has already awaited `ensure_fresh`, which is also
+    # what makes one quote internally consistent — the configuration cannot move
+    # between two lines of this function.
     if vendor_type == "wholesale_b2b":
-        vendor_commission = (_pt * Decimal(str(WHOLESALE_VENDOR_COMMISSION))).quantize(TWO, rounding=ROUND_HALF_UP)
-        service_fee = Decimal(str(WHOLESALE_SERVICE_FEE_KSH))
+        vendor_commission = (_pt * _config.get_decimal("wholesale_vendor_commission_rate")).quantize(TWO, rounding=ROUND_HALF_UP)
+        service_fee = _config.get_decimal("wholesale_service_fee")
     else:
-        vendor_commission = (_pt * Decimal(str(RETAIL_VENDOR_COMMISSION))).quantize(TWO, rounding=ROUND_HALF_UP)
-        service_fee = Decimal(str(RETAIL_SERVICE_FEE_KSH))
+        vendor_commission = (_pt * _config.get_decimal("retail_vendor_commission_rate")).quantize(TWO, rounding=ROUND_HALF_UP)
+        service_fee = _config.get_decimal("retail_service_fee")
 
     # ── Rider Commission (Gig only; wholesale in-house is exempt) ──
     if vendor_type == "wholesale_b2b":
         rider_commission = Decimal("0.00")
     else:
-        # M-09 FIX: Reference the module-level constants instead of inline values
-        # keep_my_bottle adds 2% premium (12% vs 10%) for extra bottle handling
+        # keep_my_bottle carries a premium for the extra bottle handling.
+        commission_rate = _config.get_decimal("gig_rider_commission_rate")
         if delivery_type == "keep_my_bottle":
-            commission_rate = Decimal(str(GIG_RIDER_COMMISSION)) + Decimal("0.02")
-        else:
-            commission_rate = Decimal(str(GIG_RIDER_COMMISSION))
+            commission_rate += _config.get_decimal("keep_my_bottle_commission_premium")
         rider_commission = (_df * commission_rate).quantize(TWO, rounding=ROUND_HALF_UP)
 
-    # ── Wholesale Delivery Markup (5% surcharge on delivery fee) ──
+    # ── Wholesale Delivery Markup ──
     if vendor_type == "wholesale_b2b":
-        delivery_markup = (_df * Decimal(str(WHOLESALE_DELIVERY_MARKUP))).quantize(TWO, rounding=ROUND_HALF_UP)
+        delivery_markup = (_df * _config.get_decimal("wholesale_delivery_markup_rate")).quantize(TWO, rounding=ROUND_HALF_UP)
     else:
         delivery_markup = Decimal("0.00")
 
-    # ── Surge Pricing (KSH 10 during peak hours) ──
-    surge_fee = Decimal(str(SURGE_FEE_KSH)) if is_surge_active() else Decimal("0.00")
+    # ── Surge Pricing ──
+    surge_fee = _config.get_decimal("surge_fee") if is_surge_active() else Decimal("0.00")
 
     # ── Platform Total Revenue ──
     # Platform absorbs the welcome discount as a customer acquisition cost
@@ -646,7 +707,9 @@ async def create_order(
   vendor = await session.get(Vendor, vendor_id)
 
   # --- Anti-Fraud: Self-Dealing Prevention ---
-  if vendor and (user.clerk_id == vendor.clerk_id or user.clerk_id == getattr(vendor, "staff_clerk_id", None)):
+  from services.vendor_staff_service import is_store_member
+
+  if await is_store_member(session, user.clerk_id, vendor):
       raise HTTPException(
           status_code=403,
           detail="Self-dealing prohibited. You cannot place an order from your own store."
@@ -775,7 +838,14 @@ async def create_order(
               stock=Product.stock - item.quantity,
               is_available=Product.stock - item.quantity > 0
           )
-          .returning(Product.stock, Product.name, Product.vendor_id)
+          .returning(
+              Product.id,
+              Product.stock,
+              Product.name,
+              Product.vendor_id,
+              Product.low_stock_threshold,
+              Product.low_stock_notified_at,
+          )
       )
       updated_row = result.fetchone()
       if not updated_row:
@@ -784,29 +854,102 @@ async def create_order(
               detail="Insufficient stock for product (concurrent purchase detected). Please refresh and try again."
           )
 
-      new_stock, product_name, vendor_id_for_push = updated_row
+      (
+          product_id_for_stock,
+          new_stock,
+          product_name,
+          vendor_id_for_push,
+          low_stock_threshold,
+          low_stock_notified_at,
+      ) = updated_row
 
-      # Low stock push threshold evaluator
-      if new_stock <= 5:
-          stock_alert_vendor = await session.get(Vendor, vendor_id_for_push)
-          if stock_alert_vendor:
-              title = "Low Stock Alert! ⚠️"
-              body = f"'{product_name}' is running critically low ({new_stock} left). Restock soon!"
-              action_url = "/(screens)/Inventory"
-              await create_notification(
-                  session=session,
-                  user_id=stock_alert_vendor.id,
-                  user_type="vendor",
-                  title=title,
-                  message=body,
-                  message_type="low_stock",
-                  action_url=action_url
-              )
-              queue_push(session, to=stock_alert_vendor.push_token, title=title,
-                         body=body, data={"url": action_url})
+      await _warn_if_low_stock(
+          session,
+          product_id=product_id_for_stock,
+          product_name=product_name,
+          vendor_id=vendor_id_for_push,
+          new_stock=new_stock,
+          threshold=low_stock_threshold,
+          already_notified_at=low_stock_notified_at,
+      )
 
   await session.commit()
   return order
+
+async def _warn_if_low_stock(
+    session: AsyncSession,
+    *,
+    product_id,
+    product_name: str,
+    vendor_id,
+    new_stock: int,
+    threshold: int | None,
+    already_notified_at,
+):
+    """Tell the vendor once when a product crosses its low-stock line.
+
+    Three things were wrong with the version this replaces:
+
+    * The threshold was hardcoded to 5 for every product on the platform. A shop
+      selling 200 refills a day and one selling a dispenser a month cannot share
+      a number, so `Product.low_stock_threshold` is per product (0 disables it).
+    * It fired on *every* order once stock was below the line, so the last five
+      sales of a product produced five identical pushes. `low_stock_notified_at`
+      makes it one per crossing, cleared when stock is replenished back above it.
+    * `action_url` was `/(screens)/Inventory`, a screen that does not exist in
+      the vendor app. Tapping the notification went nowhere.
+
+    Staff are notified too — they are the ones on the floor who notice the empty
+    pallet — but only those who may actually restock. Telling someone about a
+    problem they have no permission to fix is noise.
+    """
+    from datetime import datetime, timezone
+
+    if not threshold or new_stock > threshold:
+        return
+    if already_notified_at is not None:
+        # Still below the line from an earlier crossing; `restock` clears this.
+        return
+
+    vendor = await session.get(Vendor, vendor_id)
+    if not vendor:
+        return
+
+    await session.execute(
+        update(Product)
+        .where(Product.id == product_id)
+        .values(low_stock_notified_at=datetime.now(timezone.utc))
+    )
+
+    title = "Low stock ⚠️"
+    body = (
+        f"'{product_name}' is out of stock — customers can't order it."
+        if new_stock == 0
+        else f"'{product_name}' is down to {new_stock}. Restock soon."
+    )
+    action_url = "/(screens)/Products"
+
+    await create_notification(
+        session=session,
+        user_id=vendor.id,
+        user_type="vendor",
+        title=title,
+        message=body,
+        message_type="low_stock",
+        action_url=action_url,
+    )
+    # `queue_push`, not `dispatch_background`: the stock decrement above has not
+    # committed yet, and a rolled-back order must not have told anyone anything.
+    from models.vendor_staff_model import PERMISSION_MANAGE_PRODUCTS
+    from services.vendor_staff_service import push_tokens_for_store
+
+    recipients = [vendor.push_token] + await push_tokens_for_store(
+        session, vendor.id, permission=PERMISSION_MANAGE_PRODUCTS
+    )
+    for token in recipients:
+        if token and push_allowed(vendor, "low_stock"):
+            queue_push(session, to=token, title=title, body=body, data={"url": action_url})
+
 
 async def update_orders_payment_status_by_checkout_id(
     session: AsyncSession,

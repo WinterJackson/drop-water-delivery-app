@@ -2,9 +2,11 @@ import React, { useContext, useEffect, useState, useCallback, memo } from "react
 import { View, Text, StatusBar, RefreshControl, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import PressableScale from "@/components/ui/PressableScale";
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import { useVendorRiders } from "@/hooks/queries/useVendorRiders";
 import { Toast } from "@/lib/toast";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
@@ -110,7 +112,7 @@ const RiderCard = memo(({
 export default function RiderManagement() {
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { put } = useApiRequest();
   const router = useRouter();
   const { data: vendorProfile } = useVendorProfile();
 
@@ -121,9 +123,15 @@ export default function RiderManagement() {
       }
   }, [vendorProfile]);
   
-  const [riders, setRiders] = useState<any[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  // One reader for the roster, shared with `OrderDetail`'s assign sheet. This
+  // screen used to keep its own copy in `useState` and refetch it by hand.
+  const {
+    data: riders = [],
+    isLoading: initialLoading,
+    isRefetching: refreshing,
+    refetch: fetchRiders,
+  } = useVendorRiders();
+
   const [filter, setFilter] = useState("Pending");
   const [actioningRider, setActioningRider] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,32 +146,9 @@ export default function RiderManagement() {
       return 0;
     });
 
-  const fetchRiders = async () => {
-    const token = await getToken();
-    try {
-      const res = await fetch(VendorApiRoutes.GetMyRiders.path, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRiders(data);
-      }
-    } catch (e) {
-      if (__DEV__) console.error(e);
-    } finally {
-      setInitialLoading(false);
-    }
-  };
-
   const onRefresh = useCallback(async () => {
-    setRefreshing(true);
     await fetchRiders();
-    setRefreshing(false);
-  }, []);
-
-  useEffect(() => {
-    fetchRiders();
-  }, []);
+  }, [fetchRiders]);
 
   const handleAction = useCallback(async (delivererId: string, action: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -185,31 +170,24 @@ export default function RiderManagement() {
       onConfirm: async () => {
           Popup.hide();
           setActioningRider(delivererId);
-          const token = await getToken();
           try {
-            const res = await fetch(VendorApiRoutes.ManageRider.path, {
-              method: VendorApiRoutes.ManageRider.method,
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ deliverer_id: delivererId, action })
-            });
-
-            if (res.ok) {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              Toast.success("Success", `${riderName} has been ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "suspended"}.`);
-              fetchRiders();
-            } else {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              Toast.error("Error", "Action failed. Please try again.");
-            }
+            await put(VendorApiRoutes.ManageRider.path, { deliverer_id: delivererId, action });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Toast.success("Success", `${riderName} has been ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "suspended"}.`);
+            fetchRiders();
           } catch (e) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            Toast.error("Network Error", "Please check your connection.");
+            // This route is owner-only on the server now; a staff member who
+            // reaches it gets `owner_only` with a sentence saying so, which
+            // "Action failed. Please try again." would have hidden behind an
+            // instruction to retry something that can never succeed.
+            Toast.error("Error", errorMessage(e, "That action didn\'t go through."));
           } finally {
             setActioningRider(null);
           }
         }
     });
-  }, [actioningRider, getToken, riders]);
+  }, [actioningRider, put, riders, fetchRiders]);
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>

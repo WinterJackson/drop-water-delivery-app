@@ -17,13 +17,17 @@ from services.deliverer_service import (
     get_deliverer_reviews,
     cancel_delivery,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from typing import Optional, List
 from schemas.order_schema import OrderWithDetails
 from schemas.order_schema import OrderWithDetails
 from schemas.deliverer_schemas import DelivererProfileResponse
-from dependencies.auth_dependencies import get_current_rider
+from dependencies.auth_dependencies import (
+    authorise_order_access,
+    get_current_rider,
+    get_verified_rider,
+)
 from fastapi import UploadFile, File
 
 router = APIRouter()
@@ -60,6 +64,25 @@ class RiderProfileUpdateRequest(BaseModel):
 class LocationUpdateRequest(BaseModel):
     lat: float
     lng: float
+
+
+class LocationPing(BaseModel):
+    """One position sample from the rider's background location task.
+
+    `timestamp` is the client's clock at the moment of the fix, not receipt time:
+    a batch flushed after ten minutes offline must land in the tracking history
+    in the order it was actually travelled.
+    """
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+    order_id: Optional[UUID] = None
+    timestamp: Optional[float] = None
+
+
+class LocationPingBatch(BaseModel):
+    pings: List[LocationPing] = Field(min_length=1, max_length=120)
 
 
 class AvailabilityRequest(BaseModel):
@@ -123,11 +146,34 @@ async def rider_update_location(
     return await update_deliverer_location(session=db, clerk_id=clerk_id, lat=body.lat, lng=body.lng)
 
 
+@router.post("/location-ping")
+async def rider_location_ping(
+    body: LocationPingBatch,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_verified_rider),
+):
+    """Durable position reporting from the rider's background location task.
+
+    Separate from `PUT /location`, which is the foreground "where am I" write and
+    takes a single point. This one is batched, throttles the row write to one per
+    rider per 10s, and records every sample in the order's tracking history — it
+    is the path that has to survive a backgrounded app and patchy coverage, which
+    the WebSocket cannot. See `services/deliverer_service.record_location_pings`.
+    """
+    from services.deliverer_service import record_location_pings
+
+    return await record_location_pings(
+        session=db,
+        clerk_id=user["sub"],
+        pings=[p.model_dump() for p in body.pings],
+    )
+
+
 @router.put("/availability")
 async def rider_toggle_availability(
     body: AvailabilityRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     clerk_id = user["sub"]
     result = await toggle_availability(session=db, clerk_id=clerk_id, is_available=body.is_available)
@@ -162,7 +208,7 @@ async def rider_get_orders(
 @router.get("/trip-radar", response_model=List[OrderWithDetails])
 async def rider_trip_radar(
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     clerk_id = user["sub"]
     orders = await get_trip_radar_orders(session=db, clerk_id=clerk_id)
@@ -174,7 +220,7 @@ async def rider_update_delivery_status(
     order_id: UUID,
     body: DeliveryStatusRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     clerk_id = user["sub"]
     return await update_delivery_status(
@@ -200,7 +246,7 @@ async def rider_earnings(
 async def rider_reject_delivery(
     order_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Rider rejects an assigned delivery, triggering automatic reassignment."""
     clerk_id = user["sub"]
@@ -215,7 +261,7 @@ async def rider_cancel_delivery(
     order_id: UUID,
     body: CancelOrderRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Rider cancels an assigned delivery (handles both pre-pickup unassignment and post-pickup cancellation)."""
     clerk_id = user["sub"]
@@ -235,8 +281,18 @@ async def get_rider_location_for_order(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_rider),
 ):
-    """Get current rider location for a specific order (polling fallback for WebSocket)."""
+    """Get current rider location for a specific order (polling fallback for WebSocket).
+
+    Authenticating proves who is calling; it says nothing about their
+    relationship to the order in the URL. Without this check any registered
+    rider could read any other rider's live position, name and availability by
+    guessing an order id. The customer's equivalent lives in `cart_routes` and is
+    authorised the same way.
+    """
     from models.order_model import Order
+
+    await authorise_order_access(db, order_id, user["sub"], allowed_roles=("rider",))
+
     order = await db.get(Order, order_id)
     if not order or not order.deliverer_id:
         raise HTTPException(status_code=404, detail="Order not found or no rider assigned")
@@ -258,7 +314,7 @@ async def get_rider_location_for_order(
 async def rider_accept_order(
     order_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Rider 'swipes to accept' a Trip Radar broadcast."""
     clerk_id = user["sub"]
@@ -272,7 +328,7 @@ async def rider_report_address_mismatch(
     order_id: UUID,
     body: MismatchRequest = MismatchRequest(),
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Rider reports a floor level lie. Pauses delivery."""
     clerk_id = user["sub"]
@@ -284,7 +340,7 @@ async def rider_report_bottle_rejection(
     order_id: UUID,
     body: BottleRejectionRequest,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Rider reports a damaged bottle. Pauses delivery for admin review."""
     clerk_id = user["sub"]
@@ -313,7 +369,7 @@ async def rider_reviews(
 async def upload_proof(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_rider),
+    user=Depends(get_verified_rider),
 ):
     """Secure endpoint for riders to upload proof of delivery photos to AWS S3."""
     clerk_id = user["sub"]

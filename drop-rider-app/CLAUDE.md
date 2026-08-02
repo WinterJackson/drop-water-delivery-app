@@ -33,8 +33,58 @@ Key Business Workflows:
 - Use `SafeAreaView` from `react-native-safe-area-context` to prevent UI clipping on notched devices.
 
 ### 3. Location Tracking
-- Location tracking requires explicit permissions. Ensure `expo-location` permission requests are handled gracefully, explaining to the rider *why* location is needed.
-- Only broadcast WebSocket locations when an order is actively in progress to save battery and reduce server load.
+`services/locationTracking.ts` owns this. Do not add another `watchPositionAsync`
+loop.
+
+- The **durable** path is the `expo-task-manager` task -> SQLite buffer ->
+  `POST /api/rider/location-ping`. The WebSocket is a low-latency optimisation on
+  top of it, never the only writer: a `sendMessage` with no socket used to be
+  swallowed by a `try/catch` that only logged, so every fix produced in patchy
+  coverage was lost.
+- Reporting starts at `picked_up` and stops at `delivered`/`cancelled`. Tracking
+  from acceptance spends battery on the leg to the vendor and shows the rider's
+  position to a customer whose order has not been collected.
+- `Accuracy.Balanced` at 25 m. `High` at 5 s / 10 m holds the GPS radio open and
+  a delivery dot on a city map cannot show the difference.
+- Background permission is requested at **first pickup**, after an explanation —
+  never at launch. Android 11+ will not offer "Allow all the time" in the same
+  prompt as the foreground one, and an unexplained prompt is the main cause of a
+  permanent denial. A refusal does not block the delivery; it degrades to
+  foreground-only tracking and says so.
+
+### 3a. Every backend call goes through the API client
+- React code uses `useApiRequest()` from `API/useApiClient.ts`.
+- Code outside React (the Zustand store, the offline replay queue, the location
+  task) uses `apiFetch` from `API/apiFetch.ts`, which is handed a token.
+- Raw `fetch` is banned everywhere else, and
+  `BackendAPI/tests/test_rider_api_client.py` fails the build if one reappears.
+  `fetch` has no timeout, no 401 handling and no error normalisation; nineteen
+  hooks used to throw the HTTP status at the rider, so "Insufficient balance: KSH
+  4,000 is committed as float" arrived as `Earnings fetch failed: 402`.
+- Surface the backend's message with `errorMessage(err, fallback)` from
+  `API/errors.ts`. Branch on `err instanceof ApiError && err.status`, never on
+  `err.response` — an `ApiError` has no `.response`.
+- `retry` is `retryTransientOnly`: a 4xx is a refusal, not a dropped packet, and
+  retrying a 401 fires the sign-out handler once per attempt.
+
+### 3b. The verification gate fails closed
+`app/(screens)/_layout.tsx` blocks unless `kyc_status === "approved"` is
+*positively* confirmed. It used to skip its own check whenever the status query
+errored, so turning wifi off at the right moment granted access to Trip Radar.
+The backend enforces this independently via `get_verified_rider`, but the client
+must not rely on that to behave.
+
+KYC status has exactly one reader: `hooks/queries/useKycStatus`. Three screens
+used to fetch it separately, and `VerificationWall` kept it in `useState` — on
+approval the wall pushed forward while the layout's cache pushed back, a redirect
+loop that only broke when the `staleTime` expired.
+
+### 3c. Nothing the rider did offline is deleted silently
+`services/offlineQueue.ts` retries on four triggers with exponential backoff. An
+action the server refuses on the merits is marked `needs_attention` and shown on
+the **Pending Sync** screen with the server's reason — it is not dropped. For a
+`delivered` action, dropping it destroys the rider's proof of work and their pay.
+Only an explicit tap in that screen discards one.
 
 ### 4. Maps keys and Google web services
 - The Maps key is **not** in `app.json`. `app.config.js` injects
@@ -53,6 +103,21 @@ Key Business Workflows:
 
 ### 6. Optimistic UI Updates
 - When transitioning order statuses (e.g., Accept, Pick Up, Complete), use React Query's `onMutate` to optimistically update the local cache, providing an instant, snappy feel to the rider. Always handle `onError` to rollback the cache if the network request fails.
+
+### 7. Help & support
+
+`app/(screens)/Support.tsx` writes into the admin console's queue via
+`hooks/queries/useSupport.ts`. Three things about it are deliberate:
+
+- **It is reachable before verification.** `(screens)/_layout.tsx` lets
+  `VerificationWall` *and* `Support` through the KYC gate. A rider on day four of
+  a "less than 24 hours" review is exactly the person who needs to ask why, and
+  the wall itself links to it.
+- **The thread is rendered as given.** Support staff write internal notes in the
+  same thread; the server strips them. Never re-add a client-side filter as the
+  safeguard — the boundary is the safeguard.
+- **`user_type=rider` is on every call.** One Clerk identity can be a rider and a
+  customer; the account being acted on is stated, never guessed.
 
 ### Session teardown
 `hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local

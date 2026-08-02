@@ -115,6 +115,28 @@ export const initDB = async () => {
                 );
             `);
         }
+
+        // --- replay bookkeeping migration ---
+        // `attempts`, `last_error` and `needs_attention` back the backoff and the
+        // Pending Sync screen (`services/offlineQueue.ts`). Added with ALTER
+        // rather than a table rebuild: these rows are a rider's unsynced
+        // deliveries, and dropping the table to add a column would destroy the
+        // exact data the queue exists to protect.
+        const cols = await db.getAllAsync(`PRAGMA table_info(offline_actions)`) as any[];
+        const names = new Set(cols.map((c: any) => c.name));
+        for (const [column, ddl] of [
+            ['attempts', 'ALTER TABLE offline_actions ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'],
+            ['last_error', 'ALTER TABLE offline_actions ADD COLUMN last_error TEXT'],
+            ['needs_attention', 'ALTER TABLE offline_actions ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0'],
+        ] as const) {
+            if (!names.has(column)) {
+                try {
+                    await db.execAsync(ddl);
+                } catch (e) {
+                    if (__DEV__) console.warn(`[initDB] could not add ${column}:`, e);
+                }
+            }
+        }
     } catch (e: unknown) {
         if (__DEV__ && !(e as Error)?.message?.includes('NullPointerException')) {
             console.warn('[initDB] SQLite init failed (non-fatal):', e);

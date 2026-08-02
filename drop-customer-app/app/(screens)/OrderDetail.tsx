@@ -844,6 +844,27 @@ export default function OrderDetail() {
                         <Text className="text-white font-bold text-lg">⭐ Rate This Order</Text>
                     </PressableScale>
                 )}
+
+                {/* Something went wrong with *this* order is the commonest reason
+                    anybody contacts support, and it is the moment they are least
+                    willing to go hunting through Settings. The order travels with
+                    them, so the ticket says which one without them typing it. */}
+                <PressableScale
+                    activeOpacity={0.8}
+                    onPress={() =>
+                        router.push({
+                            pathname: "/(screens)/Support",
+                            params: { orderId: order.id },
+                        } as any)
+                    }
+                    className="py-4 rounded-2xl items-center mb-4 flex-row justify-center gap-2"
+                    style={{ borderWidth: 1, borderColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
+                >
+                    <Ionicons name="help-buoy-outline" size={18} color={BRAND.primary} />
+                    <Text className="font-bold text-base" style={{ color: BRAND.primary }}>
+                        Get help with this order
+                    </Text>
+                </PressableScale>
                 </ScrollView>
             </View>
 

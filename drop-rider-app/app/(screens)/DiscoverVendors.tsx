@@ -1,8 +1,9 @@
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState, useCallback, useRef } from "react";
 import { View, Text, StatusBar, FlatList, RefreshControl, Image, TextInput, Switch, Platform, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useRouter } from "expo-router";
 import PressableScale from "@/components/ui/PressableScale";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -43,7 +44,8 @@ if (Platform.OS !== 'web') {
 export default function DiscoverVendors() {
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+
+  const { get, post } = useApiRequest();
   const router = useRouter();
   const { data: profile, isLoading: isProfileLoading } = useRiderProfile();
   
@@ -90,24 +92,11 @@ export default function DiscoverVendors() {
   const activeVendorCount = vendors.filter((v: any) => v.status === "pending" || v.status === "approved").length;
 
   const fetchVendors = async (lat: number, lng: number, search?: string) => {
-    const token = await getToken();
     try {
-      const route = RiderApiRoutes.DiscoverVendors(lat, lng, search);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setVendors(data);
-      } else {
-        Toast.error("Error", "Could not load nearby vendors. Pull to refresh to try again.");
-      }
+      setVendors(await get<any[]>(RiderApiRoutes.DiscoverVendors(lat, lng, search).path));
     } catch (e) {
-      if (__DEV__) console.error(e);
+      if (e instanceof ApiError && e.status === 401) return;
+      Toast.error("Error", errorMessage(e, "Could not load nearby vendors. Pull to refresh to try again."));
     }
   };
 
@@ -168,24 +157,15 @@ export default function DiscoverVendors() {
       confirmText: "Apply",
       onConfirm: async () => {
           Popup.hide();
-          const token = await getToken();
           try {
-            const res = await fetch(RiderApiRoutes.ApplyVendor.path, {
-              method: RiderApiRoutes.ApplyVendor.method,
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ vendor_id: vendorId })
-            });
-
-            if (res.ok) {
-              Toast.success("Applied", "Your registration is now pending approval.");
-              // Optimistic UI Update
-              setVendors(prev => prev.map(v => v.id === vendorId ? { ...v, status: "pending" } : v));
-            } else {
-              const data = await res.json();
-              Toast.error("Error", data.detail || "Application failed");
-            }
+            await post(RiderApiRoutes.ApplyVendor.path, { vendor_id: vendorId });
+            Toast.success("Applied", "Your registration is now pending approval.");
+            // Optimistic UI Update
+            setVendors(prev => prev.map(v => v.id === vendorId ? { ...v, status: "pending" } : v));
           } catch (e) {
-            Toast.error("Error", "Network error");
+            // The backend refuses past ten vendors, and for a vendor the rider
+            // already applied to, each with its own sentence.
+            Toast.error("Error", errorMessage(e, "Application failed"));
           }
         }
     });

@@ -1,98 +1,62 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@clerk/clerk-expo";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { useApiRequest } from "@/API/useApiClient";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+export interface WalletTransaction {
+  id: string;
+  amount: number;
+  transaction_type: string;
+  description?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+}
 
 export const useWalletTransactions = (limit = 50, offset = 0) => {
-  const { getToken, signOut } = useAuth();
+  const { get } = useApiRequest();
 
-  return useQuery({
+  return useQuery<WalletTransaction[], Error>({
     queryKey: ["walletTransactions", limit, offset],
-    queryFn: async () => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
-      const res = await fetch(`${RiderApiRoutes.GetTransactions.path}?limit=${limit}&offset=${offset}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 401) {
-        signOut();
-        throw new Error("Session Expired");
-      }
-
-      if (!res.ok) {
-        throw new Error("Failed to fetch transactions");
-      }
-
-      return res.json();
-    },
+    queryFn: () =>
+      get<WalletTransaction[]>(
+        `${RiderApiRoutes.GetTransactions.path}?limit=${limit}&offset=${offset}`
+      ),
   });
 };
 
 export const useWalletTransactionsPaginated = (search: string, type: string, limit = 20) => {
-  const { getToken, signOut } = useAuth();
+  const { get } = useApiRequest();
 
   return useInfiniteQuery({
     queryKey: ["walletTransactions", search, type, limit],
     queryFn: async ({ pageParam = 0 }) => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
       let url = `${RiderApiRoutes.GetTransactions.path}?limit=${limit}&offset=${pageParam}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (type && type !== "All") url += `&type=${encodeURIComponent(type)}`;
-
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 401) {
-        signOut();
-        throw new Error("Session Expired");
-      }
-
-      if (!res.ok) {
-        throw new Error("Failed to fetch transactions");
-      }
-
-      return res.json();
+      return get<any>(url);
     },
-    getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
+    getNextPageParam: (lastPage: any) => lastPage?.nextCursor ?? undefined,
     initialPageParam: 0,
   });
 };
 
 export const useWalletWithdraw = () => {
-  const { getToken } = useAuth();
+  const { post } = useApiRequest();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ amount, phoneNumber, userType }: { amount: number, phoneNumber: string, userType: string }) => {
-      const token = await getToken();
-      if (!token) throw new Error("No auth token");
-
-      const res = await fetch(RiderApiRoutes.WalletWithdraw.path, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ amount, phone_number: phoneNumber, user_type: userType }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(data?.detail || "Withdrawal failed");
-      }
-
-      return data;
-    },
+    mutationFn: ({ amount, phoneNumber, userType }: { amount: number, phoneNumber: string, userType: string }) =>
+      post(RiderApiRoutes.WalletWithdraw.path, {
+        amount,
+        phone_number: phoneNumber,
+        user_type: userType,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["walletTransactions"] });
       queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
+      // The withdrawal moves the balance, so the float split the Cashout screen
+      // renders is stale the moment this succeeds.
+      queryClient.invalidateQueries({ queryKey: ["rider", "wallet-summary"] });
     },
   });
 };
@@ -116,22 +80,10 @@ export interface RiderWalletSummary {
 }
 
 export function useWalletSummary() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderWalletSummary, Error>({
         queryKey: ['rider', 'wallet-summary'],
-        queryFn: async () => {
-            const token = await getToken();
-            const route = RiderApiRoutes.WalletSummary;
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error('401_UNAUTHORIZED'); }
-            if (!res.ok) throw new Error(`Wallet summary fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => get<RiderWalletSummary>(RiderApiRoutes.WalletSummary.path),
         staleTime: 1000 * 30,
-        retry: (failureCount, error) =>
-            error.message === '401_UNAUTHORIZED' ? false : failureCount < 2,
     });
 }

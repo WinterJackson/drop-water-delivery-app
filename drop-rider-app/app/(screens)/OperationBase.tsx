@@ -2,7 +2,8 @@ import React, { useContext, useState, useEffect, useRef } from "react";
 import { View, Text, StatusBar, Platform, StyleSheet, Dimensions, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { PressableScale } from "@/components/ui/PressableScale";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import * as Location from "expo-location";
@@ -83,7 +84,7 @@ function deg2rad(deg: number) { return deg * (Math.PI / 180) }
 export default function OperationBase() {
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { get, put } = useApiRequest();
   const router = useRouter();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -98,26 +99,30 @@ export default function OperationBase() {
   const [zoneChanges, setZoneChanges] = useState<number>(0);
   const [riderId, setRiderId] = useState<string>("");
 
+  /**
+   * Load the rider's saved base and their remaining zone-change allowance.
+   *
+   * One definition, used by the initial load and the retry button — those were
+   * two copies of the same twenty lines, and only one of them handled the
+   * "never set a base" path.
+   */
+  const loadProfile = async () => {
+    const data = await get<any>(RiderApiRoutes.GetProfile.path);
+    setZoneChanges(data.zone_changes_this_month || 0);
+    setRiderId(data.id);
+    if (data.operation_lat && data.operation_lng) {
+      setLocation({ latitude: data.operation_lat, longitude: data.operation_lng });
+      reverseGeocode(data.operation_lat, data.operation_lng);
+    } else {
+      await snapToCurrentLocation();
+    }
+  };
+
   // Fetch rider profile to get initial base and limit stats
   useEffect(() => {
     (async () => {
       try {
-        const token = await getToken();
-        const res = await fetch(RiderApiRoutes.GetProfile.path, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setZoneChanges(data.zone_changes_this_month || 0);
-          setRiderId(data.id);
-
-          if (data.operation_lat && data.operation_lng) {
-            setLocation({ latitude: data.operation_lat, longitude: data.operation_lng });
-            reverseGeocode(data.operation_lat, data.operation_lng);
-          } else {
-            await snapToCurrentLocation();
-          }
-        }
+        await loadProfile();
       } catch (e) {
         setLocation({ latitude: -1.2921, longitude: 36.8219 });
         setLiveAddress("Nairobi, Kenya");
@@ -174,13 +179,15 @@ export default function OperationBase() {
     queryKey: ['rider', 'discover_vendors', location?.latitude, location?.longitude],
     queryFn: async () => {
       if (!location) return [];
-      const token = await getToken();
-      const route = RiderApiRoutes.DiscoverVendors(location.latitude, location.longitude);
-      const res = await fetch(route.path, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) return [];
-      return res.json();
+      // Plotting nearby vendors is decoration on this screen; failing to fetch
+      // them must not blank the map the rider is choosing their base on.
+      try {
+        return await get<any[]>(
+          RiderApiRoutes.DiscoverVendors(location.latitude, location.longitude).path
+        );
+      } catch {
+        return [];
+      }
     },
     enabled: !!location,
   });
@@ -214,27 +221,18 @@ export default function OperationBase() {
     }
     setSaving(true);
     try {
-      const token = await getToken();
-      const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-        method: RiderApiRoutes.UpdateProfile.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation_lat: location.latitude,
-          operation_lng: location.longitude
-        })
+      await put(RiderApiRoutes.UpdateProfile.path, {
+        operation_lat: location.latitude,
+        operation_lng: location.longitude,
       });
-
-      if (res.ok) {
-        await SecureStore.setItemAsync("rider_operation_address", liveAddress);
-        await queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
-        Toast.success("Success", "Operation Base updated! You will now receive requests near this zone.");
-        router.back();
-      } else {
-        const data = await res.json();
-        Toast.error("Error", data.detail || "Failed to save base");
-      }
+      await SecureStore.setItemAsync("rider_operation_address", liveAddress);
+      await queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
+      Toast.success("Success", "Operation Base updated! You will now receive requests near this zone.");
+      router.back();
     } catch (e) {
-      Toast.error("Network Error", "Failed to connect to servers.");
+      // The backend refuses a third zone change in a month with a reason worth
+      // reading — it is not a network error, which is what this used to say.
+      Toast.error("Couldn't Save Base", errorMessage(e, "Failed to save your operation base."));
     } finally {
       setSaving(false);
     }
@@ -266,22 +264,10 @@ export default function OperationBase() {
         onRetry={async () => {
           setLoading(true);
           try {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.GetProfile.path, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              setZoneChanges(data.zone_changes_this_month || 0);
-              setRiderId(data.id);
-              if (data.operation_lat && data.operation_lng) {
-                setLocation({ latitude: data.operation_lat, longitude: data.operation_lng });
-                reverseGeocode(data.operation_lat, data.operation_lng);
-              } else {
-                await snapToCurrentLocation();
-              }
-            }
-          } catch(e) {} finally { setLoading(false); }
+            await loadProfile();
+          } catch (e) {
+            if (__DEV__) console.warn("[OperationBase] retry failed:", errorMessage(e));
+          } finally { setLoading(false); }
         }}
       />
     );

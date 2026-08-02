@@ -20,7 +20,12 @@ import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import * as ImagePicker from 'expo-image-picker';
 import { useQueryClient } from "@tanstack/react-query";
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import SecureUpload from "@/Helpers/imageUpload";
+import { useActiveStore } from "@/stores/activeStoreStore";
+import { useUpdateVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 
@@ -30,6 +35,10 @@ export default function Profile() {
   const { user } = useUser();
   const { getToken, signOut } = useAuth();
   const { clearPushToken } = usePushNotifications();
+  const { request } = useApiRequest();
+  const updateProfile = useUpdateVendorProfile();
+  const activeStoreId = useActiveStore((s) => s.activeStoreId);
+  const clearActiveStore = useActiveStore((s) => s.clear);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -56,28 +65,26 @@ export default function Profile() {
           base64: true
       });
 
-      if (!result.canceled && result.assets[0].base64) {
+      if (!result.canceled && result.assets[0]?.uri) {
           setImageUploading(true);
           try {
-              const base64 = `data:image/jpeg;base64,${result.assets[0].base64}`;
-              const token = await getToken();
-              
-              const res = await fetch(VendorApiRoutes.UpdateProfile.path, {
-                  method: VendorApiRoutes.UpdateProfile.method,
-                  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ profile_pic: base64 }),
-              });
-
-              if (res.ok) {
-                  Toast.success("Success", "Store picture updated successfully");
-                  queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
-                  queryClient.invalidateQueries({ queryKey: ["vendorProfile"] });
-              } else {
-                  throw new Error("Upload failed");
-              }
+              // The whole image used to be stored *in* the column, as a
+              // `data:image/jpeg;base64,…` string a megabyte or two long — it was
+              // written to `Vendor.profile_pic` and then sent back inside every
+              // profile response, and to every customer browsing the store.
+              // Now it goes to S3 and the column holds the key.
+              const uploaded = await SecureUpload(
+                  result.assets[0].uri,
+                  `store_${vendor?.id ?? "avatar"}`,
+                  getToken,
+                  activeStoreId
+              );
+              await updateProfile.mutateAsync({ profile_pic: uploaded.secure_url });
+              Toast.success("Success", "Store picture updated successfully");
           } catch (err) {
-              if (__DEV__) console.error("Upload error:", err);
-              Toast.error("Upload Failed", "Could not update store picture.");
+              // `SecureUpload` has already surfaced an upload failure; this
+              // catches a refused *save*, which is a different problem.
+              Toast.error("Upload Failed", errorMessage(err, "Could not update store picture."));
           } finally {
               setImageUploading(false);
           }
@@ -103,7 +110,10 @@ export default function Profile() {
                   await signOut();
                   // Orders, products, wallet and staff records all sat in the
                   // cache and survived sign-out, so the next account to sign in
-                  // on this device rendered the previous store's data.
+                  // on this device rendered the previous store's data. The
+                  // remembered store id is part of that: left behind, the next
+                  // account sends an `X-Store-Id` it does not own.
+                  clearActiveStore();
                   queryClient.clear();
                   Popup.hide();
                   router.replace("/(Auth)");
@@ -126,30 +136,35 @@ export default function Profile() {
           onConfirm: async () => {
               Popup.setLoading(true);
               try {
-                  const res = await fetch(VendorApiRoutes.DeleteAccount.path, {
-                      method: VendorApiRoutes.DeleteAccount.method,
-                      headers: {
-                          Authorization: `Bearer ${await getToken()}`,
-                          "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({ app_type: "vendor", confirmation: "DELETE MY ACCOUNT" })
-                  });
-
-                  if (res.ok) {
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      Toast.success("Goodbye", "Store deleted successfully.");
-                      await clearPushToken();
-                      await signOut();
-                      queryClient.clear();
-                      Popup.hide();
-                      router.replace("/(Auth)");
+                  const result = await request<{ message: string; warning?: string }>(
+                      "DELETE",
+                      VendorApiRoutes.DeleteAccount.path,
+                      { app_type: "vendor", confirmation: "DELETE MY ACCOUNT" }
+                  );
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  // The backend reports honestly when the local data is gone but
+                  // the Clerk identity survived; saying "deleted successfully"
+                  // over that warning would be a lie about a deletion.
+                  if (result?.warning) {
+                      Toast.info("Account deleted", result.warning);
                   } else {
-                      const data = await res.json();
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                      Popup.show({ title: "Cannot Delete", message: data.detail || "You have active orders preventing deletion." });
+                      Toast.success("Goodbye", "Store deleted successfully.");
                   }
+                  await clearPushToken();
+                  await signOut();
+                  clearActiveStore();
+                  queryClient.clear();
+                  Popup.hide();
+                  router.replace("/(Auth)");
               } catch (error) {
-                  Popup.show({ title: "Error", message: "Network error occurred." });
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                  // "You have unfulfilled orders" is the answer the vendor needs;
+                  // "Network error occurred" was shown for it.
+                  Popup.show({
+                      title: "Cannot Delete",
+                      message: errorMessage(error, "You have active orders preventing deletion."),
+                      isAlertOnly: true,
+                  });
               }
           }
       });
@@ -308,6 +323,17 @@ export default function Profile() {
             path="/(screens)/RiderManagement" 
           />
         )}
+
+        <Text className={`mt-6 mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Help</Text>
+
+        {/* Not owner-only. Staff are the ones on the floor when a rider turns up
+            with the wrong bottle count, and they have no other way to reach us. */}
+        <NavItem
+          icon="help-buoy-outline"
+          label="Help & Support"
+          description="Message the Drop team about this store"
+          path="/(screens)/Support"
+        />
 
         <Text className={`mt-6 mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>System & Security</Text>
         

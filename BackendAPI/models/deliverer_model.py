@@ -45,6 +45,15 @@ class Deliverer(Base):
   id_card_front = Column(Text, nullable=True)
   id_card_back = Column(Text, nullable=True)
   kyc_status = Column(Enum(KYCStatus, name="deliverer_kyc_status", create_type=False), nullable=False, default=KYCStatus.unsubmitted, index=True)
+  #: Why the last review was rejected, shown on `VerificationWall`.
+  #:
+  #: The reason used to exist only inside the push notification the reviewer
+  #: triggered. A rider who dismissed it — or never received it — went back to a
+  #: form that prefills their previous answers and offers no clue what was wrong
+  #: with them, so the usual outcome was resubmitting the same document. Cleared
+  #: on the next submission so a stale reason cannot outlive the problem.
+  kyc_rejection_reason = Column(Text, nullable=True)
+  kyc_reviewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
   
   current_lat = Column(Float, nullable=True , index=True)
   current_lng = Column(Float, nullable=True , index=True)
@@ -58,6 +67,15 @@ class Deliverer(Base):
   h3_index_res8 = Column(String(16), nullable=True, index=True)
   is_available = Column(Boolean, default=True, index=True)
   is_active = Column(Boolean, default=False, index=True)
+
+  # ── Suspension, set by an administrator ───────────────────────────────
+  #: Distinct from `kyc_status` and from `is_active`. A rider can be fully
+  #: verified and still need to be stopped today; rejecting their KYC to
+  #: achieve that would misrepresent why, and re-approving would lose the
+  #: original review.
+  suspended_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  suspension_reason = Column(Text, nullable=True)
+  suspended_by = Column(UUID(as_uuid=True), nullable=True)
   is_verified = Column(Boolean, default=False, index=True)
   is_platinum = Column(Boolean, default=False, index=True)  # Gamification tier (drops commission to 7%)
   # `rating` is the derived average. `rating_count`/`rating_sum` are what it is

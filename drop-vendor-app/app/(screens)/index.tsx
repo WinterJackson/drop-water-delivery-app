@@ -2,7 +2,7 @@ import { UIThemeContext } from "@/context/ThemeContext";
 import { useDashboard } from "@/hooks/queries/useDashboard";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { useRouter } from "expo-router";
-import { useCallback, useContext, useRef, useState } from "react";
+import { useCallback, useContext, useRef } from "react";
 import { useVendorProfile, useUpdateVendorProfile } from "@/hooks/queries/useVendorProfile";
 import {
     RefreshControl,
@@ -25,6 +25,8 @@ import QuickActions from "@/components/dashboard/QuickActions";
 import RecentOrdersFeed from "@/components/dashboard/RecentOrdersFeed";
 import SwipeToGoOnline from "@/components/ui/SwipeToGoOnline";
 import StoreSwitcherSheet, { type StoreSwitcherSheetRef } from "@/components/dashboard/StoreSwitcherSheet";
+import LowStockCard from "@/components/dashboard/LowStockCard";
+import { useActiveStore } from "@/stores/activeStoreStore";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -39,15 +41,22 @@ export default function Dashboard() {
   const isOnline = vendorProfileData?.is_online ?? dashboard?.is_online ?? true;
   const isToggling = updateProfile.isPending;
 
-  // Store switcher ref
+  // Store switcher. The selection lives in a persisted store rather than in
+  // `useState` here, because the API client reads it to set `X-Store-Id` on
+  // every request — which is what makes switching actually switch anything.
+  // Previously this held the id locally beside the comment
+  // `// Future: refetch dashboard with new store context`, so choosing a store
+  // moved a highlight and refetched exactly the same store's data.
   const storeSwitcherRef = useRef<StoreSwitcherSheetRef>(null);
-  const [activeStoreId, setActiveStoreId] = useState<string | undefined>(undefined);
+  const activeStoreId = useActiveStore((s) => s.activeStoreId);
+  const setActiveStore = useActiveStore((s) => s.setActiveStore);
 
   const handleSelectStore = useCallback((storeId: string) => {
-    setActiveStoreId(storeId);
-    // Future: refetch dashboard with new store context
-    refetch();
-  }, [refetch]);
+    if (storeId === activeStoreId) return;
+    // `useStoreScopedCache` empties the query cache off the back of this, so
+    // every screen refetches against the store just chosen.
+    setActiveStore(storeId);
+  }, [activeStoreId, setActiveStore]);
 
   const toggleStoreStatus = async (newValue: boolean) => {
     try {
@@ -206,6 +215,10 @@ export default function Dashboard() {
             </ScrollView>
           )}
         </View>
+
+        {/* What needs restocking. Renders nothing when nothing does — a
+            permanent "all good" card is noise the vendor learns to skip. */}
+        <LowStockCard products={dashboard?.low_stock_products} />
 
         {/* Quick Actions */}
         <QuickActions />

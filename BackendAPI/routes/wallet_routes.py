@@ -1,7 +1,7 @@
 import logging
 import os
 
-from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,7 @@ async def top_up_wallet(
     body: TopUpRequest,
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(get_current_user),
+    x_store_id: str | None = Header(default=None, alias="X-Store-Id"),
 ):
     clerk_id = auth.get("sub")
     if not clerk_id:
@@ -55,6 +56,7 @@ async def top_up_wallet(
         user_type=body.user_type,
         amount=body.amount,
         phone=body.phone_number,
+        store_id=x_store_id,
     )
 
 
@@ -65,7 +67,11 @@ async def withdraw_wallet(
     body: WithdrawRequest,
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(get_current_user),
+    x_store_id: str | None = Header(default=None, alias="X-Store-Id"),
 ):
+    """Cash out. Each `Vendor` row carries its own balance, so a multi-store
+    owner must say which store they are withdrawing from — `X-Store-Id`, the
+    same header every other vendor endpoint takes."""
     clerk_id = auth.get("sub")
     if not clerk_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -76,6 +82,7 @@ async def withdraw_wallet(
         user_type=body.user_type,
         amount=body.amount,
         phone=body.phone_number,
+        store_id=x_store_id,
     )
 
 

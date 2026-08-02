@@ -1,114 +1,127 @@
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
-import { useAuth } from "@clerk/clerk-expo";
+import { retryTransientOnly } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+/**
+ * One page of orders as the backend actually describes it.
+ *
+ * The envelope used to be `{"pages": [orders]}` — the server imitating React
+ * Query's own `InfiniteData` shape. Every caller then unwrapped `data.pages[0]`,
+ * which is why `useVendorOrders` below discarded every page but the first, and
+ * why "is there more?" was guessed from `page.length === limit` after the unwrap
+ * rather than answered by the server.
+ */
+export interface VendorOrdersPage {
+    items: any[];
+    limit: number;
+    offset: number;
+    has_more: boolean;
+}
+
+function ordersUrl(params: Record<string, string | number | undefined>) {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== "") qs.append(key, String(value));
+    }
+    return `${VendorApiRoutes.GetOrders.path}?${qs.toString()}`;
+}
+
 export function useVendorOrdersPaginated(searchQuery: string = "", statusFilter: string = "All", limit: number = 20) {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
 
     return useInfiniteQuery({
         queryKey: ["vendorOrdersPaginated", searchQuery, statusFilter, limit],
-        queryFn: async ({ pageParam = 0 }) => {
-            const token = await getToken();
-            if (!token) throw new Error("No token found");
-
-            const queryParams = new URLSearchParams({
-                limit: limit.toString(),
-                skip: pageParam.toString(),
-            });
-
-            if (searchQuery.trim().length > 1) {
-                queryParams.append("search_query", searchQuery.trim());
-            }
-
-            if (statusFilter !== "All") {
-                queryParams.append("status_filter", statusFilter);
-            }
-
-            const url = `${VendorApiRoutes.GetOrders.path}?${queryParams.toString()}`;
-
-            const response = await fetch(url, {
-                method: VendorApiRoutes.GetOrders.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                },
-            });
-
-            if (response.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!response.ok) {
-                throw new Error("Failed to fetch orders");
-            }
-
-            const data = await response.json();
-            return data.pages?.[0] || [];
-        },
+        queryFn: ({ pageParam = 0 }) =>
+            get<VendorOrdersPage>(
+                ordersUrl({
+                    limit,
+                    skip: pageParam,
+                    search_query: searchQuery.trim().length > 1 ? searchQuery.trim() : undefined,
+                    status_filter: statusFilter !== "All" ? statusFilter : undefined,
+                })
+            ),
         initialPageParam: 0,
-        getNextPageParam: (lastPage, allPages) => {
-            if (!lastPage || lastPage.length < limit) return undefined;
-            return allPages.flat().length;
-        },
+        // `has_more` comes from the server now, so a page that happens to be
+        // exactly `limit` long no longer triggers a pointless empty fetch.
+        getNextPageParam: (lastPage) =>
+            lastPage?.has_more ? (lastPage.offset ?? 0) + (lastPage.limit ?? limit) : undefined,
+        retry: retryTransientOnly(),
     });
 }
 
+/** The dashboard's recent-orders feed: the newest page, not an infinite list. */
 export function useVendorOrders() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
 
     return useQuery({
         queryKey: ["vendorOrders"],
         queryFn: async () => {
-            const token = await getToken();
-            if (!token) throw new Error("No token found");
-
-            const response = await fetch(`${VendorApiRoutes.GetOrders.path}?t=${Date.now()}`, {
-                method: VendorApiRoutes.GetOrders.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                },
-            });
-
-            if (response.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!response.ok) {
-                throw new Error("Failed to fetch orders");
-            }
-
-            const data = await response.json();
-            
-            // Because the backend now returns {"pages": [orders]} if we don't pass skip/limit properly, 
-            // wait, we changed the backend /orders route to return {"pages": [orders]}! 
-            // So if `data.pages` exists, we should return that, otherwise `data`.
-            if (data && data.pages && Array.isArray(data.pages)) {
-                 return data.pages[0] || [];
-            }
-            return Array.isArray(data) ? data : [];
+            const page = await get<VendorOrdersPage>(ordersUrl({ limit: 20, skip: 0 }));
+            return page?.items ?? [];
         },
+        retry: retryTransientOnly(),
+    });
+}
+
+/**
+ * One order, fetched by id.
+ *
+ * `OrderDetail` used to search the already-loaded list, which meant an order
+ * past the first page did not exist as far as that screen was concerned.
+ */
+export function useVendorOrder(orderId: string | null) {
+    const { get } = useApiRequest();
+
+    return useQuery({
+        queryKey: ["vendorOrder", orderId],
+        queryFn: () => get<any>(VendorApiRoutes.GetOrder(orderId!).path),
+        enabled: !!orderId,
+        retry: retryTransientOnly(),
+    });
+}
+
+export interface OrderReview {
+    order_status: string;
+    actual_floor_level: number | null;
+    bottle_rejection: {
+        id: string;
+        status: string;
+        reason_text: string;
+        /** Presigned for 15 minutes — do not cache these URLs. */
+        photo_urls: string[];
+        created_at: string | null;
+    } | null;
+}
+
+/**
+ * Why an order stopped.
+ *
+ * Only fetched for the two states that can stop one, so an ordinary order does
+ * not pay for a request that would come back empty.
+ */
+export function useOrderReview(orderId: string | null, orderStatus?: string | null) {
+    const { get } = useApiRequest();
+    const relevant = orderStatus === "pending_review" || orderStatus === "mismatch_pending";
+
+    return useQuery({
+        queryKey: ["vendorOrderReview", orderId],
+        queryFn: () => get<OrderReview>(VendorApiRoutes.GetOrderReview(orderId!).path),
+        enabled: !!orderId && relevant,
+        // The photo URLs expire in 15 minutes; refetch well inside that.
+        staleTime: 5 * 60 * 1000,
+        retry: retryTransientOnly(),
     });
 }
 
 export function useUpdateOrderStatus() {
-    const { getToken, signOut } = useAuth();
+    const { put } = useApiRequest();
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async ({ orderId, status }: { orderId: string; status: string }) => {
-            const token = await getToken();
+        mutationFn: ({ orderId, status }: { orderId: string; status: string }) => {
             const route = VendorApiRoutes.UpdateOrderStatus(orderId);
-            const response = await fetch(route.path, {
-                method: route.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ status }),
-            });
-
-            if (response.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!response.ok) {
-                throw new Error("Failed to update status");
-            }
-            return response.json();
+            return put(route.path, { status });
         },
         onMutate: async ({ orderId, status }) => {
             await queryClient.cancelQueries({ queryKey: ["vendorOrders"] });
@@ -131,6 +144,10 @@ export function useUpdateOrderStatus() {
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ["vendorOrders"] });
+            queryClient.invalidateQueries({ queryKey: ["vendorOrdersPaginated"] });
+            queryClient.invalidateQueries({ queryKey: ["vendorOrder"] });
+            // Accepting or rejecting an order moves the day's counters too.
+            queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
         },
     });
 }

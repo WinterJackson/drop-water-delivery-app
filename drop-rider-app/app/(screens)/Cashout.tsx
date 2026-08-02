@@ -9,7 +9,8 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import PressableScale from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { format } from "date-fns";
-import { useAuth } from "@clerk/clerk-expo";
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import * as Haptics from "expo-haptics";
 import { useRiderProfile, useRiderEarnings } from "@/hooks/queries/useRiderData";
 import { useWalletTransactions, useWalletWithdraw } from "@/hooks/queries/useWallet";
@@ -20,7 +21,7 @@ export default function Cashout() {
   const router = useRouter();
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { post } = useApiRequest();
   
   const { data: rider, isLoading, refetch: refetchProfile, isRefetching } = useRiderProfile();
   const { data: earnings, isLoading: isLoadingEarnings, refetch: refetchEarnings } = useRiderEarnings();
@@ -64,32 +65,24 @@ export default function Cashout() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsProcessingTopUp(true);
-      const token = await getToken();
-      const response = await fetch(RiderApiRoutes.WalletTopUp.path, {
-        method: RiderApiRoutes.WalletTopUp.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: Number(topUpAmount),
-          phone_number: phoneNumber,
-          user_type: "rider"
-        })
+      const data = await post<{ error?: string }>(RiderApiRoutes.WalletTopUp.path, {
+        amount: Number(topUpAmount),
+        phone_number: phoneNumber,
+        user_type: "rider",
       });
 
-      const data = await response.json().catch(() => null);
-
-      if (response.ok && !data?.error) {
-        Alert.alert("STK Push Sent", "Please check your phone and enter your M-Pesa PIN to complete the top up.");
-        setTopUpAmount("");
-        setIsTopUpModalVisible(false);
-      } else {
-        Alert.alert("Top Up Failed", data?.error || data?.detail || "An error occurred during top up.");
+      // Daraja can answer 200 with a failure in the body, so a 2xx is not on its
+      // own a success here.
+      if (data?.error) {
+        Alert.alert("Top Up Failed", data.error);
+        return;
       }
+      Alert.alert("STK Push Sent", "Please check your phone and enter your M-Pesa PIN to complete the top up.");
+      setTopUpAmount("");
+      setIsTopUpModalVisible(false);
     } catch (err) {
-      console.error(err);
-      Alert.alert("Error", "Could not process top up at this time.");
+      if (__DEV__) console.error(err);
+      Alert.alert("Top Up Failed", errorMessage(err, "Could not process top up at this time."));
     } finally {
       setIsProcessingTopUp(false);
       handleRefresh();

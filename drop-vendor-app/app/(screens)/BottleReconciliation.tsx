@@ -8,18 +8,21 @@ import { BRAND } from "@/constants/brandColors";
 import { PressableScale } from "@/components/ui/PressableScale";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
 import { useBottleDebtors, type BottleDebtor } from "@/hooks/queries/useBottleDebtors";
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import { PERMISSIONS, useCan } from "@/hooks/queries/useVendorProfile";
 import Toast from "react-native-toast-message";
 
 export default function BottleReconciliation() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
-  
+  const { post } = useApiRequest();
+  const canReceive = useCan(PERMISSIONS.manageBottles);
+
   const { data: debtors = [], isLoading, refetch, isRefetching } = useBottleDebtors();
 
   const [selectedRider, setSelectedRider] = useState<any>(null);
@@ -35,6 +38,14 @@ export default function BottleReconciliation() {
   const ridersWithDebt: BottleDebtor[] = debtors;
 
   const openReceiveModal = (rider: any) => {
+    if (!canReceive) {
+      Toast.show({
+        type: "error",
+        text1: "Not allowed",
+        text2: "Ask the store owner to enable receiving empty bottles for you.",
+      });
+      return;
+    }
     setSelectedRider(rider);
     setInput10L("");
     setInput20L("");
@@ -63,32 +74,20 @@ export default function BottleReconciliation() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsSubmitting(true);
-      const token = await getToken();
-      const response = await fetch(VendorApiRoutes.ReceiveBottles.path, {
-        method: VendorApiRoutes.ReceiveBottles.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          rider_id: selectedRider.rider_id,
-          received_10L: recv10,
-          received_20L: recv20
-        })
+      await post(VendorApiRoutes.ReceiveBottles.path, {
+        rider_id: selectedRider.rider_id,
+        received_10L: recv10,
+        received_20L: recv20,
       });
 
-      const data = await response.json().catch(() => null);
-
-      if (response.ok && !data?.error) {
-        Toast.show({ type: 'success', text1: 'Success', text2: 'Rider debt cleared successfully.' });
-        setModalVisible(false);
-        refetch();
-      } else {
-        Toast.show({ type: 'error', text1: 'Error', text2: data?.error || data?.detail || "Failed to clear debt." });
-      }
+      Toast.show({ type: 'success', text1: 'Success', text2: 'Rider debt cleared successfully.' });
+      setModalVisible(false);
+      refetch();
     } catch (err) {
-      console.error(err);
-      Toast.show({ type: 'error', text1: 'Error', text2: "Could not process request at this time." });
+      // `settle_empties` refuses over-receipt with the actual outstanding count.
+      // Showing its message tells the vendor what the ledger says; the previous
+      // "Could not process request at this time" did not.
+      Toast.show({ type: 'error', text1: 'Error', text2: errorMessage(err, "Could not clear that debt right now.") });
     } finally {
       setIsSubmitting(false);
     }

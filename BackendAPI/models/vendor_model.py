@@ -40,6 +40,19 @@ class Vendor(Base):
   shift_end = Column(Time, default=time(19,0), nullable=False, index=True)
   verification_status = Column(String, default="pending")
   is_online = Column(Boolean, default=True, index=True)
+
+  # ── Account state, set by an administrator ─────────────────────────────
+  #: A store had no way to be switched off. `verification_status` records how
+  #: it *joined*; it says nothing about a store that has to stop trading today
+  #: — for a health complaint, an unpaid arrears balance, or fraud. `is_online`
+  #: is the vendor's own "we're closed right now" toggle and they can turn it
+  #: straight back on, so it is not a control the platform can rely on.
+  is_active = Column(Boolean, nullable=False, server_default="true", index=True)
+  suspended_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  #: Shown to the vendor. A suspension nobody can explain becomes a support
+  #: ticket, and an appeal with nothing to appeal against.
+  suspension_reason = Column(Text, nullable=True)
+  suspended_by = Column(UUID(as_uuid=True), nullable=True)
   # `rating` is the derived average. `rating_count`/`rating_sum` are what it is
   # derived *from*, maintained incrementally by `review_service` so submitting a
   # review costs one row update instead of an AVG over every review the target
@@ -71,3 +84,7 @@ class Vendor(Base):
   products = relationship("Product", back_populates="vendor")
   order = relationship("Order", back_populates="vendor")
   vendor_favorites = relationship("VendorFavorite", back_populates="vendor")
+  #: Many staff per store — see `models/vendor_staff_model.py`. The
+  #: `staff_clerk_id` / `staff_push_token` columns below are the single-staff
+  #: predecessor: they are backfilled into this table and no longer read.
+  staff = relationship("VendorStaff", back_populates="vendor", cascade="all, delete-orphan")

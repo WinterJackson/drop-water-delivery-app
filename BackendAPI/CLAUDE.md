@@ -61,6 +61,70 @@ reconnects with a fresh token. Webhooks that mutate money or order state
 IP allow-listing alone is not a guard while `ProxyHeadersMiddleware` trusts every
 forwarding host.
 
+## 🏪 A `Vendor` row is a store, not an account
+
+One Clerk identity may own several — `GET /api/vendor/stores` exists to list
+them. Every vendor endpoint therefore resolves an **active store** through
+`dependencies.auth_dependencies.get_active_store` (owner or staff) or
+`get_owned_store` (owner only), both of which read an `X-Store-Id` header,
+validate it against the caller's own stores, and fall back to a deterministic
+`ORDER BY created_at ASC LIMIT 1`. A store the caller does not own is a **404**,
+not a 403: confirming an id exists is itself a leak.
+
+- Routes take the resolved `Vendor` row. Do not call
+  `vendor_management_service.get_vendor_by_clerk_id` from a route — its fallback
+  is `clerk_id = … OR staff_clerk_id = …` with no store id, which is exactly the
+  ambiguity the dependency removes.
+- **Never `scalar_one_or_none()` on a vendor lookup.** It raises
+  `MultipleResultsFound` on the second store. `profile-status` and `push-token`
+  did, and the vendor app calls both before anything else — so opening a branch
+  turned app startup into a 500.
+- `get_owned_store` checks ownership against the *resolved row*, not merely that
+  the caller owns something. Someone can own store A and be staff of store B;
+  composing an owner gate with a store resolver would let them act on B.
+- `tests/test_multi_store_integration.py` is the only place a second store is
+  real — every vendor in production owns one, so nothing else exercises this. It
+  drives the app against a live Postgres and cleans up after itself.
+
+## 👥 Staff are `Vendor_Staff` rows, with capabilities
+
+`Vendor.staff_clerk_id` held one id and was UNIQUE **platform-wide**: a store
+could have one staff member, adding a second silently replaced the first, and one
+person could work for exactly one store on the whole platform. Access was
+all-or-nothing — `get_current_vendor` admitted staff to everything that was not
+owner-only, so handing someone the till handed them the catalogue, the bottle
+ledger and the wallet balance.
+
+- **Never read `staff_clerk_id` or `staff_push_token`.** They survive only so an
+  application rollback does not lose anybody's access (expand/contract), and
+  `tests/test_vendor_staff.py` tokenizes every module and fails the build if
+  either is read. Use `services/vendor_staff_service.is_store_member` /
+  `staffed_vendor_ids`, or take a `StoreAccess` from the dependency.
+- Four capabilities: `manage_orders`, `manage_products`, `manage_bottles`,
+  `view_finances`. Gate every **mutating** route with
+  `require_permission("…")`; reads that any member may make take
+  `get_active_store`. Refusals are
+  `{"type": "permission_required", "permission": …}`.
+- `view_finances` is **not** granted by default. Seeing the store's balance is a
+  decision the owner makes, not one inherited from a schema that could not
+  express the question.
+- Owners are not rows in this table. `StoreAccess.may()` short-circuits for them,
+  and `GET /profile` returns the full capability list so the app checks one thing
+  rather than "is owner, or has permission".
+- Push tokens live on the membership row, so a store with several staff reaches
+  all of them. `Vendor.staff_push_token` addressed whoever registered last.
+- Inviting by email must answer **identically** whether or not that address has a
+  Drop account. The old endpoint's 404-vs-200 let any vendor test whether an
+  arbitrary email — a competitor's, a customer's — is registered here.
+
+Staff are a real trust boundary, not a display role. They may run the shop floor;
+they may not redefine the business or move its money. `payout_service` and
+`wallet_service.resolve_wallet_owner` both match on `clerk_id` alone —
+`payout_service` did not, and a shop assistant could withdraw the store's balance
+to their own phone. `tests/test_vendor_owner_enforcement.py` fails the build when
+a new vendor route is added without being classified, or when a mutating route
+names no capability.
+
 ## 🔒 Authorisation on order-scoped endpoints
 
 Authenticating a token proves *who* is calling; it says nothing about whether they
@@ -147,6 +211,15 @@ API — see `BackendAPI/README.md`. Every sweep must claim rows with
 `with_for_update(skip_locked=True)`, re-check state under the lock, and commit
 per item inside a `try/except`, so it stays correct with several workers running
 and one bad row cannot discard the batch.
+
+## 📦 Stock
+
+`Product.low_stock_threshold` is per product (0 disables the warning) and
+`low_stock_notified_at` latches the notification so a vendor is told once per
+crossing, not once per unit sold below the line — restocking clears it, in both
+`update_product` and `_restore_order_stock`. The threshold used to be a hardcoded
+`<= 5` for every product on the platform, firing on every subsequent order, and
+pointing at a screen that does not exist.
 
 ## 📜 Coding Guidelines
 

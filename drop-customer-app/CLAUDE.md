@@ -100,6 +100,21 @@ listed them inline drifted: the Orders filters covered neither `preparing` nor
 - Avoid large monolithic screens. Break down `app/(screens)/xxx.tsx` into smaller chunks in `components/`.
 - Touchables: Prefer using `PressableScale` over standard `TouchableOpacity` to provide a premium, animated tactile feel.
 
+### 7. Help & support
+
+`app/(screens)/Support.tsx` writes into the admin console's queue via
+`hooks/queries/useSupport.ts`.
+
+- **Opened with `?orderId=`** from `OrderDetail`, it arrives with the order
+  attached and the category pre-set. "Something went wrong with *this* order" is
+  the commonest reason anyone contacts support and the worst moment to make them
+  hunt through Settings.
+- The server checks that order belongs to the caller and answers **404** if it
+  does not, so an id typed by hand is not a way to ask about somebody else's
+  delivery.
+- The thread is rendered as the server gives it. Internal notes are stripped
+  server-side; do not add a client-side filter as the safeguard.
+
 ### Session teardown
 `hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
 state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:

@@ -4,6 +4,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth } from "@clerk/clerk-expo";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import PressableScale from "@/components/ui/PressableScale";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import * as ImagePicker from "expo-image-picker";
@@ -20,6 +22,7 @@ export default function BottleRejection() {
   const { currentTheme } = useContext<any>(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
+  const { post } = useApiRequest();
   const router = useRouter();
   const params = useLocalSearchParams();
   const orderId = params.orderId as string;
@@ -75,8 +78,6 @@ export default function BottleRejection() {
     setIsSubmitting(true);
     let uploadedUrls: string[] = [];
     try {
-      const token = await getToken();
-
       // Upload photos securely to S3 first
       Toast.info("Uploading...", "Uploading evidence photos...");
       for (let i = 0; i < photos.length; i++) {
@@ -90,36 +91,36 @@ export default function BottleRejection() {
          throw new Error("Failed to upload all required photos. Please try again.");
       }
 
-      const route = RiderApiRoutes.ReportBottleRejection(orderId);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reason_text: reason,
-          photo_urls: uploadedUrls
-        })
+      await post(RiderApiRoutes.ReportBottleRejection(orderId).path, {
+        reason_text: reason,
+        photo_urls: uploadedUrls,
       });
-
-      if (res.ok) {
-        Toast.success("Submitted for Review", "The bottle has been flagged. Please wait 2-5 minutes for the admin to review it.");
-        queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
-        router.back();
-      } else {
-        const errData = await res.json();
-        Toast.error("Error", errData.detail || "Submission failed");
-      }
+      Toast.success("Submitted for Review", "The bottle has been flagged. Please wait 2-5 minutes for the admin to review it.");
+      queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
+      router.back();
     } catch (e: unknown) {
-       // Check if photos uploaded but backend request failed
-       if ((e as Error).message !== "Failed to upload all required photos. Please try again.") {
-           try {
-               await queueOfflineAction(orderId, "REJECT_BOTTLE", JSON.stringify({ reason_text: reason, photo_urls: uploadedUrls }));
-               Toast.success("Saved Offline", "Network error. The bottle rejection has been saved and will sync automatically when online.");
-               router.back();
-           } catch (queueErr) {
-               Toast.error("Error", (e as Error).message || "Network Error");
-           }
-       } else {
-           Toast.error("Error", (e as Error).message || "Network Error");
+       // Photos never made it: there is nothing worth queueing, because the
+       // report is inadmissible without its evidence.
+       if (uploadedUrls.length < 2) {
+           Toast.error("Error", errorMessage(e, "Network Error"));
+           return;
+       }
+
+       // The server refused this report on the merits — a reason too short, an
+       // order not in a state that can be disputed. Replaying it offline would
+       // retry the same refusal forever, so say why instead.
+       if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+           Toast.error("Rejected", errorMessage(e, "This report was not accepted."));
+           return;
+       }
+
+       // Photos are already in S3 and the submission is legitimate — hold it.
+       try {
+           await queueOfflineAction(orderId, "REJECT_BOTTLE", JSON.stringify({ reason_text: reason, photo_urls: uploadedUrls }));
+           Toast.success("Saved Offline", "Network error. The bottle rejection has been saved and will sync automatically when online.");
+           router.back();
+       } catch (queueErr) {
+           Toast.error("Error", errorMessage(e, "Network Error"));
        }
     } finally {
        setIsSubmitting(false);

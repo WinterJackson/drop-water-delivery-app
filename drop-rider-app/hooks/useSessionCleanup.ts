@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
 import { clearOfflineData } from '@/config/database';
+import { clearLocationTracking } from '@/services/locationTracking';
 
 /**
  * Purge everything belonging to the previous rider when a session ends.
@@ -42,6 +43,10 @@ export function useSessionCleanup() {
             wasSignedIn.current = false;
             queryClient.clear();
             clearOfflineData().catch(() => {});
+            // Also stops the foreground service. Left running it would keep
+            // showing "Delivery in progress" — and keep buffering the signed-out
+            // rider's positions — after they signed out.
+            clearLocationTracking().catch(() => {});
         }
     }, [isSignedIn, isLoaded, queryClient]);
 }

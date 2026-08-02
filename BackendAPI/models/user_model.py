@@ -32,6 +32,13 @@ class User(Base):
   h3_index_res8 = Column(String(16), nullable=True, index=True)
   is_active= Column(Boolean, default=True)
   verification_status= Column(Enum(VerificationStatus), default=VerificationStatus.PENDING)
+
+  # ── Suspension, set by an administrator ───────────────────────────────
+  #: `is_active` already existed but carried no explanation, so a disabled
+  #: account was indistinguishable from one disabled by accident.
+  suspended_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  suspension_reason = Column(Text, nullable=True)
+  suspended_by = Column(UUID(as_uuid=True), nullable=True)
   push_token = Column(String(255), nullable=True)
   
   # Empty Bottle Management

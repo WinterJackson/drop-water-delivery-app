@@ -14,9 +14,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { Popup } from "@/lib/popup";
 import { Toast } from "@/lib/toast";
 import { useQueryClient } from "@tanstack/react-query";
-import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
-import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { errorMessage } from "@/API/errors";
+import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 export default function OwnerProfile() {
@@ -25,8 +24,10 @@ export default function OwnerProfile() {
   const { signOut, getToken } = useAuth();
   const { clearPushToken } = usePushNotifications();
   const { user } = useUser();
-  const { data: dashboard } = useDashboard();
+  // `owners_name` and `phone_number` are store-profile fields; the dashboard
+  // returns neither, so this form used to open with both blank.
   const { data: vendorProfile } = useVendorProfile();
+  const updateProfile = useUpdateVendorProfile();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -46,8 +47,8 @@ export default function OwnerProfile() {
   const extractNames = () => {
     let fName = user?.firstName || "";
     let lName = user?.lastName || "";
-    if (!fName && !lName && dashboard?.owners_name) {
-      const parts = dashboard.owners_name.split(" ");
+    if (!fName && !lName && vendorProfile?.owners_name) {
+      const parts = vendorProfile.owners_name.split(" ");
       fName = parts[0] || "";
       lName = parts.slice(1).join(" ") || "";
     }
@@ -57,7 +58,7 @@ export default function OwnerProfile() {
   const [editForm, setEditForm] = useState({
     firstName: extractNames().fName,
     lastName: extractNames().lName,
-    phone_number: dashboard?.phone_number || ""
+    phone_number: vendorProfile?.phone_number || ""
   });
 
   const handleSignOut = () => {
@@ -105,21 +106,15 @@ export default function OwnerProfile() {
         await user?.setProfileImage({ file: base64 });
         await user?.reload();
         
-        // Sync DB Profile Pic
-        const token = await getToken();
-        if (token && user?.imageUrl) {
-           await fetch(VendorApiRoutes.UpdateProfile.path, {
-             method: VendorApiRoutes.UpdateProfile.method,
-             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-             body: JSON.stringify({ profile_pic: user.imageUrl })
-           });
-           queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
+        // Sync DB Profile Pic. Clerk hosts this one, so it is a public URL
+        // rather than an S3 key — the backend passes `http…` through unsigned.
+        if (user?.imageUrl) {
+          await updateProfile.mutateAsync({ profile_pic: user.imageUrl });
         }
 
         Toast.success("Success", "Profile picture updated successfully");
       } catch (err) {
-        if (__DEV__) console.error("Upload error:", err);
-        Toast.error("Upload Failed", "Could not update profile picture.");
+        Toast.error("Upload Failed", errorMessage(err, "Could not update profile picture."));
       } finally {
         setImageUploading(false);
       }
@@ -144,27 +139,17 @@ export default function OwnerProfile() {
       });
 
       // 2. Update DB Profile
-      const token = await getToken();
       const owners_name = `${editForm.firstName} ${editForm.lastName}`.trim();
-      
-      const res = await fetch(VendorApiRoutes.UpdateProfile.path, {
-        method: VendorApiRoutes.UpdateProfile.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-            owners_name: owners_name || undefined, 
-            phone_number: editForm.phone_number || undefined 
-        }),
+
+      await updateProfile.mutateAsync({
+        owners_name: owners_name || undefined,
+        phone_number: editForm.phone_number || undefined,
       });
 
-      if (res.ok) {
-        Toast.success("Success", "Owner Profile updated successfully");
-        queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
-        setIsEditing(false);
-      } else {
-        throw new Error("Failed to sync DB");
-      }
+      Toast.success("Success", "Owner Profile updated successfully");
+      setIsEditing(false);
     } catch (e) {
-      Toast.error("Error", "Could not update profile");
+      Toast.error("Error", errorMessage(e, "Could not update profile"));
     } finally {
       setSaving(false);
     }
@@ -196,7 +181,7 @@ export default function OwnerProfile() {
   };
 
   const renderKYCBadge = () => {
-      const status = dashboard?.verification_status?.toLowerCase() || "pending";
+      const status = vendorProfile?.verification_status?.toLowerCase() || "pending";
       let bgColor = "bg-gray-500/20";
       let textColor = "text-gray-500";
       let text = "Unknown";
@@ -276,7 +261,7 @@ export default function OwnerProfile() {
             </View>
 
             <Text className={`text-2xl font-bold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
-              {user?.fullName || dashboard?.owners_name || "Vendor Owner"}
+              {user?.fullName || vendorProfile?.owners_name || "Vendor Owner"}
             </Text>
             <Text className={`text-sm mt-1 font-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
               {user?.primaryEmailAddress?.emailAddress}
@@ -291,7 +276,7 @@ export default function OwnerProfile() {
                       setEditForm({ 
                           firstName: names.fName, 
                           lastName: names.lName,
-                          phone_number: dashboard?.phone_number || "" 
+                          phone_number: vendorProfile?.phone_number || "" 
                       });
                   }
                   setIsEditing(!isEditing);
@@ -307,10 +292,10 @@ export default function OwnerProfile() {
                 <InfoRow label="Last Name" field="lastName" value={editForm.lastName} />
               </>
             ) : (
-              <InfoRow label="Full Name" value={user?.fullName || dashboard?.owners_name || ""} />
+              <InfoRow label="Full Name" value={user?.fullName || vendorProfile?.owners_name || ""} />
             )}
             
-            <InfoRow label="Phone Number" field="phone_number" value={dashboard?.phone_number || ""} placeholder="07XXXXXXXX" keyboardType="phone-pad" />
+            <InfoRow label="Phone Number" field="phone_number" value={vendorProfile?.phone_number || ""} placeholder="07XXXXXXXX" keyboardType="phone-pad" />
             
             {!isEditing && (
               <>

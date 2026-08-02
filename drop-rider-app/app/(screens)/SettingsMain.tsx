@@ -1,3 +1,5 @@
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -39,6 +41,7 @@ export default function SettingsMain() {
     const [isUploadingPic, setIsUploadingPic] = useState(false);
     const { user } = useUser();
     const { signOut, getToken } = useAuth();
+    const { put, request } = useApiRequest();
     const { clearPushToken } = usePushNotifications();
 
     const handleUpdateProfilePic = async () => {
@@ -61,27 +64,15 @@ export default function SettingsMain() {
                     const secureUrl = uploadedData.secure_url;
                     
                     // Send to backend
-                    const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-                        method: RiderApiRoutes.UpdateProfile.method,
-                        headers: {
-                            Authorization: `Bearer ${await getToken()}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ profile_pic: secureUrl })
-                    });
-                    
-                    if (res.ok) {
-                        queryClient.invalidateQueries({ queryKey: ['rider', 'profile'] });
-                        Toast.success("Success", "Profile picture updated!");
-                    } else {
-                        Toast.error("Error", "Failed to update profile picture on server.");
-                    }
+                    await put(RiderApiRoutes.UpdateProfile.path, { profile_pic: secureUrl });
+                    queryClient.invalidateQueries({ queryKey: ['rider', 'profile'] });
+                    Toast.success("Success", "Profile picture updated!");
                 } else {
                     Toast.error("Error", "Failed to upload image.");
                 }
             }
         } catch (error) {
-            console.error("Profile pic update error:", error);
+            if (__DEV__) console.error("Profile pic update error:", error);
             Toast.error("Error", "An error occurred while updating profile picture.");
         } finally {
             setIsUploadingPic(false);
@@ -129,27 +120,21 @@ export default function SettingsMain() {
             onConfirm: async () => {
                 Popup.setLoading(true);
                 try {
-                    const res = await fetch(RiderApiRoutes.DeleteAccount.path, {
-                        method: RiderApiRoutes.DeleteAccount.method,
-                        headers: {
-                            Authorization: `Bearer ${await getToken()}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ app_type: "rider", confirmation: "DELETE MY ACCOUNT" })
+                    // The push token must be detached *before* the account is
+                    // gone, but this endpoint is what proves the deletion was
+                    // allowed — so: delete, then detach with the session that is
+                    // still technically valid, then sign out.
+                    await request({
+                        url: RiderApiRoutes.DeleteAccount.path,
+                        method: "DELETE",
+                        data: { app_type: "rider", confirmation: "DELETE MY ACCOUNT" },
                     });
-
-                    if (res.ok) {
-                        Toast.success("Goodbye", "Account deleted successfully.");
-                        await clearPushToken();
-                        await signOut();
-                        queryClient.clear();
-                        Popup.hide();
-                        router.replace("/(Auth)");
-                    } else {
-                        const data = await res.json();
-                        Toast.error("Cannot Delete", data.detail || "You have active deliveries preventing deletion.");
-                        Popup.hide();
-                    }
+                    Toast.success("Goodbye", "Account deleted successfully.");
+                    await clearPushToken();
+                    await signOut();
+                    queryClient.clear();
+                    Popup.hide();
+                    router.replace("/(Auth)");
                 } catch (error) {
                     Toast.error("Error", "Network error occurred.");
                     Popup.hide();
@@ -291,6 +276,31 @@ export default function SettingsMain() {
                         title="Bank & Earning Settings" 
                         iconName="business-outline" 
                         onPress={() => router.push("/(screens)/rider/BankDetails")} 
+                    />
+                </View>
+
+                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                    Sync
+                </Text>
+                <View className="mb-8">
+                    {/* Where a delivery that failed to reach the server ends up.
+                        Before this screen existed the queue was invisible and the
+                        replay silently deleted anything the server refused. */}
+                    <SettingItem
+                        title="Pending Sync"
+                        iconName="cloud-upload-outline"
+                        onPress={() => router.push("/(screens)/PendingSync" as any)}
+                    />
+                </View>
+
+                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                    Help
+                </Text>
+                <View className="mb-8">
+                    <SettingItem
+                        title="Help & Support"
+                        iconName="help-buoy-outline"
+                        onPress={() => router.push("/(screens)/Support" as any)}
                     />
                 </View>
 

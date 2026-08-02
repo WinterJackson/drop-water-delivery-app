@@ -11,15 +11,64 @@ from schemas.payout_schemas import PayoutCreate
 
 logger = logging.getLogger(__name__)
 
+async def _vendor_by_id(session: AsyncSession, vendor_id):
+    """The exact store a payout belongs to, resolved from the id we already have."""
+    from models.vendor_model import Vendor
+
+    return await session.get(Vendor, vendor_id)
+
+
 async def _get_provider_details(session: AsyncSession, clerk_id: str):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    """Resolve whose money this is.
+
+    Ownership, never staff membership. This used to call
+    `get_vendor_by_clerk_id`, which matches
+    `Vendor.clerk_id == clerk_id OR Vendor.staff_clerk_id == clerk_id` — so a
+    staff member resolved to the owner's vendor row, `request_payout` debited
+    the owner's balance, and the B2C disbursement went to
+    `data.account_details`, a phone number taken straight from the request body.
+    A shop assistant with app access could withdraw the store's balance to their
+    own number, blocked only by a `router.replace()` in a React screen.
+
+    `wallet_service.resolve_wallet_owner` already matched on `clerk_id` alone
+    and correctly refused staff; the two withdrawal paths disagreed and this was
+    the permissive one.
+    """
+    from sqlalchemy.future import select
+
+    from models.vendor_model import Vendor
+
+    result = await session.execute(
+        select(Vendor)
+        .where(Vendor.clerk_id == clerk_id)
+        .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        .limit(1)
+    )
+    vendor = result.scalars().first()
     if vendor:
         return vendor.id, "vendor"
-    
+
     rider = await get_deliverer_by_clerk_id(session, clerk_id)
     if rider:
         return rider.id, "rider"
-    
+
+    # A staff member is a real account being told this is not theirs to move.
+    from models.vendor_staff_model import VendorStaff
+
+    staff = await session.execute(
+        select(VendorStaff.id)
+        .where(VendorStaff.clerk_id == clerk_id, VendorStaff.revoked_at.is_(None))
+        .limit(1)
+    )
+    if staff.scalars().first():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "type": "owner_only",
+                "message": "Only the store owner can withdraw funds.",
+            },
+        )
+
     raise HTTPException(status_code=404, detail="Provider account not found associated with this user.")
 
 async def _refund_failed_payout(session, *, payout, owner, clerk_id: str, provider_type: str, reason: str):
@@ -96,12 +145,12 @@ async def get_payout_limits(session: AsyncSession, clerk_id: str, provider_id, p
     if provider_type == "rider":
         minimum_threshold = 250.0
     else:
-        vendor = await get_vendor_by_clerk_id(session, clerk_id)
-        if vendor and vendor.vendor_type == "wholesale_b2b":
-            minimum_threshold = 1000.0
-        else:
-            minimum_threshold = 500.0
-            
+        # By id, not by clerk id. A clerk-id lookup returns an arbitrary one of
+        # the owner's stores, so a wholesale branch could be given the retail
+        # threshold — or vice versa — depending on row order.
+        vendor = await _vendor_by_id(session, provider_id)
+        minimum_threshold = 1000.0 if (vendor and vendor.vendor_type == "wholesale_b2b") else 500.0
+
     return minimum_threshold, transaction_fee
 
 
@@ -126,7 +175,7 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
     if provider_type == "rider" and data.amount >= 1000.0:
         tx_fee = 0.0
     elif provider_type == "vendor":
-        vendor = await get_vendor_by_clerk_id(session, clerk_id)
+        vendor = await _vendor_by_id(session, provider_id)
         if vendor and vendor.vendor_type == "wholesale_b2b" and data.amount >= 5000.0:
             tx_fee = 0.0
         elif vendor and vendor.vendor_type != "wholesale_b2b" and data.amount >= 2500.0:
@@ -263,7 +312,13 @@ async def get_provider_payouts(session: AsyncSession, clerk_id: str):
     min_threshold, tx_fee = await get_payout_limits(session, clerk_id, provider_id, provider_type)
     
     if provider_type == "vendor":
-        total_earnings = (await get_vendor_dashboard(session, clerk_id))["total_revenue"]
+        # Scoped to the store the payout was resolved against. Without
+        # `vendor_id` the dashboard re-resolves from the clerk id and, for an
+        # owner with two stores, could report the *other* store's revenue beside
+        # this store's balance.
+        total_earnings = (
+            await get_vendor_dashboard(session, clerk_id, vendor_id=provider_id)
+        )["total_revenue"]
     else:
         total_earnings = (await get_deliverer_earnings(session, clerk_id))["total_earnings"]
 

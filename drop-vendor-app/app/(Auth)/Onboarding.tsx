@@ -1,3 +1,5 @@
+import { apiFetch } from "@/API/apiFetch";
+import { errorMessage } from "@/API/errors";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useRouter } from "expo-router";
@@ -68,21 +70,21 @@ export default function VendorOnboarding() {
     useEffect(() => {
         const checkStatus = async () => {
             try {
-                const token = await getToken();
                 const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
-                const res = await fetch(`${BASE_URL}/api/auth/profile-status?app_type=vendor`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-                        setMissingFields(data.missing_fields);
-                    } else {
-                        router.replace("/(screens)");
-                    }
+                const data = await apiFetch<{ exists: boolean; missing_fields?: string[] }>(
+                    `${BASE_URL}/api/auth/profile-status?app_type=vendor`,
+                    { token: await getToken() }
+                );
+                if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
+                    setMissingFields(data.missing_fields ?? []);
+                } else {
+                    router.replace("/(screens)");
                 }
             } catch (error) {
-                if (__DEV__) console.error("Failed to check profile status", error);
+                // Staying on the form is the right failure here: it is the only
+                // screen a vendor without a profile can act from, and the fields
+                // they fill in are checked again on submit.
+                if (__DEV__) console.warn("Failed to check profile status", error);
             } finally {
                 setLoading(false);
             }
@@ -216,27 +218,21 @@ export default function VendorOnboarding() {
                 payload.business_license = businessLicense;
             }
 
-            const res = await fetch(VendorApiRoutes.Register.path, {
+            await apiFetch(VendorApiRoutes.Register.path, {
                 method: "POST",
-                headers: { 
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload)
+                token,
+                body: payload,
             });
 
-            if (res.ok) {
-                Toast.success("Success", "Welcome to Drop Vendor!");
-                queryClient.invalidateQueries({ queryKey: ['vendor'] });
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                router.replace("/(screens)");
-            } else {
-                const errorData = await res.json();
-                Toast.error("Error", errorData?.detail || "Registration failed");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            }
+            Toast.success("Success", "Welcome to Drop Vendor!");
+            queryClient.invalidateQueries({ queryKey: ['vendor'] });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            router.replace("/(screens)");
         } catch (error) {
-            Toast.error("Error", "Network error occurred");
+            // Registration fails on real, fixable things — a duplicate email, a
+            // malformed phone number. "Network error occurred" told the vendor
+            // to retry the same rejected form.
+            Toast.error("Error", errorMessage(error, "Registration failed"));
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setSubmitting(false);

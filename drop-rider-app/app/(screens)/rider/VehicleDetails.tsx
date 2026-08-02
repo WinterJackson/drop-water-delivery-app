@@ -1,3 +1,5 @@
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -5,7 +7,6 @@ import { TouchableOpacity } from "react-native";
 import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { Toast } from "@/lib/toast";
@@ -20,8 +21,8 @@ export default function VehicleDetails() {
     const router = useRouter();
     const { data: profile } = useRiderProfile();
     const queryClient = useQueryClient();
-    const { getToken } = useAuth();
 
+    const { put } = useApiRequest();
     const [plateNo, setPlateNo] = useState(profile?.plate_number || "");
     const [vehicleType, setVehicleType] = useState(profile?.vehicle_type || "");
     const [isSaving, setIsSaving] = useState(false);
@@ -36,27 +37,14 @@ export default function VehicleDetails() {
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-                method: RiderApiRoutes.UpdateProfile.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    plate_number: plateNo.trim().toUpperCase(),
-                    vehicle_type: vehicleType.trim().toLowerCase(),
-                })
+            await put(RiderApiRoutes.UpdateProfile.path, {
+                plate_number: plateNo.trim().toUpperCase(),
+                vehicle_type: vehicleType.trim().toLowerCase(),
             });
-
-            if (res.ok) {
-                queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
-                Toast.success("Saved", "Vehicle parameters updated successfully.");
-            } else {
-                Toast.error("Error", "Could not update vehicle profile.");
-            }
+            queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
+            Toast.success("Saved", "Vehicle parameters updated successfully.");
         } catch (error) {
-            Toast.error("Network Error", "Unable to reach servers.");
+            Toast.error("Error", errorMessage(error, "Could not update vehicle profile."));
         } finally {
             setIsSaving(false);
         }

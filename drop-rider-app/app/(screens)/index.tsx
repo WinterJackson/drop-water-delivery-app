@@ -1,6 +1,8 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -35,7 +37,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 export default function Dashboard() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { put } = useApiRequest();
   const router = useRouter();
 
   const { data: unreadData } = useUnreadNotificationCount();
@@ -115,8 +117,6 @@ export default function Dashboard() {
     useRiderStore.setState({ isOnline: value });
     await SecureStore.setItemAsync("rider_availability", String(value));
 
-    const token = await getToken();
-
     try {
       if (value) {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -171,10 +171,9 @@ export default function Dashboard() {
           }
 
           if (loc) {
-            await fetch(RiderApiRoutes.UpdateLocation.path, {
-              method: RiderApiRoutes.UpdateLocation.method,
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ lat: loc.coords.latitude, lng: loc.coords.longitude }),
+            await put(RiderApiRoutes.UpdateLocation.path, {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
             });
           } else {
             // Warn but don't crash if we couldn't get a coordinate despite GPS being on
@@ -185,14 +184,8 @@ export default function Dashboard() {
         }
       }
 
-      const res = await fetch(RiderApiRoutes.ToggleAvailability.path, {
-        method: RiderApiRoutes.ToggleAvailability.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ is_available: value }),
-      });
+      await put(RiderApiRoutes.ToggleAvailability.path, { is_available: value });
 
-      if (!res.ok) throw new Error("Failed to update on server");
-      
       // If going online, refetch radar immediately
       if (value) {
         refetchRadar();
@@ -203,8 +196,13 @@ export default function Dashboard() {
         Toast.error("Permission Denied", "Please grant location permissions to go online.");
       } else if ((e as Error).message === "SERVICES_DISABLED") {
         // Do nothing, Alert is already shown
+      } else if (e instanceof ApiError && e.status === 401) {
+        // The client has already signed the rider out.
       } else {
-        Toast.error("Status Update Failed", "We couldn't toggle your availability.");
+        // The backend refuses with a reason — an unapproved KYC, a wallet in
+        // arrears. "We couldn't toggle your availability" told the rider nothing
+        // they could act on.
+        Toast.error("Status Update Failed", errorMessage(e, "We couldn't toggle your availability."));
       }
       
       // Revert optimism

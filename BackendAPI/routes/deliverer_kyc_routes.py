@@ -82,6 +82,10 @@ async def upload_kyc_documents(
     # new submission, not a minor field update on an already-verified rider.
     if deliverer.kyc_status != KYCStatus.approved:
         deliverer.kyc_status = KYCStatus.pending
+        # The reason described the *previous* documents. Leaving it set would
+        # keep showing "your ID photo was blurred" on VerificationWall next to a
+        # freshly uploaded, perfectly sharp one.
+        deliverer.kyc_rejection_reason = None
     else:
         # Log the change for an admin to spot-check, without interrupting the rider's ability to work.
         logger.info(f"Rider {deliverer.id} updated KYC documents post-approval; status unchanged.")
@@ -121,5 +125,10 @@ async def get_kyc_status(
         "kyc_status": deliverer.kyc_status,
         "employer_vendor_id": deliverer.employer_vendor_id,
         "vehicle_type": deliverer.vehicle_type,
-        "plate_number": deliverer.plate_number
+        "plate_number": deliverer.plate_number,
+        # Why the last review failed. `VerificationWall` prefills the rider's
+        # previous answers, so without this a rejected rider sees a form that
+        # looks correct and resubmits the same document.
+        "rejection_reason": deliverer.kyc_rejection_reason,
+        "reviewed_at": deliverer.kyc_reviewed_at.isoformat() if deliverer.kyc_reviewed_at else None,
     }

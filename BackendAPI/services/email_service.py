@@ -26,6 +26,8 @@ except ImportError:
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from services import email_templates
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=4),
@@ -155,3 +157,28 @@ def send_order_confirmation(to: str, name: str, order_details: dict) -> None:
     </div>
     """
     _send(to, subject, html)
+
+
+def send_broadcast_email(to: str, name: str, subject: str, body: str) -> None:
+    """One message from an admin campaign.
+
+    Fire-and-forget by design, like every other email here: `_send` retries the
+    transport failures worth retrying and swallows the rest. The campaign's
+    authoritative record is the `Notification` row that was already written, so
+    an email that does not arrive loses the interruption, never the history.
+    """
+    html = email_templates.broadcast(name=name, subject=subject, body=body)
+    _send(to, subject, html)
+
+
+def send_support_reply_email(to: str, name: str, subject: str, body: str, ticket_id: str) -> None:
+    """An administrator's reply to a support ticket.
+
+    Best-effort in exactly the same way. The reply is already in the requester's
+    in-app notifications before this is attempted, so a bounced address delays
+    the conversation rather than losing it.
+    """
+    html = email_templates.support_reply(
+        name=name, subject=subject, body=body, ticket_id=ticket_id
+    )
+    _send(to, f"Re: {subject}", html)

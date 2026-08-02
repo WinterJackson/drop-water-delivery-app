@@ -17,6 +17,8 @@ import {
 } from "react-native";
 import { Toast } from "@/lib/toast";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { apiFetch } from "@/API/apiFetch";
+import { errorMessage } from "@/API/errors";
 import PressableScale from "@/components/ui/PressableScale";
 import VehicleDropdown from "@/components/ui/VehicleDropdown";
 import { BRAND } from "@/constants/brandColors";
@@ -46,20 +48,16 @@ export default function RiderOnboarding() {
         const checkStatus = async () => {
             try {
                 const token = await getToken();
-                const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
-                const res = await fetch(`${BASE_URL}/api/auth/profile-status?app_type=rider`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-                        setMissingFields(data.missing_fields);
-                    } else {
-                        router.replace("/(screens)");
-                    }
+                const data = await apiFetch<{ exists?: boolean; missing_fields?: string[] }>(
+                    RiderApiRoutes.ProfileStatus.path, { token }
+                );
+                if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
+                    setMissingFields(data.missing_fields ?? []);
+                } else {
+                    router.replace("/(screens)");
                 }
             } catch (error) {
-                console.error("Failed to check profile status", error);
+                if (__DEV__) console.warn("Failed to check profile status:", errorMessage(error));
             } finally {
                 setLoading(false);
             }
@@ -105,25 +103,15 @@ export default function RiderOnboarding() {
                 payload.plate_number = plateNumber;
             }
 
-            const res = await fetch(RiderApiRoutes.Register.path, {
-                method: "POST",
-                headers: { 
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (res.ok) {
-                Toast.success("Success", "Welcome to Drop Riders!");
-                queryClient.invalidateQueries({ queryKey: ['rider'] });
-                router.replace("/(screens)");
-            } else {
-                const errorData = await res.json();
-                Toast.error("Error", errorData?.detail || "Registration failed");
-            }
+            await apiFetch(RiderApiRoutes.Register.path, { method: "POST", token, body: payload });
+            Toast.success("Success", "Welcome to Drop Riders!");
+            queryClient.invalidateQueries({ queryKey: ['rider'] });
+            router.replace("/(screens)");
         } catch (error) {
-            Toast.error("Error", "Network error occurred");
+            // A 422 here names the field that failed — "ID_number is required",
+            // "phone_number is not a valid Kenyan number" — which is the whole
+            // point of the form. "Network error occurred" was never true.
+            Toast.error("Error", errorMessage(error, "Registration failed"));
         } finally {
             setSubmitting(false);
         }

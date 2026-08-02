@@ -1,73 +1,110 @@
-import { useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { Redirect } from "expo-router";
-import { UIThemeContext } from "@/context/ThemeContext";
-import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
+import { ActivityIndicator, Text, View } from "react-native";
+
+import { apiFetch } from "@/API/apiFetch";
+import { ApiError, errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import PressableScale from "@/components/ui/PressableScale";
+import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
+import { UIThemeContext } from "@/context/ThemeContext";
+import { useActiveStore } from "@/stores/activeStoreStore";
+
+const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
+
+interface ProfileStatus {
+  exists: boolean;
+  missing_fields?: string[];
+}
+
+interface Store {
+  id: string;
+}
 
 export default function Index() {
   const { isSignedIn, isLoaded, getToken } = useAuth();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const [splashDone, setSplashDone] = useState(false);
-  const [isVerifyingProfile, setIsVerifyingProfile] = useState(false);
   const [readyToRoute, setReadyToRoute] = useState<"onboarding" | "main" | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+
+  const hydrateActiveStore = useActiveStore((s) => s.hydrate);
+  const reconcileStores = useActiveStore((s) => s.reconcile);
+
+  const verifyOnboardingAndProceed = useCallback(async () => {
+    setStartupError(null);
+    try {
+      const token = await getToken();
+
+      const status = await apiFetch<ProfileStatus>(
+        `${BASE_URL}/api/auth/profile-status?app_type=vendor`,
+        { token }
+      );
+
+      if (!status.exists || (status.missing_fields && status.missing_fields.length > 0)) {
+        setReadyToRoute("onboarding");
+        return;
+      }
+
+      // Restore the store they were last working in before anything queries it,
+      // so the first dashboard request already carries the right `X-Store-Id`.
+      await hydrateActiveStore();
+
+      const stores = await apiFetch<Store[]>(VendorApiRoutes.GetStores.path, { token });
+      if (!stores.length) {
+        setReadyToRoute("onboarding");
+        return;
+      }
+
+      // Drop a remembered store this account can no longer reach — a different
+      // vendor signed in on this device, or the store was deleted. Left in
+      // place, every request would carry an id the backend answers 404 for.
+      reconcileStores(stores.map((s) => s.id));
+      setReadyToRoute("main");
+    } catch (err) {
+      // Only the server saying "you are not a vendor here" means onboarding. A
+      // dropped connection or a 500 does not: sending an established vendor back
+      // through sign-up because their train went into a tunnel is the wrong
+      // failure, and it was the previous behaviour for *every* error — the
+      // `catch` routed to onboarding unconditionally, timeouts included.
+      if (err instanceof ApiError && err.status === 403) {
+        setReadyToRoute("onboarding");
+        return;
+      }
+      setStartupError(errorMessage(err, "We couldn't reach the server. Check your connection."));
+    }
+  }, [getToken, hydrateActiveStore, reconcileStores]);
 
   useEffect(() => {
-    const verifyOnboardingAndProceed = async () => {
-      if (!isSignedIn) return;
-      setIsVerifyingProfile(true);
-      try {
-        const token = await getToken();
-        // The backend exposes /api/auth/profile-status internally 
-        // We'll reuse the BASE_URL logic from VendorApiRoutes to form this specific URL
-        const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
-        const res = await fetch(`${BASE_URL}/api/auth/profile-status?app_type=vendor`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-            setReadyToRoute("onboarding");
-          } else {
-            // Fetch stores to integrate multi-store selection into startup flow
-            const storesRes = await fetch(`${BASE_URL}/api/vendor/stores`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (storesRes.ok) {
-                const stores = await storesRes.json();
-                if (stores.length > 1) {
-                    // Owner with multiple stores: Here we could route to a StoreSelector screen.
-                    // For now, we route to main and let them switch from the Header.
-                    setReadyToRoute("main");
-                } else if (stores.length === 1) {
-                    // Staff member or single-store Owner: Automatically routed into their store's dashboard
-                    setReadyToRoute("main");
-                } else {
-                    setReadyToRoute("onboarding");
-                }
-            } else {
-                setReadyToRoute("main");
-            }
-          }
-        } else {
-          setReadyToRoute("onboarding");
-        }
-      } catch (e) {
-        setReadyToRoute("onboarding");
-      } finally {
-        setIsVerifyingProfile(false);
-      }
-    };
+    if (splashDone && isLoaded && isSignedIn) verifyOnboardingAndProceed();
+  }, [splashDone, isLoaded, isSignedIn, verifyOnboardingAndProceed]);
 
-    if (splashDone && isLoaded) {
-      if (isSignedIn) verifyOnboardingAndProceed();
-    }
-  }, [splashDone, isLoaded, isSignedIn]);
-
-  // Show splash until both animation completes AND Clerk auth resolves
-  // We also wait for the profile verification to finish cleanly if they are signed in.
   const canProceed = splashDone && isLoaded;
+
+  if (canProceed && isSignedIn && startupError) {
+    return (
+      <View className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-black" : "bg-white"}`}>
+        <Text className={`text-lg font-bold mb-2 text-center ${darkTheme ? "text-white" : "text-black"}`}>
+          Couldn&apos;t start up
+        </Text>
+        <Text className={`text-center mb-6 ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
+          {startupError}
+        </Text>
+        <PressableScale
+          onPress={verifyOnboardingAndProceed}
+          className="bg-accentbg px-8 py-3 rounded-xl flex-row items-center"
+        >
+          <ActivityIndicator animating={false} />
+          <Text className="text-white font-bold">Try again</Text>
+        </PressableScale>
+      </View>
+    );
+  }
+
+  // Show splash until both animation completes AND Clerk auth resolves.
+  // We also wait for the profile verification to finish cleanly if signed in.
   const isFullyReady = canProceed && (!isSignedIn || readyToRoute !== null);
 
   if (!isFullyReady) {

@@ -21,7 +21,12 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.drop.rider"
+      "bundleIdentifier": "com.drop.rider",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +34,6 @@
       },
       "package": "com.drop.rider",
       "permissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
@@ -48,7 +52,10 @@
         "expo-location",
         {
           "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "isAndroidForegroundServiceEnabled": true,
+          "locationWhenInUsePermission": "Drop uses your location to show you nearby orders and to guide you to the vendor and the customer.",
+          "locationAlwaysAndWhenInUsePermission": "Drop shares your location with the customer while you are delivering their order, so they can watch your progress on a live map after you switch to your navigation app. It stops when you complete the delivery.",
+          "locationAlwaysPermission": "Drop shares your location with the customer while you are delivering their order. It stops when you complete the delivery."
         }
       ],
       "expo-secure-store",

@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/*
+ * The palette is anchored on the water-blue the three apps already use, so the
+ * console reads as part of the same platform rather than a bolted-on tool.
+ *
+ * Semantic tokens, not raw colours, at every call site: `bg-surface` rather
+ * than `bg-white dark:bg-neutral-900`. Dark mode then costs one block here
+ * instead of a second class on every element — which is how the two drift.
+ */
+
+@theme {
+  --color-brand-50: oklch(0.97 0.02 235);
+  --color-brand-100: oklch(0.93 0.04 235);
+  --color-brand-200: oklch(0.87 0.07 235);
+  --color-brand-300: oklch(0.79 0.11 235);
+  --color-brand-400: oklch(0.70 0.14 235);
+  --color-brand-500: oklch(0.62 0.16 235);
+  --color-brand-600: oklch(0.54 0.15 235);
+  --color-brand-700: oklch(0.45 0.13 235);
+  --color-brand-800: oklch(0.37 0.10 235);
+  --color-brand-900: oklch(0.30 0.07 235);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  :root {
+    --background: oklch(0.98 0.003 240);
+    --surface: oklch(1 0 0);
+    --surface-muted: oklch(0.97 0.004 240);
+    --border: oklch(0.91 0.005 240);
+    --foreground: oklch(0.22 0.01 240);
+    --foreground-muted: oklch(0.52 0.012 240);
+    --accent: oklch(0.54 0.15 235);
+    --accent-foreground: oklch(0.99 0 0);
+    --success: oklch(0.58 0.13 155);
+    --warning: oklch(0.72 0.15 75);
+    --danger: oklch(0.58 0.20 25);
+    --ring: oklch(0.62 0.16 235);
+
+    /* Categorical chart palette.
+     *
+     * Six hues, deliberately spread around the wheel and held at a similar
+     * lightness so no slice reads as "more important" than another. Defined as
+     * variables rather than hard-coded hex so a chart inherits the theme like
+     * everything else — Recharts writes these straight into SVG `fill`.
+     *
+     * Colour is never the only carrier of meaning anywhere in this console:
+     * every slice, bar and cell also states its label and value as text. */
+    --chart-1: oklch(0.62 0.16 235);
+    --chart-2: oklch(0.66 0.14 165);
+    --chart-3: oklch(0.72 0.15 75);
+    --chart-4: oklch(0.60 0.19 15);
+    --chart-5: oklch(0.58 0.16 300);
+    --chart-6: oklch(0.68 0.12 200);
+  }
+
+  /* Follows the OS by default, and the explicit toggle wins over it. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: oklch(0.17 0.008 245);
+      --surface: oklch(0.21 0.01 245);
+      --surface-muted: oklch(0.25 0.012 245);
+      --border: oklch(0.30 0.014 245);
+      --foreground: oklch(0.95 0.004 240);
+      --foreground-muted: oklch(0.68 0.012 240);
+      --accent: oklch(0.68 0.14 235);
+      --accent-foreground: oklch(0.16 0.01 245);
+      --success: oklch(0.70 0.14 155);
+      --warning: oklch(0.78 0.14 75);
+      --danger: oklch(0.68 0.18 25);
+      --ring: oklch(0.68 0.14 235);
+
+      /* Lifted, not merely inverted: the same hues at a lightness that holds up
+         against a dark surface without vibrating. */
+      --chart-1: oklch(0.70 0.14 235);
+      --chart-2: oklch(0.74 0.13 165);
+      --chart-3: oklch(0.79 0.14 75);
+      --chart-4: oklch(0.70 0.17 15);
+      --chart-5: oklch(0.68 0.15 300);
+      --chart-6: oklch(0.76 0.11 200);
+    }
+  }
+
+  /* Repeated rather than shared with the media query above: a single selector
+     list would make the whole rule invalid in a browser that does not know
+     `prefers-color-scheme`, and this block is the one an explicit choice
+     depends on. */
+  :root[data-theme="dark"] {
+    --background: oklch(0.17 0.008 245);
+    --surface: oklch(0.21 0.01 245);
+    --surface-muted: oklch(0.25 0.012 245);
+    --border: oklch(0.30 0.014 245);
+    --foreground: oklch(0.95 0.004 240);
+    --foreground-muted: oklch(0.68 0.012 240);
+    --accent: oklch(0.68 0.14 235);
+    --accent-foreground: oklch(0.16 0.01 245);
+    --success: oklch(0.70 0.14 155);
+    --warning: oklch(0.78 0.14 75);
+    --danger: oklch(0.68 0.18 25);
+    --ring: oklch(0.68 0.14 235);
+
+    --chart-1: oklch(0.70 0.14 235);
+    --chart-2: oklch(0.74 0.13 165);
+    --chart-3: oklch(0.79 0.14 75);
+    --chart-4: oklch(0.70 0.17 15);
+    --chart-5: oklch(0.68 0.15 300);
+    --chart-6: oklch(0.76 0.11 200);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Visible only for keyboard users. Every action in this console must be
+     reachable without a mouse — payout approval included. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+}
+
+@layer utilities {
+  .bg-surface { background-color: var(--surface); }
+  .bg-surface-muted { background-color: var(--surface-muted); }
+  .text-muted { color: var(--foreground-muted); }
+  .border-default { border-color: var(--border); }
+
+  /* Wide content — tables, the audit log's JSON diffs — scrolls inside its own
+     box. The page body must never scroll sideways on a phone. */
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* The bottom tab bar sits over the home indicator on an iPhone and over the
+     gesture pill on Android. Both are handled by the same inset, which is 0 on
+     every device that does not have one. */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* Reserve the tab bar's height at the end of the scroll region, or the last
+     row of every list is permanently underneath it. */
+  .pb-tabbar { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

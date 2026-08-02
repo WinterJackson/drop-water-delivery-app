@@ -1,26 +1,35 @@
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useState } from 'react';
-import { Alert } from 'react-native';
+
+import { errorMessage } from '@/API/errors';
+import SecureUpload from '@/Helpers/imageUpload';
 import { Toast } from '@/lib/toast';
+import { useActiveStore } from '@/stores/activeStoreStore';
+import { useAuth } from '@clerk/clerk-expo';
 
-const cloudName = 'dn5f0jksu';
-const uploadPreset = 'drop_uploads';
-
+/**
+ * Pick a product photo and upload it.
+ *
+ * The upload itself lives in `Helpers/imageUpload.ts` — this hook is the picker
+ * and the loading state around it. It used to hold a second, divergent copy of
+ * the upload: the same unsigned Cloudinary preset, different compression
+ * settings, and a `catch` that swallowed the failure and returned `null`, so a
+ * screen that did not check the return value saved a product with no image.
+ */
 export const useImageUpload = () => {
+  const { getToken } = useAuth();
+  const activeStoreId = useActiveStore((s) => s.activeStoreId);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pickImage = useCallback(async () => {
-    // Request permissions
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissionResult.granted) {
       Toast.error('Permission denied', 'We need permission to access your photos');
       return;
     }
 
-    // Launch image picker
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -34,59 +43,23 @@ export const useImageUpload = () => {
     }
   }, []);
 
-  const uploadToCloudinary = useCallback(async (uri: string): Promise<string | null> => {
-    setUploading(true);
-    setError(null);
-
-    try {
-      let processedUri = uri;
-      let processedName = `drop_${Date.now()}.webp`;
-
+  const uploadImage = useCallback(
+    async (uri: string): Promise<string | null> => {
+      setUploading(true);
+      setError(null);
       try {
-        const manipResult = await ImageManipulator.manipulateAsync(
-          uri,
-          [],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.WEBP }
-        );
-        processedUri = manipResult.uri;
-      } catch (e) {
-        if (__DEV__) console.warn("Failed to compress to WEBP, falling back to original", e);
+        const result = await SecureUpload(uri, `product_${Date.now()}`, getToken, activeStoreId);
+        return result.secure_url;
+      } catch (err: unknown) {
+        // `SecureUpload` has already shown the backend's own reason.
+        setError(errorMessage(err, 'Could not upload that image.'));
+        return null;
+      } finally {
+        setUploading(false);
       }
-
-      const formData = new FormData();
-      const file = {
-        uri: processedUri,
-        type: 'image/webp',
-        name: processedName,
-      };
-
-      formData.append('file', file as any);
-      formData.append('upload_preset', uploadPreset);
-
-      const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/upload`,
-        {
-          method: 'POST',
-          body: formData,
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.secure_url) {
-        return data.secure_url;
-      } else {
-        throw new Error('Upload failed');
-      }
-    } catch (err: unknown) {
-      if (__DEV__) console.error('Cloudinary upload error:', err);
-      setError('Failed to upload image');
-      Toast.error('Upload Error', 'Could not upload image to Cloudinary');
-      return null;
-    } finally {
-      setUploading(false);
-    }
-  }, []);
+    },
+    [getToken, activeStoreId]
+  );
 
   const handleImageUpload = useCallback(async () => {
     if (!imageUri) {
@@ -94,8 +67,8 @@ export const useImageUpload = () => {
       return null;
     }
 
-    return await uploadToCloudinary(imageUri);
-  }, [imageUri, uploadToCloudinary]);
+    return await uploadImage(imageUri);
+  }, [imageUri, uploadImage]);
 
   return {
     imageUri,
@@ -103,7 +76,7 @@ export const useImageUpload = () => {
     uploading,
     error,
     pickImage,
-    uploadToCloudinary,
+    uploadImage,
     handleImageUpload,
   };
 };

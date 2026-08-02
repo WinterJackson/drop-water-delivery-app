@@ -19,13 +19,25 @@ MIN_TOPUP_KSH = Decimal("10")
 MIN_WITHDRAWAL_KSH = Decimal("500")
 
 
-async def resolve_wallet_owner(session: AsyncSession, clerk_id: str, requested_type: str):
+async def resolve_wallet_owner(
+    session: AsyncSession, clerk_id: str, requested_type: str, store_id: str | None = None
+):
     """Verify the caller actually owns a wallet of the type they are claiming.
 
     `user_type` arrives from the request body, so it is untrusted. A token is only
     permitted to act on a wallet that has a row for its own clerk id — without
     this check a client could name any entity type and operate on the matching
     wallet.
+
+    Matching on `clerk_id` alone is deliberate for vendors: `staff_clerk_id` must
+    never resolve here. A staff member operating the shop may not move the
+    owner's money, and this function has always been the path that got that
+    right — `payout_service` was the one that did not.
+
+    `store_id` names *which* of the owner's stores when they hold more than one.
+    Each `Vendor` row carries its own `wallet_balance`, so without it a
+    withdrawal debited whichever row the database returned first — an unordered
+    `.first()`, so not even consistently the same one between two requests.
     """
     normalised = (requested_type or "").lower()
     model = _WALLET_OWNER_MODELS.get(normalised)
@@ -35,9 +47,22 @@ async def resolve_wallet_owner(session: AsyncSession, clerk_id: str, requested_t
             detail="Invalid account type. Expected one of: customer, vendor, rider.",
         )
 
-    result = await session.execute(select(model).where(model.clerk_id == clerk_id))
+    query = select(model).where(model.clerk_id == clerk_id)
+    if store_id and model is Vendor:
+        from uuid import UUID
+
+        try:
+            query = query.where(Vendor.id == UUID(str(store_id)))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="Invalid store id.")
+
+    result = await session.execute(query.order_by(model.created_at.asc(), model.id.asc()))
     owner = result.scalars().first()
     if owner is None:
+        if store_id and model is Vendor:
+            # Their account is fine; that store is not theirs. 404 rather than
+            # 403 — confirming the id exists is not ours to do.
+            raise HTTPException(status_code=404, detail="Store not found.")
         raise HTTPException(
             status_code=403,
             detail=f"This account is not registered as a {normalised}.",
@@ -117,7 +142,7 @@ async def apply_wallet_delta(
     )
 
 
-async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str):
+async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str, store_id: str | None = None):
     import re
 
     amount_dec = Decimal(str(amount))
@@ -132,7 +157,7 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
         )
 
     # Confirms the caller owns a wallet of this type before any money moves.
-    await resolve_wallet_owner(session, user_id, user_type)
+    await resolve_wallet_owner(session, user_id, user_type, store_id=store_id)
 
     # Trigger M-Pesa STK Push
     response = await initiate_stk_push(phone=phone, amount=int(amount))
@@ -270,7 +295,7 @@ async def handle_mpesa_topup_callback(session: AsyncSession, payload: dict):
     await session.commit()
     return {"status": "failed"}
 
-async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str):
+async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str, store_id: str | None = None):
     import re
 
     amount = Decimal(str(amount))
@@ -285,10 +310,17 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
         raise HTTPException(status_code=400, detail="Phone number must be in the format 2547XXXXXXXX or 2541XXXXXXXX.")
 
     # Confirms the caller owns a wallet of this type — `user_type` is client input.
-    user_type, model, _ = await resolve_wallet_owner(session, user_id, user_type)
+    user_type, model, owner = await resolve_wallet_owner(
+        session, user_id, user_type, store_id=store_id
+    )
 
-    # Lock the row for the duration of this transaction to prevent concurrent double-withdrawal
-    result = await session.execute(select(model).where(model.clerk_id == user_id).with_for_update())
+    # Lock the row for the duration of this transaction to prevent concurrent
+    # double-withdrawal. Locked by primary key, so it is provably the same row
+    # `resolve_wallet_owner` approved — re-selecting on `clerk_id` and taking
+    # `.first()` could lock the owner's *other* store.
+    result = await session.execute(
+        select(model).where(model.id == owner.id).with_for_update()
+    )
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")

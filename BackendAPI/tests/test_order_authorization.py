@@ -28,7 +28,14 @@ def _order(customer_id, vendor_id, deliverer_id=None):
     return order
 
 
-def _session(order, *, customer=None, vendor=None, rider=None):
+def _session(order, *, customer=None, vendor=None, rider=None, staff_clerk_ids=()):
+    """A session double for the lookups `resolve_order_role` actually makes.
+
+    Staff used to be `Vendor.staff_clerk_id`, a column already loaded with the
+    vendor row. It is a membership table now, so "is this person staff of that
+    store" is a query — and a bare `AsyncMock.execute()` answers every query
+    truthily, which would silently make *everyone* a vendor here.
+    """
     session = AsyncMock()
 
     async def _get(model, ident):
@@ -44,6 +51,18 @@ def _session(order, *, customer=None, vendor=None, rider=None):
         return None
 
     session.get = AsyncMock(side_effect=_get)
+
+    def _membership(statement):
+        # `staff_membership` filters on the clerk id; pull it back out of the
+        # compiled parameters rather than guessing from call order.
+        params = statement.compile().params
+        wanted = {v for k, v in params.items() if k.startswith("clerk_id")}
+        result = MagicMock()
+        match = MagicMock() if wanted & set(staff_clerk_ids) else None
+        result.scalars.return_value.first.return_value = match
+        return result
+
+    session.execute = AsyncMock(side_effect=lambda stmt, *a, **kw: _membership(stmt))
     return session
 
 
@@ -51,7 +70,7 @@ def _session(order, *, customer=None, vendor=None, rider=None):
 async def test_owning_customer_is_recognised():
     customer = MagicMock(clerk_id="customer_a")
     order = _order(uuid4(), uuid4())
-    session = _session(order, customer=customer, vendor=MagicMock(clerk_id="v", staff_clerk_id=None))
+    session = _session(order, customer=customer, vendor=MagicMock(clerk_id="v"))
 
     assert await resolve_order_role(session, order.id, "customer_a") == "customer"
 
@@ -61,7 +80,7 @@ async def test_unrelated_customer_gets_no_role():
     """The core of B7: customer B must have no access to customer A's order."""
     customer = MagicMock(clerk_id="customer_a")
     order = _order(uuid4(), uuid4())
-    session = _session(order, customer=customer, vendor=MagicMock(clerk_id="v", staff_clerk_id=None))
+    session = _session(order, customer=customer, vendor=MagicMock(clerk_id="v"))
 
     assert await resolve_order_role(session, order.id, "customer_b") is None
 
@@ -69,11 +88,15 @@ async def test_unrelated_customer_gets_no_role():
 @pytest.mark.asyncio
 async def test_order_vendor_and_staff_are_recognised():
     order = _order(uuid4(), uuid4())
-    vendor = MagicMock(clerk_id="vendor_a", staff_clerk_id="staff_a")
-    session = _session(order, customer=MagicMock(clerk_id="c"), vendor=vendor)
+    vendor = MagicMock(clerk_id="vendor_a")
+    session = _session(
+        order, customer=MagicMock(clerk_id="c"), vendor=vendor, staff_clerk_ids=("staff_a",)
+    )
 
     assert await resolve_order_role(session, order.id, "vendor_a") == "vendor"
     assert await resolve_order_role(session, order.id, "staff_a") == "vendor"
+    # And a staff member of some *other* store is nobody here.
+    assert await resolve_order_role(session, order.id, "staff_elsewhere") is None
 
 
 @pytest.mark.asyncio
@@ -83,7 +106,7 @@ async def test_assigned_rider_is_recognised_but_other_riders_are_not():
     session = _session(
         order,
         customer=MagicMock(clerk_id="c"),
-        vendor=MagicMock(clerk_id="v", staff_clerk_id=None),
+        vendor=MagicMock(clerk_id="v"),
         rider=MagicMock(clerk_id="rider_a"),
     )
 
@@ -98,7 +121,7 @@ async def test_unauthorised_access_raises_404_not_403():
 
     order = _order(uuid4(), uuid4())
     session = _session(order, customer=MagicMock(clerk_id="customer_a"),
-                       vendor=MagicMock(clerk_id="v", staff_clerk_id=None))
+                       vendor=MagicMock(clerk_id="v"))
 
     with pytest.raises(HTTPException) as exc:
         await authorise_order_access(session, order.id, "attacker")
@@ -112,7 +135,7 @@ async def test_role_restriction_is_enforced():
 
     order = _order(uuid4(), uuid4())
     session = _session(order, customer=MagicMock(clerk_id="customer_a"),
-                       vendor=MagicMock(clerk_id="vendor_a", staff_clerk_id=None))
+                       vendor=MagicMock(clerk_id="vendor_a"))
 
     assert await authorise_order_access(session, order.id, "customer_a", ("customer",)) == "customer"
     with pytest.raises(HTTPException):

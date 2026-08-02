@@ -4,47 +4,46 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
-import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { errorMessage } from "@/API/errors";
 import { Toast } from "@/lib/toast";
-import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useQueryClient } from "@tanstack/react-query";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { BRAND } from "@/constants/brandColors";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 
 export default function StoreProfile() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
-    const { data: dashboard, isLoading: dashLoading } = useDashboard();
-    const { data: vendorProfile } = useVendorProfile();
-    const queryClient = useQueryClient();
-    const { getToken } = useAuth();
+    // Every field on this screen belongs to the store profile. It used to read
+    // them off the dashboard response, which returns none of them — so the form
+    // opened blank and "saving" it wrote empty strings over the vendor's real
+    // business name, licence and phone number.
+    const { data: vendorProfile, isLoading: dashLoading } = useVendorProfile();
+    const updateProfile = useUpdateVendorProfile();
     
     const isStaff = vendorProfile?.role === "staff";
 
     const [isEditing, setIsEditing] = useState(false);
-    const [businessName, setBusinessName] = useState(dashboard?.business_name || "");
-    const [ownersName, setOwnersName] = useState(dashboard?.owners_name || "");
-    const [phone, setPhone] = useState(dashboard?.phone_number || "");
-    const [businessLicense, setBusinessLicense] = useState(dashboard?.business_license || "");
-    const [depositFee, setDepositFee] = useState(dashboard?.deposit_fee?.toString() || "");
-    const [vendorType, setVendorType] = useState(dashboard?.vendor_type || "retail_refill");
+    const [businessName, setBusinessName] = useState(vendorProfile?.business_name || "");
+    const [ownersName, setOwnersName] = useState(vendorProfile?.owners_name || "");
+    const [phone, setPhone] = useState(vendorProfile?.phone_number || "");
+    const [businessLicense, setBusinessLicense] = useState(vendorProfile?.business_license || "");
+    const [depositFee, setDepositFee] = useState(vendorProfile?.deposit_fee?.toString() || "");
+    const [vendorType, setVendorType] = useState(vendorProfile?.vendor_type || "retail_refill");
 
     React.useEffect(() => {
-        if (dashboard && !isEditing) {
-            setBusinessName(dashboard.business_name || "");
-            setOwnersName(dashboard.owners_name || "");
-            setPhone(dashboard.phone_number || "");
-            setBusinessLicense(dashboard.business_license || "");
-            setDepositFee(dashboard.deposit_fee?.toString() || "");
-            setVendorType(dashboard.vendor_type || "retail_refill");
+        if (vendorProfile && !isEditing) {
+            setBusinessName(vendorProfile.business_name || "");
+            setOwnersName(vendorProfile.owners_name || "");
+            setPhone(vendorProfile.phone_number || "");
+            setBusinessLicense(vendorProfile.business_license || "");
+            setDepositFee(vendorProfile.deposit_fee?.toString() || "");
+            setVendorType(vendorProfile.vendor_type || "retail_refill");
         }
-    }, [dashboard, isEditing]);
+    }, [vendorProfile, isEditing]);
     
     // Location state
     const [locationData, setLocationData] = useState<{lat: number, lng: number, address: string} | null>(null);
@@ -180,7 +179,6 @@ export default function StoreProfile() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
-            const token = await getToken();
             const payload: any = {
                 business_name: businessName.trim(),
                 owners_name: ownersName.trim(),
@@ -199,24 +197,15 @@ export default function StoreProfile() {
                 payload.location_address = locationData.address;
             }
 
-            const res = await fetch(VendorApiRoutes.UpdateProfile.path, {
-                method: VendorApiRoutes.UpdateProfile.method,
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-
-            if (res.ok) {
-                queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
-                Toast.success("Saved", "Store Profile updated successfully.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                setIsEditing(false);
-            } else {
-                const err = await res.json();
-                Toast.error("Update Failed", err.detail || "Unable to update profile.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            }
+            await updateProfile.mutateAsync(payload);
+            Toast.success("Saved", "Store Profile updated successfully.");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setIsEditing(false);
         } catch (error: unknown) {
-            Toast.error("Network Error", "Check your connection and try again.");
+            // Owner-only, and the deposit-fee range check answers with the
+            // permitted bounds. Both were previously flattened to
+            // "Check your connection and try again."
+            Toast.error("Update Failed", errorMessage(error, "Unable to update profile."));
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setIsSaving(false);
@@ -320,15 +309,15 @@ export default function StoreProfile() {
                             </View>
 
                             <View className={`rounded-2xl p-4 mb-8 ${darkTheme ? "bg-white/5 border border-white/5" : "bg-white border border-gray-100"} shadow-sm`}>
-                                <InfoRow label="Store Name" value={dashboard?.business_name} stateVal={businessName} setStateVal={setBusinessName} />
-                                <InfoRow label="Owner Name" value={dashboard?.owners_name} stateVal={ownersName} setStateVal={setOwnersName} />
-                                <InfoRow label="Email Address" value={dashboard?.email} editable={false} />
-                                <InfoRow label="Phone Number" value={dashboard?.phone_number} stateVal={phone} setStateVal={setPhone} keyboardType="phone-pad" placeholder="07XXXXXXXX" />
+                                <InfoRow label="Store Name" value={vendorProfile?.business_name} stateVal={businessName} setStateVal={setBusinessName} />
+                                <InfoRow label="Owner Name" value={vendorProfile?.owners_name} stateVal={ownersName} setStateVal={setOwnersName} />
+                                <InfoRow label="Email Address" value={vendorProfile?.email} editable={false} />
+                                <InfoRow label="Phone Number" value={vendorProfile?.phone_number} stateVal={phone} setStateVal={setPhone} keyboardType="phone-pad" placeholder="07XXXXXXXX" />
                                 
                                 {isEditing ? (
                                     <>
-                                        <InfoRow label="Business License" value={dashboard?.business_license} stateVal={businessLicense} setStateVal={setBusinessLicense} placeholder="License No" />
-                                        <InfoRow label="Deposit Fee" value={dashboard?.deposit_fee?.toString()} stateVal={depositFee} setStateVal={setDepositFee} keyboardType="numeric" placeholder="e.g. 500" />
+                                        <InfoRow label="Business License" value={vendorProfile?.business_license} stateVal={businessLicense} setStateVal={setBusinessLicense} placeholder="License No" />
+                                        <InfoRow label="Deposit Fee" value={vendorProfile?.deposit_fee?.toString()} stateVal={depositFee} setStateVal={setDepositFee} keyboardType="numeric" placeholder="e.g. 500" />
                                         
                                         {/* Vendor Type Selection */}
                                         <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
@@ -345,13 +334,13 @@ export default function StoreProfile() {
                                     </>
                                 ) : (
                                     <>
-                                        <InfoRow label="Business License" value={dashboard?.business_license || "Not Provided"} editable={false} />
-                                        <InfoRow label="Vendor Type" value={dashboard?.vendor_type === "wholesale_b2b" ? "Wholesale (B2B)" : (dashboard?.vendor_type === "retail_refill" ? "Retail Refill" : "N/A")} editable={false} />
-                                        <InfoRow label="Deposit Fee" value={dashboard?.deposit_fee != null ? `Ksh ${dashboard?.deposit_fee}` : "N/A"} editable={false} />
-                                        <InfoRow label="Operating Hours" value={dashboard?.shift_start && dashboard?.shift_end ? `${dashboard.shift_start.slice(0, 5)} - ${dashboard.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
+                                        <InfoRow label="Business License" value={vendorProfile?.business_license || "Not Provided"} editable={false} />
+                                        <InfoRow label="Vendor Type" value={vendorProfile?.vendor_type === "wholesale_b2b" ? "Wholesale (B2B)" : (vendorProfile?.vendor_type === "retail_refill" ? "Retail Refill" : "N/A")} editable={false} />
+                                        <InfoRow label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? `Ksh ${vendorProfile?.deposit_fee}` : "N/A"} editable={false} />
+                                        <InfoRow label="Operating Hours" value={vendorProfile?.shift_start && vendorProfile?.shift_end ? `${vendorProfile.shift_start.slice(0, 5)} - ${vendorProfile.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
                                         <View className="flex-row justify-between pt-3">
                                             <Text className={`w-1/3 mt-3 text-sm font-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Location</Text>
-                                            <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"}`}>{dashboard?.location_address || "Not Set"}</Text>
+                                            <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"}`}>{vendorProfile?.location_address || "Not Set"}</Text>
                                         </View>
                                     </>
                                 )}
@@ -364,7 +353,7 @@ export default function StoreProfile() {
                                         Store Location Update
                                     </Text>
                                     <Text className={`text-xs mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                                        Ensure riders can find your new warehouse. Current: {dashboard?.location_address}
+                                        Ensure riders can find your new warehouse. Current: {vendorProfile?.location_address}
                                     </Text>
 
                                     <PressableScale

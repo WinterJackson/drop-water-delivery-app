@@ -1,6 +1,8 @@
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useContext, useState } from "react";
 import { useImageUpload } from "@/hooks/useImageUpload";
@@ -20,7 +22,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 export default function AddProduct() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { post } = useApiRequest();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const { imageUri, uploading: imageUploading, error, pickImage, handleImageUpload } = useImageUpload();
 
@@ -34,6 +37,7 @@ export default function AddProduct() {
   const [minQty, setMinQty] = useState("1");
   const [unit, setUnit] = useState("litres");
   const [stock, setStock] = useState("");
+  const [lowStockThreshold, setLowStockThreshold] = useState("5");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -45,7 +49,7 @@ export default function AddProduct() {
       return;
     }
     
-    // Handle image upload if image selected but not yet uploaded to Cloudinary
+    // Upload the picked photo if it has not been sent yet.
     let finalImageUrl = imageUrl;
     if (imageUri && !imageUrl.startsWith('http')) {
       // Image selected from picker but not yet uploaded
@@ -61,7 +65,6 @@ export default function AddProduct() {
     }
 
     setLoading(true);
-    const token = await getToken();
     const payload = {
       name, description, image_url: finalImageUrl,
       price: parseFloat(price), discount: parseFloat(discount || "0"),
@@ -69,25 +72,22 @@ export default function AddProduct() {
       weight_kg: parseFloat(weightKg),
       minimum_order_qty: parseInt(minQty || "1"),
       unit, stock: parseInt(stock),
+      low_stock_threshold: parseInt(lowStockThreshold || "0") || 0,
     };
     try {
-      const res = await fetch(VendorApiRoutes.CreateProduct.path, {
-        method: VendorApiRoutes.CreateProduct.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Toast.success("Product created!", "Your product is now live.");
-        router.back();
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        const err = await res.json();
-        Toast.error("Error", err.detail || "Failed to create product");
-      }
+      await post(VendorApiRoutes.CreateProduct.path, payload);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Toast.success("Product created!", "Your product is now live.");
+      // The list is cached for 60s server-side and by React Query on the client;
+      // without this the vendor returns to Products and does not see what they
+      // just created, which reads as the save having failed.
+      queryClient.invalidateQueries({ queryKey: ["vendorProducts"] });
+      router.back();
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.error("Error", "Network error. Please check your connection.");
+      // The backend rejects a discount at or above the price with the two
+      // numbers in the message; "Network error" hid that entirely.
+      Toast.error("Error", errorMessage(e, "Could not create that product."));
     } finally {
       setLoading(false);
     }
@@ -215,6 +215,17 @@ export default function AddProduct() {
             <View>
               <Text className={labelStyle}>Stock Quantity *</Text>
               <TextInput className={inputStyle} placeholder="100" placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"} value={stock} onChangeText={setStock} keyboardType="numeric" />
+            </View>
+
+            {/* Per product, because a shop selling 200 refills a day and one
+                selling a dispenser a month cannot share a number. 0 turns the
+                warning off for products where "low" means nothing. */}
+            <View>
+              <Text className={labelStyle}>Warn me at</Text>
+              <TextInput className={inputStyle} placeholder="5" placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"} value={lowStockThreshold} onChangeText={setLowStockThreshold} keyboardType="numeric" />
+              <Text className={`text-xs mt-2 ml-1 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
+                You&apos;ll get one notification when stock drops to this level. Set 0 to turn it off.
+              </Text>
             </View>
 
             <PressableScale

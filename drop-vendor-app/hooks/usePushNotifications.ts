@@ -1,3 +1,4 @@
+import { apiFetch } from '@/API/apiFetch';
 import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -96,14 +97,19 @@ export function usePushNotifications(queryPrefix: string = 'vendor') {
         registerForPushNotificationsAsync().then(async (token) => {
             if (token) {
                 setExpoPushToken(token);
-                const authToken = await getToken();
                 try {
-                    await fetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
+                    await apiFetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-                        body: JSON.stringify({ push_token: token, app_type: 'vendor' }),
+                        token: await getToken(),
+                        body: { push_token: token, app_type: 'vendor' },
                     });
-                } catch (e) { console.error("Caught Unhandled Exception:", e); }
+                } catch (e) {
+                    // Not fatal — the in-app notification list still works, and
+                    // registration retries on the next launch. Deliberately not
+                    // routed through `useApiRequest`: a 401 here would sign the
+                    // vendor out during startup.
+                    if (__DEV__) console.warn('Push token registration failed:', e);
+                }
             }
         });
 
@@ -139,10 +145,15 @@ export function usePushNotifications(queryPrefix: string = 'vendor') {
         try {
             const authToken = await getToken();
             if (!authToken) return;
-            await fetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${authToken}` },
-            });
+            // `?app_type=vendor` is not optional: the endpoint defaults to
+            // `customer` and clears `User.push_token` for a clerk id that has no
+            // User row. Without it this call returned 404 and the vendor's token
+            // stayed registered — exactly the failure the docstring above
+            // describes it as preventing.
+            await apiFetch(
+                `${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token?app_type=vendor`,
+                { method: 'DELETE', token: authToken }
+            );
             setExpoPushToken('');
         } catch (e) {
             if (__DEV__) console.warn('Push token de-registration failed:', e);

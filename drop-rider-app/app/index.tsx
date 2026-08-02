@@ -1,5 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
+import { apiFetch } from "@/API/apiFetch";
+import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { Redirect } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
@@ -21,32 +23,21 @@ export default function Index() {
       if (!isSignedIn) return;
       setIsVerifyingProfile(true);
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), fallbackTimeoutMs);
-      
       try {
         const token = await getToken();
-        // The backend exposes /api/auth/profile-status internally 
-        const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
-        const res = await fetch(`${BASE_URL}/api/auth/profile-status?app_type=rider`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: controller.signal
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
-            setReadyToRoute("onboarding");
-          } else {
-            setReadyToRoute("main");
-          }
-        } else {
-          setReadyToRoute("onboarding");
-        }
+        const data = await apiFetch<{ exists?: boolean; missing_fields?: string[] }>(
+          RiderApiRoutes.ProfileStatus.path,
+          { token, timeoutMs: fallbackTimeoutMs }
+        );
+        setReadyToRoute(
+          !data.exists || (data.missing_fields && data.missing_fields.length > 0)
+            ? "onboarding"
+            : "main"
+        );
       } catch (e) {
         // Fallback to onboarding if network fails or unregistered
         setReadyToRoute("onboarding");
       } finally {
-        clearTimeout(timeoutId);
         setIsVerifyingProfile(false);
       }
     };

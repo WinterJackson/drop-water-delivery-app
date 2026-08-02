@@ -5,17 +5,26 @@ from models.product_model import Product
 from models.vendor_model import Vendor
 from schemas.product_schemas import ProductFull
 from schemas.vendor_schemas import VendorOut
+from services.vendor_service import discoverable_vendor
 
 from sqlalchemy.orm import joinedload
 from geoalchemy2 import Geography
 
 async def search_service(session: AsyncSession, query: str | None, limit: int = 20, offset: int = 0, category: str | None = None, mode: str | None = None, user_lat: float | None = None, user_lng: float | None = None) -> list[ProductFull]:
-    stmt = select(Product).options(joinedload(Product.vendor))
-    
+    # The join is unconditional. It used to happen only when coordinates were
+    # supplied, purely to sort by distance — which meant a search without a
+    # location had no access to the vendor row and therefore returned products
+    # belonging to deleted and suspended stores.
+    stmt = (
+        select(Product)
+        .options(joinedload(Product.vendor))
+        .join(Vendor, Product.vendor_id == Vendor.id)
+        .where(discoverable_vendor())
+    )
+
     order_by_clauses = []
 
     if user_lat is not None and user_lng is not None:
-        stmt = stmt.join(Vendor, Product.vendor_id == Vendor.id)
         user_location = func.ST_SetSRID(func.ST_MakePoint(user_lng, user_lat), 4326).cast(Geography)
         order_by_clauses.append(func.ST_Distance(Vendor.location, user_location).asc())
 
@@ -54,7 +63,7 @@ async def search_service(session: AsyncSession, query: str | None, limit: int = 
     return products
 
 async def search_vendors_service(session: AsyncSession, query: str | None, limit: int = 20, offset: int = 0, user_lat: float | None = None, user_lng: float | None = None) -> list[VendorOut]:
-    stmt = select(Vendor)
+    stmt = select(Vendor).where(discoverable_vendor())
     order_by_clauses = []
 
     if user_lat is not None and user_lng is not None:

@@ -1,5 +1,7 @@
-import { useAuth } from '@clerk/clerk-expo';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { ApiError } from '../../API/errors';
+import { useApiRequest } from '../../API/useApiClient';
 import RiderApiRoutes from '../../API/routes/RiderApiRoutes';
 import { saveOrdersLocal, getOrdersLocal } from '../../config/database';
 
@@ -62,31 +64,37 @@ export interface RiderProfile {
     wallet_balance?: number;
 }
 
+/**
+ * The backend page size for `GET /api/rider/orders`. It has always accepted
+ * `skip`/`limit`; the client passed neither, so a rider six months in could not
+ * see anything past their most recent 50 deliveries — including for an earnings
+ * dispute — with no empty state to explain the cut-off, so it read as data loss.
+ */
+export const RIDER_ORDERS_PAGE_SIZE = 50;
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
+
+/**
+ * The rider's current orders.
+ *
+ * Deliberately *not* paginated: this feeds `ActiveDelivery`, which needs the
+ * live set, not a history. Use `useRiderOrdersPaginated` for the history screens.
+ */
 export function useRiderOrders() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderOrder[], Error>({
         queryKey: ['rider', 'orders'],
         queryFn: async () => {
-            const token = await getToken();
             const route = RiderApiRoutes.GetOrders();
             try {
-                const res = await fetch(route.path, {
-                    method: route.method,
-                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                });
-                if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-                if (!res.ok) {
-                    if (res.status === 404) throw new Error("404_NOT_FOUND");
-                    throw new Error(`Rider orders fetch failed: ${res.status}`);
-                }
-                const data = await res.json();
+                const data = await get<RiderOrder[]>(route.path);
                 saveOrdersLocal(data).catch(() => {});
                 return data;
-            } catch (e: any) {
-                if (e.message === "401_UNAUTHORIZED" || e.message === "404_NOT_FOUND") {
-                    throw e;
-                }
+            } catch (e) {
+                // A refusal is real and must surface. A *transport* failure means
+                // the rider is in a coverage hole mid-shift, and the on-disk
+                // manifest is the whole reason it exists.
+                if (e instanceof ApiError && !e.isNetworkError) throw e;
                 const localOrders = await getOrdersLocal();
                 if (localOrders && localOrders.length > 0) {
                     return localOrders as RiderOrder[];
@@ -95,137 +103,82 @@ export function useRiderOrders() {
             }
         },
         staleTime: 1000 * 60,
-        retry: (failureCount, error) => {
-            if ((error as Error).message === "404_NOT_FOUND" || (error as Error).message === "401_UNAUTHORIZED") return false;
-            return failureCount < 3;
-        }
+    });
+}
+
+/**
+ * Delivery history, page by page.
+ *
+ * `FlashList`'s `onEndReached` drives `fetchNextPage`; a short final page means
+ * the end, which is the only signal the endpoint gives.
+ */
+export function useRiderOrdersPaginated(status?: string) {
+    const { get } = useApiRequest();
+    return useInfiniteQuery<RiderOrder[], Error>({
+        queryKey: ['rider', 'orders', 'paginated', status ?? 'all'],
+        initialPageParam: 0,
+        queryFn: async ({ pageParam }) => {
+            const route = RiderApiRoutes.GetOrdersPaged(
+                status,
+                pageParam as number,
+                RIDER_ORDERS_PAGE_SIZE
+            );
+            return get<RiderOrder[]>(route.path);
+        },
+        getNextPageParam: (lastPage, allPages) =>
+            lastPage.length < RIDER_ORDERS_PAGE_SIZE
+                ? undefined
+                : allPages.reduce((n, page) => n + page.length, 0),
+        staleTime: 1000 * 60 * 5,
     });
 }
 
 export function useRiderEarningsHistory() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderOrder[], Error>({
         queryKey: ['rider', 'orders', 'delivered'],
-        queryFn: async () => {
-            const token = await getToken();
-            const route = RiderApiRoutes.GetOrders("delivered");
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) {
-                if (res.status === 404) throw new Error("404_NOT_FOUND");
-                throw new Error(`Earnings history fetch failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        queryFn: () => get<RiderOrder[]>(RiderApiRoutes.GetOrders("delivered").path),
         staleTime: 1000 * 60 * 5, // Cache longer since historical data changes rarely
-        retry: (failureCount, error) => {
-            if ((error as Error).message === "404_NOT_FOUND" || (error as Error).message === "401_UNAUTHORIZED") return false;
-            return failureCount < 3;
-        }
     });
 }
 
+/** Paginated delivered orders, for the earnings history screen. */
+export function useEarningsHistoryPaginated() {
+    return useRiderOrdersPaginated("delivered");
+}
+
 export function useTripRadar() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderOrder[], Error>({
         queryKey: ['rider', 'trip_radar'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.TripRadar.path, {
-                method: RiderApiRoutes.TripRadar.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) {
-                if (res.status === 404) throw new Error("404_NOT_FOUND");
-                throw new Error(`Trip radar fetch failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        queryFn: () => get<RiderOrder[]>(RiderApiRoutes.TripRadar.path),
         staleTime: 1000 * 5,
-        retry: (failureCount, error) => {
-            if ((error as Error).message === "404_NOT_FOUND" || (error as Error).message === "401_UNAUTHORIZED") return false;
-            return failureCount < 3;
-        }
     });
 }
 
 export function useRiderEarnings() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderEarnings, Error>({
         queryKey: ['rider', 'earnings'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.GetEarnings.path, {
-                method: RiderApiRoutes.GetEarnings.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) {
-                if (res.status === 404) throw new Error("404_NOT_FOUND");
-                throw new Error(`Earnings fetch failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        queryFn: () => get<RiderEarnings>(RiderApiRoutes.GetEarnings.path),
         staleTime: 1000 * 30,
-        retry: (failureCount, error) => {
-            if ((error as Error).message === "404_NOT_FOUND" || (error as Error).message === "401_UNAUTHORIZED") return false;
-            return failureCount < 3;
-        }
     });
 }
 
 export function useRiderProfile() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderProfile, Error>({
         queryKey: ['rider', 'profile'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.GetProfile.path, {
-                method: RiderApiRoutes.GetProfile.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (res.status === 403) throw new Error("403_FORBIDDEN");
-            if (!res.ok) {
-                if (res.status === 404) throw new Error("404_NOT_FOUND");
-                throw new Error(`Profile fetch failed: ${res.status}`);
-            }
-            return res.json();
-        },
+        queryFn: () => get<RiderProfile>(RiderApiRoutes.GetProfile.path),
         staleTime: 1000 * 60 * 2,
-        retry: (failureCount, error) => {
-            const msg = (error as Error).message;
-            if (msg === "404_NOT_FOUND" || msg === "401_UNAUTHORIZED" || msg === "403_FORBIDDEN") return false;
-            return failureCount < 3;
-        }
     });
 }
 
 export function useAcceptOrder() {
-    const { getToken, signOut } = useAuth();
+    const { post } = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (orderId: string) => {
-            const token = await getToken();
-            const route = RiderApiRoutes.AcceptDelivery(orderId);
-            const res = await fetch(`${route.path}`, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({} as any));
-                const error: any = new Error(err.detail || `Accept order failed: ${res.status}`);
-                error.status = res.status;
-                error.detail = err.detail;
-                throw error;
-            }
-            return res.json();
-        },
+        mutationFn: (orderId: string) => post(RiderApiRoutes.AcceptDelivery(orderId).path),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
             queryClient.invalidateQueries({ queryKey: ['rider', 'trip_radar'] });
@@ -255,24 +208,10 @@ export interface RiderReviewsResponse {
 }
 
 export function useRiderReviews() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<RiderReviewsResponse, Error>({
         queryKey: ['rider', 'reviews'],
-        queryFn: async () => {
-            const token = await getToken();
-            const route = RiderApiRoutes.GetReviews;
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Rider reviews fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => get<RiderReviewsResponse>(RiderApiRoutes.GetReviews.path),
         staleTime: 1000 * 60 * 5, // 5 minutes
-        retry: (failureCount, error) => {
-            if ((error as Error).message === "401_UNAUTHORIZED") return false;
-            return failureCount < 3;
-        }
     });
 }

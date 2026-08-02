@@ -1,7 +1,10 @@
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
-import { useAuth } from "@clerk/clerk-expo";
+import { Toast } from "@/lib/toast";
+import { PERMISSIONS, useCan } from "@/hooks/queries/useVendorProfile";
 import { useRouter } from "expo-router";
 import React, { useCallback, useContext, useEffect, useState, memo } from "react";
 import {
@@ -27,7 +30,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { useVendorProducts } from "@/hooks/queries/useVendorProducts";
 import { useDebounce } from "@/hooks/useDebounce";
 
-const ProductCard = memo(({ item, darkTheme, onDelete, onEdit, onToggleAvailability, onUpdateStock }: { item: any, darkTheme: boolean, onDelete: (id: string) => void, onEdit: (id: string) => void, onToggleAvailability: (id: string, isAvailable: boolean) => void, onUpdateStock: (id: string, newStock: number) => void }) => {
+const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggleAvailability, onUpdateStock }: { item: any, darkTheme: boolean, canEdit: boolean, onDelete: (id: string) => void, onEdit: (id: string) => void, onToggleAvailability: (id: string, isAvailable: boolean) => void, onUpdateStock: (id: string, newStock: number) => void }) => {
   return (
     <View 
       className={`flex-row items-center p-5 mb-4 rounded-[24px] border shadow-sm ${item.stock === 0 ? "opacity-60" : ""} ${darkTheme ? "bg-surface-container border-transparent" : "bg-white border-gray-200"}`} 
@@ -38,11 +41,14 @@ const ProductCard = memo(({ item, darkTheme, onDelete, onEdit, onToggleAvailabil
           <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>
             {item.name}
           </Text>
+          {/* Against this product's own threshold, not a hardcoded 5. A vendor
+              selling 200 refills a day and one selling a dispenser a month
+              cannot share a definition of "low". */}
           {item.stock === 0 ? (
-            <View className="bg-slate-500/10 border border-slate-500/20 px-2 py-1 rounded-md">
-              <Text className="text-slate-500 text-[10px] font-bold uppercase">Out of Stock</Text>
+            <View className="bg-red-500/10 border border-red-500/20 px-2 py-1 rounded-md">
+              <Text className="text-red-600 text-[10px] font-bold uppercase">Out of Stock</Text>
             </View>
-          ) : item.stock <= 5 ? (
+          ) : item.low_stock_threshold > 0 && item.stock <= item.low_stock_threshold ? (
             <View className="bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md">
               <Text className="text-amber-600 text-[10px] font-bold uppercase">Low Stock</Text>
             </View>
@@ -54,13 +60,13 @@ const ProductCard = memo(({ item, darkTheme, onDelete, onEdit, onToggleAvailabil
           </Text>
           <View className="w-1 h-1 rounded-full bg-slate-300" />
           <View className="flex-row items-center gap-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg p-1">
-            <PressableScale onPress={() => onUpdateStock(item.id, Math.max(0, item.stock - 1))} className={`w-6 h-6 rounded-md items-center justify-center ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
+            <PressableScale disabled={!canEdit} onPress={() => onUpdateStock(item.id, Math.max(0, item.stock - 1))} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
               <Ionicons name="remove" size={14} color={darkTheme ? "white" : "black"} />
             </PressableScale>
-            <Text className={`text-sm font-bold ${item.stock <= 5 ? "text-red-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
+            <Text className={`text-sm font-bold ${item.low_stock_threshold > 0 && item.stock <= item.low_stock_threshold ? "text-red-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
               {item.stock}
             </Text>
-            <PressableScale onPress={() => onUpdateStock(item.id, item.stock + 1)} className={`w-6 h-6 rounded-md items-center justify-center ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
+            <PressableScale disabled={!canEdit} onPress={() => onUpdateStock(item.id, item.stock + 1)} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
               <Ionicons name="add" size={14} color={darkTheme ? "white" : "black"} />
             </PressableScale>
           </View>
@@ -70,23 +76,28 @@ const ProductCard = memo(({ item, darkTheme, onDelete, onEdit, onToggleAvailabil
       <View className="flex-row items-center gap-3">
         <Switch
           value={item.is_available}
+          disabled={!canEdit}
           onValueChange={(val) => onToggleAvailability(item.id, val)}
           trackColor={{ false: darkTheme ? "#333" : "#e2e8f0", true: BRAND.primary }}
           thumbColor={item.is_available ? "#fff" : "#f4f3f4"}
           style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
         />
-        <PressableScale 
-          onPress={() => onEdit(item.id)} 
-          className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-blue-900/20" : "bg-blue-50"}`}
-        >
-          <Ionicons name="pencil-outline" size={18} color="#3b82f6" />
-        </PressableScale>
-        <PressableScale 
-          onPress={() => onDelete(item.id)} 
-          className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-red-900/20" : "bg-red-50"}`}
-        >
-          <Ionicons name="trash-outline" size={18} color="#ef4444" />
-        </PressableScale>
+        {canEdit && (
+          <>
+            <PressableScale
+              onPress={() => onEdit(item.id)}
+              className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-blue-900/20" : "bg-blue-50"}`}
+            >
+              <Ionicons name="pencil-outline" size={18} color="#3b82f6" />
+            </PressableScale>
+            <PressableScale
+              onPress={() => onDelete(item.id)}
+              className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-red-900/20" : "bg-red-50"}`}
+            >
+              <Ionicons name="trash-outline" size={18} color="#ef4444" />
+            </PressableScale>
+          </>
+        )}
       </View>
     </View>
   );
@@ -95,7 +106,11 @@ const ProductCard = memo(({ item, darkTheme, onDelete, onEdit, onToggleAvailabil
 export default function Products() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { del, put } = useApiRequest();
+  // A staff member may be allowed to take orders without being allowed to
+  // reprice the catalogue. The server enforces it; this stops the app offering
+  // buttons that would only ever return 403.
+  const canEdit = useCan(PERMISSIONS.manageProducts);
   const router = useRouter();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -113,7 +128,8 @@ export default function Products() {
     isError
   } = useVendorProducts(searchState, filter, 20);
 
-  const filteredProducts = productsData?.pages?.flatMap(page => page) || [];
+  // `page.items` — the server no longer pretends to be an `InfiniteData`.
+  const filteredProducts = productsData?.pages?.flatMap((page) => page.items ?? []) || [];
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -131,64 +147,48 @@ export default function Products() {
       isDestructive: true,
       onConfirm: async () => {
           Popup.hide();
-          const token = await getToken();
-          const route = VendorApiRoutes.DeleteProduct(productId);
           try {
-            await fetch(route.path, {
-              method: route.method,
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            await del(VendorApiRoutes.DeleteProduct(productId).path);
             await refetch();
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          } catch (e) { 
+          } catch (e) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            if (__DEV__) console.error("Caught Unhandled Exception:", e); 
+            // The old version never checked the response at all: a refused
+            // delete refetched, the product reappeared, and the vendor was told
+            // nothing. A product still on sale that the vendor believes is gone
+            // is an order they cannot fulfil.
+            Toast.error("Couldn't delete", errorMessage(e, "That product is still there. Please try again."));
           }
         }
     });
-  }, [getToken, refetch]);
+  }, [del, refetch]);
 
   const handleToggleAvailability = useCallback(async (productId: string, isAvailable: boolean) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const token = await getToken();
-    const route = VendorApiRoutes.UpdateProduct(productId);
-    
-    // Optimistic UI update could be done here by manipulating cache, but refetch is safer for now
     try {
-      await fetch(route.path, {
-        method: route.method,
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ is_available: isAvailable }),
-      });
+      await put(VendorApiRoutes.UpdateProduct(productId).path, { is_available: isAvailable });
       await refetch();
     } catch (e) {
-      if (__DEV__) console.error("Toggle error:", e);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // The switch has already moved. Refetching puts it back where the server
+      // says it is; without the toast the vendor reads that as a UI glitch and
+      // keeps selling something they believe they took offline.
+      await refetch();
+      Toast.error("Couldn't update", errorMessage(e, "That change didn't save. Please try again."));
     }
-  }, [getToken, refetch]);
+  }, [put, refetch]);
 
   const handleUpdateStock = useCallback(async (productId: string, newStock: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const token = await getToken();
-    const route = VendorApiRoutes.UpdateProduct(productId);
     try {
-      await fetch(route.path, {
-        method: route.method,
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ stock: newStock }),
-      });
+      await put(VendorApiRoutes.UpdateProduct(productId).path, { stock: newStock });
       await refetch();
     } catch (e) {
-      if (__DEV__) console.error("Update stock error:", e);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      await refetch();
+      Toast.error("Couldn't update stock", errorMessage(e, "That change didn't save. Please try again."));
     }
-  }, [getToken, refetch]);
+  }, [put, refetch]);
 
   useEffect(() => {
     if (debouncedSearchQuery.trim().length > 1) {
@@ -200,8 +200,8 @@ export default function Products() {
   }, [debouncedSearchQuery, filteredProducts.length]);
 
   const renderItem = useCallback(({ item }: { item: any }) => (
-    <ProductCard item={item} darkTheme={darkTheme} onDelete={handleDelete} onEdit={(id) => router.push(`/(screens)/EditProduct/${id}` as any)} onToggleAvailability={handleToggleAvailability} onUpdateStock={handleUpdateStock} />
-  ), [darkTheme, handleDelete, handleToggleAvailability, handleUpdateStock, router]);
+    <ProductCard item={item} darkTheme={darkTheme} canEdit={canEdit} onDelete={handleDelete} onEdit={(id) => router.push(`/(screens)/EditProduct/${id}` as any)} onToggleAvailability={handleToggleAvailability} onUpdateStock={handleUpdateStock} />
+  ), [darkTheme, canEdit, handleDelete, handleToggleAvailability, handleUpdateStock, router]);
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -294,18 +294,20 @@ export default function Products() {
         />
       </View>
 
-      {/* Floating Action Button (FAB) */}
-      <PressableScale
-        activeOpacity={0.8}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push("/(screens)/AddProduct");
-        }}
-        className="absolute right-5 bottom-[100px] bg-accentbg w-14 h-14 rounded-2xl items-center justify-center"
-        style={{ ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
-      >
-        <Ionicons name="add" size={28} color="white" />
-      </PressableScale>
+      {/* Floating Action Button (FAB) — only for someone who may use it. */}
+      {canEdit && (
+        <PressableScale
+          activeOpacity={0.8}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/(screens)/AddProduct");
+          }}
+          className="absolute right-5 bottom-[100px] bg-accentbg w-14 h-14 rounded-2xl items-center justify-center"
+          style={{ ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+        >
+          <Ionicons name="add" size={28} color="white" />
+        </PressableScale>
+      )}
     </SafeAreaView>
   );
 }

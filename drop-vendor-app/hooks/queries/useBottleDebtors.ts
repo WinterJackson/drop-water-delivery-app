@@ -1,4 +1,6 @@
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { retryTransientOnly } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
 
@@ -23,27 +25,17 @@ export interface BottleDebtor {
 }
 
 export function useBottleDebtors() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
+  const { get } = useApiRequest();
 
   return useQuery<BottleDebtor[], Error>({
     queryKey: ["vendor", "bottle-debtors"],
     queryFn: async () => {
-      const token = await getToken();
-      if (!token) throw new Error("No token found");
-
-      const route = VendorApiRoutes.BottleDebtors;
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (!res.ok) throw new Error(`Bottle debtors fetch failed: ${res.status}`);
-      const data = await res.json();
+      const data = await get<{ riders?: BottleDebtor[] }>(VendorApiRoutes.BottleDebtors.path);
       return Array.isArray(data?.riders) ? data.riders : [];
     },
     enabled: isLoaded && isSignedIn,
     staleTime: 1000 * 30,
+    retry: retryTransientOnly(),
   });
 }

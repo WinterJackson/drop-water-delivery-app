@@ -4,11 +4,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useDashboard } from "@/hooks/queries/useDashboard";
-import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
-import { useAuth } from "@clerk/clerk-expo";
-import { useQueryClient } from "@tanstack/react-query";
-import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { errorMessage } from "@/API/errors";
 import { Toast } from "@/lib/toast";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,10 +16,11 @@ export default function OperatingHours() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
-    const { data: dashboard } = useDashboard();
+    // Shift times live on the store profile, not the dashboard — the dashboard
+    // never returned them, so these fields opened blank and saving them wrote
+    // the defaults over whatever the vendor had actually set.
     const { data: vendorProfile } = useVendorProfile();
-    const queryClient = useQueryClient();
-    const { getToken } = useAuth();
+    const updateProfile = useUpdateVendorProfile();
 
     React.useEffect(() => {
         if (vendorProfile?.role === "staff") {
@@ -91,8 +89,8 @@ export default function OperatingHours() {
         return formatted;
     };
 
-    const [start, setStart] = useState<string>(to12Hour(dashboard?.shift_start || "08:00"));
-    const [end, setEnd] = useState<string>(to12Hour(dashboard?.shift_end || "17:00"));
+    const [start, setStart] = useState<string>(to12Hour(vendorProfile?.shift_start || "08:00"));
+    const [end, setEnd] = useState<string>(to12Hour(vendorProfile?.shift_end || "17:00"));
     const [isSaving, setIsSaving] = useState(false);
 
     const [focusStart, setFocusStart] = useState(false);
@@ -111,31 +109,15 @@ export default function OperatingHours() {
         setIsSaving(true);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         try {
-            const token = await getToken();
-
-            const res = await fetch(VendorApiRoutes.UpdateProfile.path, {
-                method: VendorApiRoutes.UpdateProfile.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    shift_start: to24Hour(start),
-                    shift_end: to24Hour(end)
-                })
+            await updateProfile.mutateAsync({
+                shift_start: to24Hour(start),
+                shift_end: to24Hour(end),
             });
-
-            if (res.ok) {
-                queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
-                Toast.success("Saved", "Operating hours updated successfully.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                setTimeout(() => router.back(), 500);
-            } else {
-                Toast.error("Error", "Could not update operating hours.");
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            }
+            Toast.success("Saved", "Operating hours updated successfully.");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setTimeout(() => router.back(), 500);
         } catch (error) {
-            Toast.error("Network Error", "Unable to reach servers.");
+            Toast.error("Error", errorMessage(error, "Could not update operating hours."));
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setIsSaving(false);

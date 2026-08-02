@@ -28,11 +28,15 @@ import { Popup } from "@/lib/popup";
 import { RiderProfileSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import UserAvatar from "@/components/ui/UserAvatar";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { useKycStatus } from "@/hooks/queries/useKycStatus";
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 
 export default function Profile() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken, signOut } = useAuth();
+  const { get, put } = useApiRequest();
   const { clearPushToken } = usePushNotifications();
   const router = useRouter();
   const { user } = useUser();
@@ -45,31 +49,13 @@ export default function Profile() {
   const [imageUploading, setImageUploading] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Fetch KYC & Operational Status (already cached from layout)
-  const { data: statusData } = useQuery<any>({
-    queryKey: ['rider', 'kyc_status'],
-    queryFn: async () => {
-      const token = await getToken();
-      const res = await fetch(process.env.EXPO_PUBLIC_BACKEND_BASE_URL + "/api/deliverer/kyc/status", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error("Failed to fetch status");
-      return res.json();
-    },
-    enabled: !!user,
-  });
+  // Already cached by the `(screens)` gate — the same hook, so the same entry.
+  const { data: statusData } = useKycStatus(!!user);
 
   // Fetch active associations and applications
   const { data: registeredVendors, isLoading: vendorsLoading } = useQuery({
     queryKey: ['rider', 'registered_vendors'],
-    queryFn: async () => {
-      const token = await getToken();
-      const res = await fetch(RiderApiRoutes.RegisteredVendors().path, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error("Failed to fetch vendors");
-      return res.json();
-    },
+    queryFn: () => get<any[]>(RiderApiRoutes.RegisteredVendors().path),
     enabled: !!user
   });
 
@@ -78,18 +64,13 @@ export default function Profile() {
   const bottleDebtCount = bottleDebt?.total_bottles ?? 0;
 
   const fetchProfile = async () => {
-    const token = await getToken();
     try {
-      const res = await fetch(RiderApiRoutes.GetProfile.path, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-          const data = await res.json();
-          setProfile(data);
-          setEditForm({ name: data.name, phone_number: data.phone_number, vehicle_type: data.vehicle_type, plate_number: data.plate_number });
-      }
-    } catch (e) { if (__DEV__) console.error("Caught Unhandled Exception:", e); }
-    finally { setLoading(false); }
+      const data = await get<any>(RiderApiRoutes.GetProfile.path);
+      setProfile(data);
+      setEditForm({ name: data.name, phone_number: data.phone_number, vehicle_type: data.vehicle_type, plate_number: data.plate_number });
+    } catch (e) {
+      if (__DEV__) console.warn("[Profile] fetch failed:", errorMessage(e));
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchProfile(); }, []);
@@ -144,18 +125,13 @@ export default function Profile() {
         
         // Sync with backend DB
         if (user?.imageUrl) {
-            const token = await getToken();
-            await fetch(RiderApiRoutes.UpdateProfile.path, {
-                method: RiderApiRoutes.UpdateProfile.method,
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ profile_pic: user.imageUrl }),
-            });
+            await put(RiderApiRoutes.UpdateProfile.path, { profile_pic: user.imageUrl });
             // Update local profile state to trigger re-renders
             setProfile((prev: any) => ({ ...prev, profile_pic: user.imageUrl }));
         }
       } catch (err) {
         if (__DEV__) console.error("Upload error:", err);
-        Toast.error("Upload Failed", "Could not update profile picture.");
+        Toast.error("Upload Failed", errorMessage(err, "Could not update profile picture."));
       } finally {
         setImageUploading(false);
       }
@@ -171,22 +147,14 @@ export default function Profile() {
     }
 
     setSaving(true);
-    const token = await getToken();
     try {
-      const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-        method: RiderApiRoutes.UpdateProfile.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(editForm),
-      });
-      if (res.ok) {
-        Toast.success("Success", "Profile updated successfully");
-        setProfile({ ...profile, ...editForm });
-        setIsEditing(false);
-      } else {
-        throw new Error("Failed to update profile");
-      }
+      await put(RiderApiRoutes.UpdateProfile.path, editForm);
+      Toast.success("Success", "Profile updated successfully");
+      setProfile({ ...profile, ...editForm });
+      setIsEditing(false);
+      queryClient.invalidateQueries({ queryKey: ['rider', 'profile'] });
     } catch (e) {
-      Toast.error("Error", "Could not update profile");
+      Toast.error("Error", errorMessage(e, "Could not update profile"));
     } finally {
       setSaving(false);
     }

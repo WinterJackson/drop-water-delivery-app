@@ -1,6 +1,8 @@
 # Maps architecture
 
-How the three apps and the backend divide up Google Maps. The short rule:
+How the three apps, the admin console and the backend divide up Google Maps.
+Every map on this platform is Google — there is no OpenStreetMap basemap
+anywhere. The short rule:
 
 > **Client keys draw maps. They never call an API.**
 > Anything that is an HTTP request to Google goes through the backend.
@@ -22,8 +24,15 @@ So there are two classes of key, and they are not interchangeable:
 
 | | Where it lives | Restriction | Can call |
 |---|---|---|---|
-| **6 client keys** | `AndroidManifest.xml` / `Info.plist`, injected at build time | package+SHA-1 / bundle id, **Maps SDK only** | tile rendering, nothing else |
+| **6 mobile keys** | `AndroidManifest.xml` / `Info.plist`, injected at build time | package+SHA-1 / bundle id, **Maps SDK only** | tile rendering, nothing else |
+| **1 browser key** | the admin console's JS bundle | **HTTP referrer**, **Maps JavaScript API only** | tile rendering, nothing else |
 | **1 server key** | `BackendAPI/.env`, never leaves the server | **IP address**, Directions API only | Directions (and any web service added later) |
+
+The browser key sits in the same class as the six mobile ones: it is an **SDK**
+key whose only job is to draw a map, made safe by an application restriction
+rather than by secrecy. The restriction mechanism differs because the caller
+does — package id for an APK, HTTP referrer for a web origin — but the rule it
+enforces is identical, and neither may ever be granted a web service.
 
 ## Client keys — six of them
 
@@ -55,6 +64,39 @@ the key back at runtime through `Constants.expoConfig`; three screens used to tr
 and were silently reading `undefined`.
 
 Full Console walkthrough: [security/google-api-key-rotation.md](./security/google-api-key-rotation.md).
+
+## Browser key — one, for the admin console
+
+`/operations/map` in `drop-admin` draws riders, vendors, live orders, coverage
+and demand on a Google map. It uses the **Maps JavaScript API**, loaded once per
+page by `drop-admin/lib/maps/google-maps.ts`.
+
+Env var: `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY`, in `drop-admin/.env.local`
+locally and in the hosting provider's environment (Vercel) for the deployment.
+
+The `NEXT_PUBLIC_` prefix is not an oversight. The browser is what renders the
+map, so the key has to reach it; there is no arrangement in which a JavaScript
+map keeps its key private. What makes that acceptable is the same thing that
+makes the six mobile keys acceptable — the restriction. In the Google Cloud
+console, on this key alone:
+
+- **Application restrictions → Websites**, listing exactly the console's origins:
+
+  ```
+  http://localhost:3000/*
+  https://<project>.vercel.app/*
+  https://<project>-*.vercel.app/*     # only if you use preview deployments
+  ```
+
+- **API restrictions → Maps JavaScript API**. Nothing else. Not Directions, not
+  Places, not Geocoding.
+
+An unrestricted browser key is the most commonly abused credential in a mapping
+stack, and the abuse arrives as an invoice. Set both restrictions **before** the
+key is ever deployed.
+
+Everything the map draws comes from `GET /api/admin/map/*` on the backend —
+the console's browser never calls Google for data, only for tiles.
 
 ## Server key — one
 
@@ -183,4 +225,5 @@ own on Android, Apple's on iOS. No key, no quota, no OpenStreetMap. Leave it.
 2. Cache it, with a TTL matching how fast the underlying data actually changes.
 3. Reduce the response; never forward Google's payload verbatim.
 4. Log upstream `error_message`, return a generic error.
-5. Enable the API on the **server** key only. The six client keys stay Maps-SDK-only.
+5. Enable the API on the **server** key only. The six mobile keys stay
+   Maps-SDK-only and the browser key stays Maps-JavaScript-API-only.

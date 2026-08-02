@@ -2,7 +2,8 @@ import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { UIThemeContext } from "@/context/ThemeContext";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useRiderStore } from "@/stores/useRiderStore";
-import { useAuth } from "@clerk/clerk-expo";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
 import {
@@ -65,7 +66,7 @@ type FilterType = "ALL" | "< 5KM" | "HIGH PAYOUT" | "QUICK SWAP" | "KEEP MY BOTT
 export default function TripRadar() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken, signOut } = useAuth();
+  const { get, post } = useApiRequest();
   const router = useRouter();
   const riderId = useRiderStore((s) => s.riderId);
   const isOnline = useRiderStore((s) => s.isOnline);
@@ -90,32 +91,20 @@ export default function TripRadar() {
 
   // ── Fetch unassigned orders from REST ────────────────────────────────
   const fetchRadarOrders = useCallback(async () => {
-    const token = await getToken();
-    if (!token) return;
     try {
-      const route = RiderApiRoutes.TripRadar.path;
-      const res = await fetch(route, {
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        const raw = await res.json();
-        const orders: RadarOrder[] = Array.isArray(raw) ? raw : [];
-        const filtered = orders.filter(
-          (o) => !mutedVendors.includes(o.vendor?.id || "")
-        );
-        setRadarOrders(filtered);
-      } else if (res.status === 401) {
-        Toast.error("Session Expired", "Please log in again to continue.");
-        signOut();
-        router.replace("/(Auth)/sign-in/screen");
-      }
+      const raw = await get<RadarOrder[]>(RiderApiRoutes.TripRadar.path);
+      const orders: RadarOrder[] = Array.isArray(raw) ? raw : [];
+      setRadarOrders(orders.filter((o) => !mutedVendors.includes(o.vendor?.id || "")));
     } catch (e) {
-      if (__DEV__) console.error("[TripRadar] Fetch failed:", e);
+      // The client already signed the rider out if this was a 401. A KYC refusal
+      // is the layout gate's business, not the radar's. Anything else is
+      // transient and the next tick retries.
+      if (__DEV__) console.warn("[TripRadar] Fetch failed:", errorMessage(e));
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mutedVendors]);
+  }, [mutedVendors, get]);
 
   // ── WebSocket for real-time radar updates ────────────────────────────
   const { connected } = useWebSocket("rider", riderId || "", (updateData) => {
@@ -173,38 +162,26 @@ export default function TripRadar() {
     setRadarOrders((prev) => prev.filter((o) => o.id !== orderId));
     bottomSheetRef.current?.close();
 
-    const token = await getToken();
     try {
-      const route = RiderApiRoutes.AcceptDelivery(orderId);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (res.ok) {
-        Toast.success("Accepted!", "Navigate to the Active Delivery tab.");
-        router.push("/(screens)/ActiveDelivery" as any);
-      } else {
-        if (res.status === 401) {
-          Toast.error("Session Expired", "Please log in again to continue.");
-          signOut();
-          router.replace("/(Auth)/sign-in/screen");
-          return;
-        }
-        const err = await res.json().catch(() => ({}));
-        let title = "Claimed";
-        if (res.status === 402) title = "Insufficient Balance";
-        else if (res.status === 403) title = "Not Allowed";
-        else if (res.status === 409) title = "Claimed";
-        else title = "Error";
-        Toast.error(title, err.detail || "This order was already taken by another rider.");
-        fetchRadarOrders();
-      }
+      await post(RiderApiRoutes.AcceptDelivery(orderId).path);
+      Toast.success("Accepted!", "Navigate to the Active Delivery tab.");
+      router.push("/(screens)/ActiveDelivery" as any);
     } catch (e) {
-      Toast.error("Error", "Network error. Please try again.");
+      const status = e instanceof ApiError ? e.status : 0;
+      if (status === 401) return; // the client has already signed the rider out
+
+      // The title names the *category*; the body is the backend's own sentence
+      // — "You must be online and available to accept orders", "Insufficient
+      // balance: KSH 4,000 is committed as float". Those were being thrown away
+      // and replaced with "This order was already taken", which was usually a
+      // lie about why the accept failed.
+      const title =
+        status === 402 ? "Insufficient Balance"
+        : status === 403 ? "Not Allowed"
+        : status === 409 ? "Claimed"
+        : status === 0 ? "No Connection"
+        : "Couldn't Accept";
+      Toast.error(title, errorMessage(e, "This order was already taken by another rider."));
       fetchRadarOrders();
     } finally {
       setAcceptingId(null);
@@ -212,15 +189,24 @@ export default function TripRadar() {
   };
 
   // ── Polling + Lifecycle ──────────────────────────────────────────────
+  //
+  // The socket above already pushes new offers, so the poll is a
+  // *reconciliation* pass, not the primary path. It used to run every 30s
+  // regardless: at 500 online riders that is 1,000 spatial `ST_DWithin` queries
+  // a minute purely as a fallback, and it drains rider battery while idle.
+  //
+  // While the socket is connected, reconciling every two minutes is enough to
+  // catch anything a dropped frame lost. While it is disconnected the poll *is*
+  // the only path, so it speeds up.
   useEffect(() => {
     if (!isOnline) {
       setRadarOrders([]);
       return;
     }
     fetchRadarOrders();
-    const interval = setInterval(fetchRadarOrders, 30000);
+    const interval = setInterval(fetchRadarOrders, connected ? 120_000 : 15_000);
     return () => clearInterval(interval);
-  }, [isOnline, fetchRadarOrders]);
+  }, [isOnline, connected, fetchRadarOrders]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

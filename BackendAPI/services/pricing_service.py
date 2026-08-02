@@ -30,6 +30,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.vendor_model import Vendor
+from services import platform_config_service as config
 from services.dispatch_policy import DispatchPolicy
 
 logger = logging.getLogger(__name__)
@@ -38,25 +39,37 @@ CENTS = Decimal("0.01")
 WHOLE = Decimal("1")
 ZERO = Decimal("0.00")
 
-# ── Bottle deposit schedule (KSH per bottle, by capacity in litres) ──────────
-BOTTLE_DEPOSIT_BY_CAPACITY: dict[int, Decimal] = {
-    20: Decimal("300.00"),
-    10: Decimal("150.00"),
-}
+# Every figure below used to be a constant here. They are rows in
+# `Platform_Settings` now, read through `platform_config_service`, so the owners
+# can change the deposit schedule or the welcome discount from the admin console
+# and have it apply to the next quote in all three apps.
+#
+# `compute_order_quote` awaits `config.ensure_fresh(session)` before reading any
+# of them, so a single quote is priced against one consistent configuration.
 
-# First order gets 30% off the bottle deposit. The platform absorbs it as a
-# customer-acquisition cost (see `calculate_revenue_splits`).
-WELCOME_DISCOUNT_RATE = Decimal("0.30")
 
-# Surcharge schedule
-PAYLOAD_FREE_UNITS = 2
-PAYLOAD_SURCHARGE_PER_UNIT = Decimal("10.00")
-STAIRCASE_FREE_FLOORS = 2
-STAIRCASE_SURCHARGE_PER_FLOOR = Decimal("10.00")
+def bottle_deposit_for(capacity_litres: int) -> Optional[Decimal]:
+    """The deposit for one bottle of this capacity, or None if not offered.
 
-# An STK push for 0 is rejected by Safaricom, so discounts never consume the
-# final shilling.
-MIN_CHARGEABLE_TOTAL = Decimal("1")
+    None is meaningful: a capacity with no configured deposit is a product the
+    platform does not take a deposit on, which is different from a deposit of
+    zero.
+    """
+    schedule = config.get("bottle_deposit_by_capacity") or {}
+    amount = schedule.get(str(int(capacity_litres)))
+    return None if amount is None else _money(_d(amount))
+
+
+def welcome_discount_rate() -> Decimal:
+    """Off the bottle deposit on a customer's first order. The platform absorbs
+    it as an acquisition cost — it is never charged to the vendor."""
+    return config.get_decimal("welcome_discount_rate")
+
+
+def min_chargeable_total() -> Decimal:
+    """An STK push for 0 is rejected by Safaricom, so discounts never consume
+    the final shilling."""
+    return config.get_decimal("min_chargeable_total")
 
 # Ordering used to reconcile the weight-derived and quantity-derived vehicle
 # classes. We always take the larger of the two: 100 kg of water does not fit on
@@ -210,7 +223,7 @@ def _bottle_deposit(items: Iterable) -> Decimal:
         if product is None:
             continue
         capacity = int(_d(getattr(product, "capacity", 0)))
-        per_bottle = BOTTLE_DEPOSIT_BY_CAPACITY.get(capacity)
+        per_bottle = bottle_deposit_for(capacity)
         if per_bottle is not None:
             deposit += per_bottle * int(item.quantity or 0)
     return _money(deposit)
@@ -225,10 +238,10 @@ def vendor_type_of(vendor: Optional[Vendor]) -> str:
 
 def service_fee_for(vendor_type: str) -> Decimal:
     """The one definition of the customer-facing service fee."""
-    from services.order_service import RETAIL_SERVICE_FEE_KSH, WHOLESALE_SERVICE_FEE_KSH
-
     return _money(
-        _d(WHOLESALE_SERVICE_FEE_KSH if vendor_type == "wholesale_b2b" else RETAIL_SERVICE_FEE_KSH)
+        config.get_decimal(
+            "wholesale_service_fee" if vendor_type == "wholesale_b2b" else "retail_service_fee"
+        )
     )
 
 
@@ -255,8 +268,12 @@ async def compute_order_quote(
         calculate_delivery_fee,
         calculate_revenue_splits,
         is_surge_active,
-        SURGE_FEE_KSH,
     )
+
+    # One load, at the top. Everything below reads the configuration
+    # synchronously, so a single quote cannot be priced against two different
+    # fee schedules even if an administrator saves a change mid-request.
+    await config.ensure_fresh(session)
 
     if not items:
         raise HTTPException(status_code=400, detail="Your cart is empty. Add an item before checking out.")
@@ -302,32 +319,36 @@ async def compute_order_quote(
     if delivery_type == "keep_my_bottle" or is_first_order:
         bottle_deposit = _bottle_deposit(items)
         if is_first_order and bottle_deposit > ZERO:
-            welcome_discount = _money(bottle_deposit * WELCOME_DISCOUNT_RATE)
+            welcome_discount = _money(bottle_deposit * welcome_discount_rate())
             is_welcome_offer = True
 
     # ── Surcharges ──────────────────────────────────────────────────────────
     payload_surcharge = ZERO
-    if total_quantity > PAYLOAD_FREE_UNITS:
-        payload_surcharge = _money(Decimal(total_quantity - PAYLOAD_FREE_UNITS) * PAYLOAD_SURCHARGE_PER_UNIT)
+    free_units = config.get_int("payload_free_units")
+    if total_quantity > free_units:
+        payload_surcharge = _money(
+            Decimal(total_quantity - free_units) * config.get_decimal("payload_surcharge_per_unit")
+        )
 
     staircase_surcharge = ZERO
     if user is not None:
         floor_level = int(_d(getattr(user, "floor_level", 0)))
         has_elevator = bool(getattr(user, "has_elevator", False))
-        if floor_level > STAIRCASE_FREE_FLOORS and not has_elevator:
+        free_floors = config.get_int("staircase_free_floors")
+        if floor_level > free_floors and not has_elevator:
             staircase_surcharge = _money(
-                Decimal(floor_level - STAIRCASE_FREE_FLOORS) * STAIRCASE_SURCHARGE_PER_FLOOR
+                Decimal(floor_level - free_floors) * config.get_decimal("staircase_surcharge_per_floor")
             )
 
     # ── Platform fees ───────────────────────────────────────────────────────
     service_fee = service_fee_for(vendor_type)
     surge_active = is_surge_active()
-    surge_fee = _money(_d(SURGE_FEE_KSH)) if surge_active else ZERO
+    surge_fee = _money(config.get_decimal("surge_fee")) if surge_active else ZERO
     delivery_markup = ZERO
     if vendor_type == "wholesale_b2b":
-        from services.order_service import WHOLESALE_DELIVERY_MARKUP
+        markup_rate = config.get_decimal("wholesale_delivery_markup_rate")
 
-        delivery_markup = _money(delivery_fee * _d(WHOLESALE_DELIVERY_MARKUP))
+        delivery_markup = _money(delivery_fee * markup_rate)
 
     gross = _money(
         product_subtotal
@@ -354,7 +375,7 @@ async def compute_order_quote(
             else _d(getattr(user, "wallet_balance", 0) if user else 0)
         )
         if balance > ZERO:
-            headroom = after_welcome - MIN_CHARGEABLE_TOTAL
+            headroom = after_welcome - min_chargeable_total()
             if headroom > ZERO:
                 wallet_discount = _money(min(balance, headroom))
 
@@ -362,8 +383,8 @@ async def compute_order_quote(
     # else would reintroduce the charged-vs-recorded drift this module exists to
     # eliminate.
     total = (after_welcome - wallet_discount).quantize(WHOLE, rounding=ROUND_HALF_UP)
-    if total < MIN_CHARGEABLE_TOTAL:
-        total = MIN_CHARGEABLE_TOTAL
+    if total < min_chargeable_total():
+        total = min_chargeable_total()
 
     revenue = calculate_revenue_splits(
         product_total=float(product_subtotal),
@@ -448,7 +469,7 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None) -> None:
         # loaded; nothing to assert here without another query.
         pass
 
-    if quote.total < MIN_CHARGEABLE_TOTAL:
+    if quote.total < min_chargeable_total():
         raise HTTPException(status_code=400, detail="Order total must be greater than zero.")
 
 

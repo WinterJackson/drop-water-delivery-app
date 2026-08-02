@@ -48,13 +48,11 @@ async def get_order_contacts(session: AsyncSession, order_id: UUID, requester_cl
     # Customer: User.clerk_id matches
     is_customer = (order.user is not None) and (order.user.clerk_id == requester_clerk_id)
 
-    # Vendor: Vendor.clerk_id or Vendor.staff_clerk_id matches
-    is_vendor = False
-    if order.vendor is not None:
-        is_vendor = (
-            order.vendor.clerk_id == requester_clerk_id or
-            order.vendor.staff_clerk_id == requester_clerk_id
-        )
+    # Vendor: the owner, or live staff of that store. Staff used to be one
+    # nullable column on the vendor row; it is a membership table now.
+    from services.vendor_staff_service import is_store_member
+
+    is_vendor = await is_store_member(session, requester_clerk_id, order.vendor)
 
     # Rider: Deliverer.clerk_id matches
     is_rider = (order.deliverer is not None) and (order.deliverer.clerk_id == requester_clerk_id)

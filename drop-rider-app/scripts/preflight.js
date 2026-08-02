@@ -129,6 +129,79 @@ if (!clerk) {
   );
 }
 
+// The socket carries Trip Radar offers and the live delivery position. When it
+// is pointed at the wrong scheme nothing errors — the app just never connects,
+// and the 15s radar poll quietly becomes the only source of orders.
+const ws = (process.env.EXPO_PUBLIC_WS_BASE_URL || "").trim();
+if (ws && backend) {
+  const wantsSecure = backend.startsWith("https://");
+  if (wantsSecure && !ws.startsWith("wss://")) {
+    problems.push(
+      `EXPO_PUBLIC_WS_BASE_URL is "${ws}" but the backend is https.\n` +
+        "    A ws:// socket to an https host is refused; Trip Radar and live\n" +
+        "    tracking will never connect. Use wss://."
+    );
+  }
+  if (!wantsSecure && ws.startsWith("wss://")) {
+    notes.push(
+      `EXPO_PUBLIC_WS_BASE_URL is wss:// but the backend is plain http — the\n` +
+        "    socket will not connect against a local dev server."
+    );
+  }
+}
+
+// ── Background location ───────────────────────────────────────────────────
+// The rider's position is reported by an expo-task-manager task backed by an
+// Android foreground service and the iOS `location` background mode. Missing
+// either declaration is invisible in Expo Go and in the simulator: tracking
+// simply stops the moment the app backgrounds, which is the whole delivery.
+try {
+  const appJson = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "app.json"), "utf8")).expo;
+  const androidPerms = (appJson.android && appJson.android.permissions) || [];
+  for (const perm of [
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_LOCATION",
+  ]) {
+    if (!androidPerms.includes(perm)) {
+      problems.push(`app.json is missing ${perm} — background delivery tracking will not run on Android.`);
+    }
+  }
+
+  const backgroundModes =
+    (appJson.ios && appJson.ios.infoPlist && appJson.ios.infoPlist.UIBackgroundModes) || [];
+  if (!backgroundModes.includes("location")) {
+    problems.push(
+      'app.json ios.infoPlist.UIBackgroundModes does not include "location".\n' +
+        "    iOS suspends the app on background and the customer's live map freezes\n" +
+        "    at the last foreground position."
+    );
+  }
+
+  const locationPlugin = (appJson.plugins || []).find(
+    (entry) => Array.isArray(entry) && entry[0] === "expo-location"
+  );
+  const locationConfig = (locationPlugin && locationPlugin[1]) || {};
+  if (!locationConfig.locationAlwaysAndWhenInUsePermission) {
+    problems.push(
+      "The expo-location plugin has no locationAlwaysAndWhenInUsePermission string.\n" +
+        "    iOS refuses the always-authorization prompt without one, and App Review\n" +
+        "    rejects background location with no stated purpose."
+    );
+  }
+
+  // Google Play requires a justification for every dangerous permission and
+  // rejects ones with no matching feature.
+  if (androidPerms.includes("android.permission.RECORD_AUDIO")) {
+    problems.push(
+      "app.json requests RECORD_AUDIO but the app has no audio feature.\n" +
+        "    Play Store review rejects unjustified microphone access."
+    );
+  }
+} catch (e) {
+  problems.push(`Could not read app.json: ${e.message}`);
+}
+
 if (!(process.env.EXPO_PUBLIC_SMS_GATEWAY_NUMBER || "").trim()) {
   notes.push(
     "EXPO_PUBLIC_SMS_GATEWAY_NUMBER is not set — the \"No Data? SMS to Complete\"\n" +

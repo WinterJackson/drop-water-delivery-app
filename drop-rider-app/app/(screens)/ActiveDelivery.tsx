@@ -2,6 +2,8 @@ import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { queueOfflineAction } from '@/config/database';
 import { UIThemeContext } from "@/context/ThemeContext";
 import useWebSocket from "@/hooks/useWebSocket";
+import { ApiError, errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import { useAuth } from "@clerk/clerk-expo";
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
@@ -62,6 +64,13 @@ import { useRouter } from "expo-router";
 import { Popup } from "@/lib/popup";
 import { RiderActiveDeliverySkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts";
+import {
+    hasBackgroundPermission,
+    recordForegroundFix,
+    requestTrackingPermissions,
+    startRiderLocationTracking,
+    stopRiderLocationTracking,
+} from "@/services/locationTracking";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -91,7 +100,10 @@ const { width } = Dimensions.get("window");
 export default function ActiveDelivery() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken, signOut } = useAuth();
+  // `getToken` is still needed for the multipart proof upload, which goes
+  // through `apiFetch` rather than the hook client.
+  const { getToken } = useAuth();
+  const { get, post, put } = useApiRequest();
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -198,52 +210,101 @@ export default function ActiveDelivery() {
 
   // BUG-LOC-01 FIX: Only request location and start aggressive polling if there is ACTUALLY an order.
   // This prevents the app from chewing battery and pinging WS constantly while idle.
+  //
+  // Two further corrections since:
+  //
+  //  - Accuracy was `High` at 5 s / 10 m, which holds the GPS radio open
+  //    continuously. `Balanced` at 25 m is ample for a delivery dot on a city
+  //    map and materially cheaper on battery.
+  //  - Positions are only *reported* once the order is `picked_up`. Tracking
+  //    from acceptance spent battery on the leg to the vendor and showed the
+  //    rider's position to a customer whose order had not been collected yet.
+  //    The map still needs the rider's own position before pickup, so the watch
+  //    runs — it just does not report.
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
-    
-    const watchLocation = async () => {
-      // Get silent one-time location for map display even if idle
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted" && !activeOrder) {
-         try {
-           const loc = await Location.getLastKnownPositionAsync();
-           if (loc) setCurrentLocation(loc.coords);
-         } catch(e) {}
-         return; // Don't subscribe to continuous updates if no active order
-      }
+    let cancelled = false;
 
-      if (status !== "granted" && activeOrder) {
-        Toast.error("Permission Denied", "Location access is required for delivery tracking.");
+    const watchLocation = async () => {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      const granted =
+        status === "granted"
+          ? true
+          : (await Location.requestForegroundPermissionsAsync()).status === "granted";
+
+      if (!granted) {
+        if (activeOrder) {
+          Toast.error("Permission Denied", "Location access is required for delivery tracking.");
+        }
         return;
       }
 
-      if (activeOrder) {
-        sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-          (loc) => {
-            setCurrentLocation(loc.coords);
-            try {
-              sendMessage({
-                action: 'location_update',
-                lat: loc.coords.latitude,
-                lng: loc.coords.longitude,
-                order_id: activeOrder.id
-              });
-            } catch (e) { if (__DEV__) console.error("Caught Unhandled Exception:", e); }
-          }
-        );
-        locationSubscription.current = sub;
+      if (!activeOrder) {
+        try {
+          const loc = await Location.getLastKnownPositionAsync();
+          if (loc && !cancelled) setCurrentLocation(loc.coords);
+        } catch (e) { /* the map falls back to the order's coordinates */ }
+        return;
       }
+
+      sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
+        (loc) => {
+          setCurrentLocation(loc.coords);
+
+          if (activeOrder.order_status !== "picked_up") return;
+
+          // Durable first. This used to be a socket send inside a `try/catch`
+          // that only logged, so every fix produced while the socket was down —
+          // exactly when the customer most wants the dot to move — was silently
+          // discarded. The buffer keeps it and the next flush sends it.
+          recordForegroundFix(loc, activeOrder.id).catch(() => {});
+
+          // Then the socket, as the low-latency path when one is open.
+          try {
+            sendMessage({
+              action: 'location_update',
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              order_id: activeOrder.id
+            });
+          } catch (e) { if (__DEV__) console.error("Caught Unhandled Exception:", e); }
+        }
+      );
+      locationSubscription.current = sub;
     };
 
     watchLocation();
 
     return () => {
+      cancelled = true;
       if (sub) {
         sub.remove();
       }
     };
-  }, [activeOrder?.id, sendMessage]);
+  }, [activeOrder?.id, activeOrder?.order_status, sendMessage]);
+
+  // Background reporting follows the order's own lifecycle, not this screen's.
+  // The rider taps "Navigate" and leaves for the whole delivery; the foreground
+  // watcher above dies with the screen, and everything after that point — which
+  // is the entire journey to the customer — used to go unrecorded.
+  useEffect(() => {
+    // `activeOrder` is null until the orders query resolves. Acting on that
+    // would stop a foreground service that is legitimately running — opening
+    // this screen mid-delivery would end the customer's live tracking.
+    if (isLoading) return;
+
+    const status = activeOrder?.order_status;
+    if (activeOrder && status === "picked_up") {
+      startRiderLocationTracking(activeOrder.id).then((started) => {
+        if (!started && __DEV__) {
+          console.warn("[ActiveDelivery] background tracking unavailable; foreground only");
+        }
+      });
+    } else if (!activeOrder || status === "delivered" || status === "cancelled") {
+      stopRiderLocationTracking();
+    }
+  }, [isLoading, activeOrder?.id, activeOrder?.order_status]);
 
   /**
    * True when the drawn route is stale: no route yet, the destination changed
@@ -275,23 +336,14 @@ export default function ActiveDelivery() {
   const fetchRoute = async (startLng: number, startLat: number, endLng: number, endLat: number) => {
     lastRouteFetch.current = { lat: startLat, lng: startLng, destLat: endLat, destLng: endLng };
     try {
-      const token = await getToken();
-      if (!token) return;
-      const route = RiderApiRoutes.Directions(startLat, startLng, endLat, endLng);
-      const response = await fetch(route.path, {
-        method: route.method,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        if (__DEV__) console.warn("Directions proxy returned", response.status);
-        return;
-      }
-      const data = await response.json();
+      const data = await get<{ polyline?: string }>(
+        RiderApiRoutes.Directions(startLat, startLng, endLat, endLng).path
+      );
       if (data?.polyline) {
         setRouteCoords(decodePolyline(data.polyline));
       }
     } catch (e) {
-      if (__DEV__) console.error("Route fetch error", e);
+      if (__DEV__) console.warn("Route fetch failed:", errorMessage(e));
     }
   };
 
@@ -347,34 +399,11 @@ export default function ActiveDelivery() {
     setActiveOrder({ ...activeOrder, order_status: status });
     
     try {
-      const token = await getToken();
-      const route = RiderApiRoutes.UpdateDeliveryStatus(activeOrder.id);
       const payload: { status: string; proof_url?: string; empties_received?: number } = { status };
       if (proofUrl) payload.proof_url = proofUrl;
       if (status === "delivered") payload.empties_received = emptiesReceived;
-      
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!res.ok) {
-        if (res.status === 401) {
-          Toast.error("Session Expired", "Please log in again to continue.");
-          signOut();
-          router.replace("/(Auth)/sign-in/screen");
-          return;
-        }
-        if (res.status >= 400 && res.status < 500) {
-          const err = await res.json().catch(() => ({}));
-          Toast.error("Update Failed", err.detail || "Could not update delivery status.");
-          // Rollback optimistic update on backend rejection
-          setActiveOrder({ ...previousOrder, order_status: previousStatus });
-          return;
-        }
-        throw new Error("Sync Failed Offline");
-      }
+
+      await put(RiderApiRoutes.UpdateDeliveryStatus(activeOrder.id).path, payload);
 
       // Only NOW, after server confirmation, treat delivery as complete.
       if (status === "delivered") {
@@ -389,12 +418,67 @@ export default function ActiveDelivery() {
         queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
       }
     } catch (e) {
-      // Network-level failure: ALWAYS queue for retry, delivered included — money and
-      // notifications depend on this reaching the server eventually.
       setActiveOrder({ ...previousOrder, order_status: previousStatus });
+
+      if (e instanceof ApiError && e.status === 401) return; // already signed out
+
+      // A 4xx is the server refusing on the merits — a status transition that is
+      // not legal, a proof photo that is mandatory. Queueing it would replay the
+      // same refusal forever. Show the reason and stop.
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+        Toast.error("Update Failed", errorMessage(e, "Could not update delivery status."));
+        return;
+      }
+
+      // Transport failure or 5xx: ALWAYS queue for retry, delivered included —
+      // money and notifications depend on this reaching the server eventually.
       await queueOfflineAction(activeOrder.id, "UPDATE_DELIVERY_STATUS", JSON.stringify({ status, proof_url: proofUrl, empties_received: status === "delivered" ? emptiesReceived : undefined }));
       Toast.info("Saved Offline", "No connection — this update will sync automatically once you're back online.");
     }
+  };
+
+  /**
+   * Pickup is where background location starts mattering, so it is where we ask
+   * for it — never at launch. Android 11+ will not even offer "Allow all the
+   * time" in the same prompt as the foreground one, and a permission dialog that
+   * arrives before the rider has seen why it is needed is the main cause of a
+   * permanent denial. Explaining first, once, at the moment it becomes true.
+   *
+   * A refusal does not block the pickup: the delivery still works, the customer
+   * just sees a dot that only moves while the rider has the app open.
+   */
+  const confirmPickup = async () => {
+    if (await hasBackgroundPermission()) {
+      updateDeliveryStatus("picked_up");
+      return;
+    }
+
+    Popup.show({
+      title: "Share your location during delivery",
+      message:
+        "Your customer watches your progress on a live map while you deliver. " +
+        "For that to keep working after you switch to your navigation app, Drop " +
+        "needs location access set to \"Allow all the time\".\n\n" +
+        "It is used only between pickup and delivery, and stops the moment you " +
+        "complete the order.",
+      confirmText: "Continue",
+      cancelText: "Not now",
+      onConfirm: async () => {
+        const result = await requestTrackingPermissions();
+        if (result === "denied") {
+          Toast.error("Permission Denied", "Location access is required for delivery tracking.");
+          return;
+        }
+        if (result === "foreground-only") {
+          Toast.info(
+            "Limited tracking",
+            "Your customer will only see you move while Drop is open. You can change this in Settings."
+          );
+        }
+        updateDeliveryStatus("picked_up");
+      },
+      onCancel: () => updateDeliveryStatus("picked_up"),
+    });
   };
 
   const captureProofAndDeliver = async () => {
@@ -427,8 +511,7 @@ export default function ActiveDelivery() {
         // Upload proof photo securely to S3
         try {
           const uploadResult = await SecureUpload(photoUri, `proof_${activeOrder?.id}`, getToken);
-          const proofUrl = uploadResult?.secure_url || null;
-          updateDeliveryStatus("delivered", proofUrl);
+          updateDeliveryStatus("delivered", uploadResult?.secure_url || undefined);
         } catch (uploadErr) {
           if (emptiesReceived < computedEmptiesExpected) {
             Toast.error("Proof Required", "Photo upload failed, but proof is mandatory for missing bottles. Please check your connection and try again.");
@@ -464,32 +547,16 @@ export default function ActiveDelivery() {
     if (!activeOrder) return;
     setIsReportingMismatch(true);
     try {
-      const token = await getToken();
-      const route = RiderApiRoutes.ReportMismatch(activeOrder.id);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ actual_floor_level: floorLevel })
+      await post(RiderApiRoutes.ReportMismatch(activeOrder.id).path, {
+        actual_floor_level: floorLevel,
       });
-      if (!res.ok) {
-        if (res.status === 401) {
-          Toast.error("Session Expired", "Please log in again to continue.");
-          signOut();
-          router.replace("/(Auth)/sign-in/screen");
-          return;
-        }
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Failed to report mismatch");
-      }
       setShowMismatchSheet(false);
       Toast.success("Dispute Raised", "The customer has been notified to correct their floor level. You will be compensated for the waiting time.");
       // Invalidate to fetch the updated state
       queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
     } catch (e: unknown) {
-      Toast.error("Error", (e as Error).message || "Failed to report mismatch");
+      if (e instanceof ApiError && e.status === 401) return;
+      Toast.error("Error", errorMessage(e, "Failed to report mismatch"));
     } finally {
       setIsReportingMismatch(false);
     }
@@ -504,31 +571,16 @@ export default function ActiveDelivery() {
     if (!activeOrder) return;
     setIsCanceling(true);
     try {
-      const token = await getToken();
-      const route = RiderApiRoutes.CancelOrder(activeOrder.id);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ reason: cancelReason, details: cancelDetails })
+      await put(RiderApiRoutes.CancelOrder(activeOrder.id).path, {
+        reason: cancelReason,
+        details: cancelDetails,
       });
-      if (!res.ok) {
-        if (res.status === 401) {
-          Toast.error("Session Expired", "Please log in again to continue.");
-          signOut();
-          router.replace("/(Auth)/sign-in/screen");
-          return;
-        }
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Failed to cancel delivery");
-      }
       setShowCancelSheet(false);
       Toast.success("Delivery Cancelled", "Your delivery assignment has been cancelled/rejected successfully.");
       queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
     } catch (e: unknown) {
-      Toast.error("Error", (e as Error).message || "Failed to cancel delivery");
+      if (e instanceof ApiError && e.status === 401) return;
+      Toast.error("Error", errorMessage(e, "Failed to cancel delivery"));
     } finally {
       setIsCanceling(false);
     }
@@ -872,7 +924,7 @@ export default function ActiveDelivery() {
                   </PressableScale>
                 )}
                 {activeOrder.order_status === "ready" && (
-                  <PressableScale onPress={() => updateDeliveryStatus("picked_up")} className="py-4 rounded-3xl items-center shadow-sm" style={{ backgroundColor: BRAND.primary }}>
+                  <PressableScale onPress={confirmPickup} className="py-4 rounded-3xl items-center shadow-sm" style={{ backgroundColor: BRAND.primary }}>
                     <Text className="text-white font-bold text-lg">Mark as Picked Up</Text>
                   </PressableScale>
                 )}

@@ -1,6 +1,6 @@
-import { useAuth } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
 import RiderApiRoutes from '../../API/routes/RiderApiRoutes';
+import { useApiRequest } from '../../API/useApiClient';
 
 /**
  * Empty bottles this rider is currently holding on a vendor's behalf.
@@ -39,45 +39,22 @@ export interface BottleLedgerEntry {
 }
 
 export function useBottleDebt() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<BottleDebtResponse, Error>({
         queryKey: ['rider', 'bottle-debt'],
-        queryFn: async () => {
-            const token = await getToken();
-            const route = RiderApiRoutes.BottleDebt;
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error('401_UNAUTHORIZED'); }
-            if (!res.ok) throw new Error(`Bottle debt fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => get<BottleDebtResponse>(RiderApiRoutes.BottleDebt.path),
         // Changes only when a delivery completes or a vendor confirms a return,
         // both of which invalidate this key explicitly.
         staleTime: 1000 * 60 * 2,
-        retry: (failureCount, error) =>
-            error.message === '401_UNAUTHORIZED' ? false : failureCount < 2,
     });
 }
 
 export function useBottleLedger(limit = 50) {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<{ entries: BottleLedgerEntry[] }, Error>({
         queryKey: ['rider', 'bottle-ledger', limit],
-        queryFn: async () => {
-            const token = await getToken();
-            const route = RiderApiRoutes.BottleLedger(limit, 0);
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error('401_UNAUTHORIZED'); }
-            if (!res.ok) throw new Error(`Bottle ledger fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () =>
+            get<{ entries: BottleLedgerEntry[] }>(RiderApiRoutes.BottleLedger(limit, 0).path),
         staleTime: 1000 * 60 * 5,
-        retry: (failureCount, error) =>
-            error.message === '401_UNAUTHORIZED' ? false : failureCount < 2,
     });
 }

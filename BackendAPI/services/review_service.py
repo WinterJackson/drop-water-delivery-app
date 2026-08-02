@@ -87,8 +87,11 @@ async def create_review(session: AsyncSession, clerk_id: str, data: ReviewCreate
     if target is None:
         raise HTTPException(status_code=404, detail="Review target not found")
 
-    if data.target_type == 'vendor' and clerk_id in {target.clerk_id, getattr(target, "staff_clerk_id", None)}:
-        raise HTTPException(status_code=403, detail="Self-rating prohibited. You cannot review your own store.")
+    if data.target_type == 'vendor':
+        from services.vendor_staff_service import is_store_member
+
+        if await is_store_member(session, clerk_id, target):
+            raise HTTPException(status_code=403, detail="Self-rating prohibited. You cannot review your own store.")
     if data.target_type == 'rider' and target.clerk_id == clerk_id:
         raise HTTPException(status_code=403, detail="Self-rating prohibited. You cannot review your own rider profile.")
 

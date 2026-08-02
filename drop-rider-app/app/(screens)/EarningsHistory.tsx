@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useContext } from 'react';
-import { View, Text, StatusBar, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
+import { ActivityIndicator, View, Text, StatusBar, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND } from '../../constants/brandColors';
 import { UIThemeContext } from '../../context/ThemeContext';
 import BackButtonMinimal from '../../components/ui/BackButtonMinimal';
-import { useRiderEarningsHistory, RiderOrder } from '../../hooks/queries/useRiderData';
+import { useEarningsHistoryPaginated, RiderOrder } from '../../hooks/queries/useRiderData';
 import { RiderEarningsHistorySkeleton } from '../../components/skeletons/ContextualSkeletons';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useRouter } from 'expo-router';
@@ -125,11 +125,25 @@ export default function EarningsHistory() {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
 
-    const { data: orders, isLoading, isRefetching, refetch } = useRiderEarningsHistory();
+    // Paginated: the endpoint has always defaulted to 50 rows and the old hook
+    // asked for exactly one page, so a rider six months in simply could not
+    // reach anything older — with no "load more" and no explanation, which reads
+    // as lost history rather than a page boundary.
+    const {
+        data,
+        isLoading,
+        isRefetching,
+        refetch,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+    } = useEarningsHistoryPaginated();
+
+    const orders = useMemo(() => data?.pages.flat() ?? [], [data]);
 
     // Group orders by date (e.g., "Today", "Yesterday", "May 20, 2026")
     const groupedOrders = useMemo(() => {
-        if (!orders) return [];
+        if (!orders.length) return [];
 
         const groups: { [key: string]: RiderOrder[] } = {};
         const today = new Date();
@@ -189,6 +203,19 @@ export default function EarningsHistory() {
                 keyExtractor={(item: any) => item.id}
                 contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
                 refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
+                onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
+                onEndReachedThreshold={0.4}
+                ListFooterComponent={
+                    isFetchingNextPage ? (
+                        <View className="py-6 items-center">
+                            <ActivityIndicator color={BRAND.primary} />
+                        </View>
+                    ) : !hasNextPage && orders.length > 0 ? (
+                        <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                            That's your full delivery history.
+                        </Text>
+                    ) : null
+                }
                 renderItem={({ item }: { item: any }) => <AccordionItem order={item} darkTheme={darkTheme} />}
                 renderSectionHeader={({ section: { title } }: { section: any }) => (
                     <Text className={`text-sm font-bold uppercase tracking-wider mb-3 mt-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>

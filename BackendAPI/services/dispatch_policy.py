@@ -1,28 +1,79 @@
+"""Where an order may go, on what, and for how much.
+
+The numeric policy — delivery rates, radii, the wholesale minimum order — now
+comes from `platform_config_service`, so the owners can change it from the admin
+console without a deploy. The class attributes below are the **shipped
+defaults**, kept here so the module is readable on its own and so a running
+process still prices correctly with the settings table unreachable.
+
+Reads are synchronous by design; whatever is about to price an order awaits
+`platform_config_service.ensure_fresh(session)` first. See that module.
+
+Capacities are *not* configurable. How many 20-litre bottles fit on a motorbike
+is a fact about motorbikes, and a console field that let someone set it to 40
+would produce orders no rider can physically accept.
+"""
 from dataclasses import dataclass
+
 from fastapi import HTTPException
+
+from services import platform_config_service as config
+
 
 @dataclass
 class DispatchPolicy:
+    # Defaults, mirrored in `platform_config_service.SPECS`. Read through the
+    # accessors below, never directly — a direct read silently ignores whatever
+    # the owners have configured.
     RETAIL_MAX_DISTANCE_KM: float = 2.0
-    WHOLESALE_MAX_DISTANCE_KM: float = 15.0  # Upgraded to 15km for city-wide logistics
+    WHOLESALE_MAX_DISTANCE_KM: float = 15.0
+    WHOLESALE_MOQ_KG: float = 100.0
+    RETAIL_FLAT_FEE_KSH: float = 50.0
+
+    # Not configurable: where a rider registers to serve is a different question
+    # from how far a single order may travel.
     RETAIL_RIDER_REGISTRATION_MAX_RADIUS_KM: float = 2.0
     WHOLESALE_RIDER_REGISTRATION_MAX_RADIUS_KM: float = 15.0
-    WHOLESALE_MOQ_KG: float = 100.0  # Mandatory 100kg+ MOQ
 
-    # Pricing & Capacity Engine
-    RETAIL_FLAT_FEE_KSH: float = 50.0  # Strict flat rate
-    VEHICLE_PRICING = {
-        "motorbike": {"base": 50.0, "per_km": 60.0},
-        "tuktuk":    {"base": 150.0, "per_km": 100.0},
-        "truck":     {"base": 500.0, "per_km": 150.0},
-    }
-    
-    # Per-vehicle capacity limits (quantities are conceptually "items/bottles")
+    #: Physical limits, not business policy. Quantities are bottles.
     VEHICLE_CAPACITIES = {
-        "motorbike": 4,   # Max 4 bottles
-        "tuktuk": 20,     # Max 20 bottles
-        "truck": 200      # Max 200 bottles (preventing abuse while allowing wholesale)
+        "motorbike": 4,
+        "tuktuk": 20,
+        "truck": 200,
     }
+
+    # ── Configurable accessors ────────────────────────────────────────────
+
+    @classmethod
+    def retail_max_distance_km(cls) -> float:
+        return float(config.get("retail_max_distance_km"))
+
+    @classmethod
+    def wholesale_max_distance_km(cls) -> float:
+        return float(config.get("wholesale_max_distance_km"))
+
+    @classmethod
+    def wholesale_moq_kg(cls) -> float:
+        return float(config.get("wholesale_moq_kg"))
+
+    @classmethod
+    def max_distance_km(cls, vendor_type: str) -> float:
+        return (
+            cls.wholesale_max_distance_km()
+            if vendor_type == "wholesale_b2b"
+            else cls.retail_max_distance_km()
+        )
+
+    @classmethod
+    def vehicle_pricing(cls, vehicle_class: str) -> dict:
+        """Wholesale base and per-km rates for a vehicle class."""
+        known = vehicle_class if vehicle_class in cls.VEHICLE_CAPACITIES else "tuktuk"
+        return {
+            "base": float(config.get(f"wholesale_{known}_base")),
+            "per_km": float(config.get(f"wholesale_{known}_per_km")),
+        }
+
+    # ── Policy ────────────────────────────────────────────────────────────
 
     @classmethod
     def get_vehicle_class(cls, total_quantity: int) -> str:
@@ -43,27 +94,25 @@ class DispatchPolicy:
         action can be "delivery" or "rider_search".
         """
         if action == "rider_search":
-            return (cls.WHOLESALE_MAX_DISTANCE_KM if vendor_type == "wholesale_b2b" else cls.RETAIL_MAX_DISTANCE_KM) * 1000.0
-        
+            return cls.max_distance_km(vendor_type) * 1000.0
+
         # Action is "delivery" (checkout restriction)
         if vendor_type == "retail_refill":
-            return cls.RETAIL_MAX_DISTANCE_KM * 1000.0
+            return cls.retail_max_distance_km() * 1000.0
         else:
-            # For wholesale deliveries, we don't strictly cap the delivery distance, 
-            # but we can return the global 10km search radius as a soft-cap or None
+            # Wholesale deliveries are not distance-capped at checkout.
             return None
 
     @classmethod
     def get_h3_k_ring(cls, vendor_type: str) -> int:
+        """Grid search ring radius, derived from the configured radius.
+
+        A res-8 cell edge is ~461 m. This used to be a hardcoded 5 or 22, so
+        raising the delivery radius left the rider search looking at the old
+        area — orders would be accepted and then find nobody.
         """
-        Derives grid search ring radius based on business model.
-        Res 8 base cell edge length is ~461m.
-        """
-        if vendor_type == "wholesale_b2b":
-             # WHOLESALE: Need up to 10km radius. 10,000 / 461 ≈ 21.6. So k=22 rings.
-             return 22
-        # RETAIL: Max 2km limit. 2000 / 461 ≈ 4.3. So k=5 rings.
-        return 5
+        radius_m = cls.max_distance_km(vendor_type) * 1000.0
+        return max(1, int(radius_m / 461.0) + 1)
 
     @classmethod
     def validate_cart_preflight(cls, vendor_type: str, distance_km: float, total_quantity: int, total_weight_kg: float = 0.0, is_wholesale_capable: bool = False):
@@ -75,31 +124,33 @@ class DispatchPolicy:
             cls.get_vehicle_class(total_quantity)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        
+
         # 2. Wholesale Business Rules
         if vendor_type == "wholesale_b2b":
-            if total_weight_kg < cls.WHOLESALE_MOQ_KG:
-                raise HTTPException(status_code=400, detail=f"Wholesale requires a minimum payload of {cls.WHOLESALE_MOQ_KG}kg. Current payload: {total_weight_kg}kg. Please add more items.")
-            pass
+            moq = cls.wholesale_moq_kg()
+            if total_weight_kg < moq:
+                raise HTTPException(status_code=400, detail=f"Wholesale requires a minimum payload of {moq:g}kg. Current payload: {total_weight_kg}kg. Please add more items.")
 
         # 3. Retail Rules
         if vendor_type == "retail_refill":
-            if distance_km > cls.RETAIL_MAX_DISTANCE_KM:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Distance {distance_km:.1f}km exceeds the single-trip retail limit of {cls.RETAIL_MAX_DISTANCE_KM}km. Please select a closer vendor."
-                )
-            if total_quantity > 4:
+            limit = cls.retail_max_distance_km()
+            if distance_km > limit:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Retail orders are fulfilled via motorbikes which can carry a maximum of 4 (20L) bottles per trip. You requested {total_quantity}."
+                    detail=f"Distance {distance_km:.1f}km exceeds the single-trip retail limit of {limit:g}km. Please select a closer vendor."
+                )
+            motorbike_capacity = cls.VEHICLE_CAPACITIES["motorbike"]
+            if total_quantity > motorbike_capacity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Retail orders are fulfilled via motorbikes which can carry a maximum of {motorbike_capacity} (20L) bottles per trip. You requested {total_quantity}."
                 )
 
     @classmethod
     def should_auto_dispatch(cls, vendor_type: str) -> bool:
         """
         Determines whether the system should immediately trigger the automated dispatch engine.
-        Now enabled for both Retail and Wholesale to handle Tier 1 (In-House) -> Tier 2 (Trip Radar) switch.
+        Enabled for both Retail and Wholesale to handle Tier 1 (In-House) -> Tier 2 (Trip Radar) switch.
         """
         return True
 
@@ -107,19 +158,17 @@ class DispatchPolicy:
     def get_delivery_fee(cls, distance_km: float, vendor_type: str, vehicle_class: str, wholesale_base: float = 0.0, wholesale_per_km: float = 0.0, delivery_type: str = "quick_swap") -> float:
         """Returns the calculated delivery fee based on vendor type and vehicle."""
         if vendor_type == "wholesale_b2b":
-            # Wholesale custom pricing takes precedence
+            # A vendor's own negotiated rate takes precedence over the platform's.
             if wholesale_base > 0 or wholesale_per_km > 0:
-                fee = wholesale_base + (wholesale_per_km * distance_km)
-                return round(fee, 2)
-                
-            # Fallback to defaults
-            pricing = cls.VEHICLE_PRICING.get(vehicle_class, cls.VEHICLE_PRICING["tuktuk"])
-            fee = pricing["base"] + (pricing["per_km"] * distance_km)
-            return round(fee, 2)
-        else:
-            # Retail pricing
-            # H-03 FIX: Use RETAIL_FLAT_FEE_KSH as the base rate instead of magic numbers
-            if delivery_type == "keep_my_bottle":
-                return round(cls.RETAIL_FLAT_FEE_KSH + 20.0 + (25.0 * distance_km), 2)
-            else:
-                return round(cls.RETAIL_FLAT_FEE_KSH + (15.0 * distance_km), 2)
+                return round(wholesale_base + (wholesale_per_km * distance_km), 2)
+
+            pricing = cls.vehicle_pricing(vehicle_class)
+            return round(pricing["base"] + (pricing["per_km"] * distance_km), 2)
+
+        base = float(config.get("retail_delivery_base_fee"))
+        if delivery_type == "keep_my_bottle":
+            premium = float(config.get("keep_my_bottle_base_premium"))
+            per_km = float(config.get("keep_my_bottle_per_km"))
+            return round(base + premium + (per_km * distance_km), 2)
+
+        return round(base + (float(config.get("retail_delivery_per_km")) * distance_km), 2)

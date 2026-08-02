@@ -1,3 +1,5 @@
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -5,7 +7,6 @@ import { TouchableOpacity } from "react-native";
 import { View, Text, ScrollView, Switch } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { Toast } from "@/lib/toast";
@@ -18,8 +19,8 @@ export default function Preferences() {
     const router = useRouter();
     const { data: profile } = useRiderProfile();
     const queryClient = useQueryClient();
-    const { getToken } = useAuth();
-    
+
+    const { put } = useApiRequest();
     const prefs = profile?.preferences || {
         orderUpdates: true,
         analytics: true
@@ -28,25 +29,13 @@ export default function Preferences() {
 
 
     const updatePreferencesMutation = useMutation({
-        mutationFn: async (newPrefs: any) => {
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-                method: RiderApiRoutes.UpdateProfile.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ preferences: newPrefs })
-            });
-
-            if (!res.ok) throw new Error("Failed to update preferences");
-            return res.json();
-        },
+        mutationFn: (newPrefs: any) =>
+            put(RiderApiRoutes.UpdateProfile.path, { preferences: newPrefs }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
         },
-        onError: () => {
-             Toast.error("Error", "Could not update preferences.");
+        onError: (e) => {
+             Toast.error("Error", errorMessage(e, "Could not update preferences."));
         }
     });
 

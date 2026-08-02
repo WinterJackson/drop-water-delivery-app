@@ -32,32 +32,62 @@ async def _restore_order_stock(session: AsyncSession, order: Order):
             .where(Product.id == item.product_id)
             .values(
                 stock=Product.stock + item.quantity,
-                is_available=True  # Re-enable if it was auto-disabled
+                is_available=True,  # Re-enable if it was auto-disabled
+                # Back above the line, so the next crossing warns again. Without
+                # this the vendor is told once, ever, per product.
+                low_stock_notified_at=None,
             )
         )
     if items:
         logger.info(f"Restored stock for {len(items)} items from order {order.id}")
 
 
+async def _reachable_vendor_filter(session: AsyncSession, clerk_id: str):
+    """`Vendor` rows this clerk id owns or staffs.
+
+    Staff used to be `Vendor.staff_clerk_id`, one nullable column, so this was a
+    two-term OR. It is a join table now — see `models/vendor_staff_model.py`.
+    """
+    from sqlalchemy import or_
+
+    from services.vendor_staff_service import staffed_vendor_ids
+
+    staffed = await staffed_vendor_ids(session, clerk_id)
+    if staffed:
+        return or_(Vendor.clerk_id == clerk_id, Vendor.id.in_(staffed))
+    return Vendor.clerk_id == clerk_id
+
+
 async def get_vendor_by_clerk_id(session: AsyncSession, clerk_id: str, vendor_id: UUID = None):
-    from sqlalchemy import or_, and_
+    from sqlalchemy import and_
+
+    reachable = await _reachable_vendor_filter(session, clerk_id)
     if vendor_id:
-        query = select(Vendor).where(
-            and_(
-                Vendor.id == vendor_id,
-                or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id)
-            )
-        )
+        query = select(Vendor).where(and_(Vendor.id == vendor_id, reachable))
         result = await session.execute(query)
         return result.scalar_one_or_none()
     else:
-        query = select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id))
+        # Deterministic: an owner with two stores must not get a different one
+        # from request to request just because Postgres felt like a different
+        # plan. The app names the store it means via `X-Store-Id`; this ordered
+        # fallback is only for callers that have not (and for single-store
+        # vendors, which is everyone today).
+        query = (
+            select(Vendor)
+            .where(reachable)
+            .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        )
         result = await session.execute(query)
         return result.scalars().first()
 
 async def get_all_vendors_by_clerk_id(session: AsyncSession, clerk_id: str):
-    from sqlalchemy import or_
-    query = select(Vendor).where(or_(Vendor.clerk_id == clerk_id, Vendor.staff_clerk_id == clerk_id))
+    """Every store this clerk id can reach, owned or staffed, oldest first."""
+    reachable = await _reachable_vendor_filter(session, clerk_id)
+    query = (
+        select(Vendor)
+        .where(reachable)
+        .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+    )
     result = await session.execute(query)
     return result.scalars().all()
 
@@ -96,8 +126,8 @@ async def register_vendor(session: AsyncSession, clerk_id: str, data: dict):
     return vendor
 
 
-async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict, vendor_id: UUID | None = None):
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -129,8 +159,8 @@ async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict
     return vendor
 
 
-async def create_product(session: AsyncSession, clerk_id: str, data: dict):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+async def create_product(session: AsyncSession, clerk_id: str, data: dict, vendor_id: UUID | None = None):
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -154,6 +184,7 @@ async def create_product(session: AsyncSession, clerk_id: str, data: dict):
         minimum_order_qty=data.get("minimum_order_qty", 1),
         unit=data["unit"],
         stock=data["stock"],
+        low_stock_threshold=data.get("low_stock_threshold", 5),
         is_available=data.get("is_available", True),
     )
     session.add(product)
@@ -162,8 +193,8 @@ async def create_product(session: AsyncSession, clerk_id: str, data: dict):
     return product
 
 
-async def update_product(session: AsyncSession, clerk_id: str, product_id: UUID, data: dict):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+async def update_product(session: AsyncSession, clerk_id: str, product_id: UUID, data: dict, vendor_id: UUID | None = None):
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -181,19 +212,26 @@ async def update_product(session: AsyncSession, clerk_id: str, product_id: UUID,
 
     updatable_fields = [
         "name", "description", "image_url", "price", "discount",
-        "capacity", "weight_kg", "minimum_order_qty", "unit", "stock", "is_available"
+        "capacity", "weight_kg", "minimum_order_qty", "unit", "stock",
+        "low_stock_threshold", "is_available"
     ]
     for field in updatable_fields:
         if field in data and data[field] is not None:
             setattr(product, field, data[field])
+
+    # A restock arms the warning again. The latch exists to stop one push per
+    # unit sold below the line, not to silence the product forever.
+    threshold = product.low_stock_threshold or 0
+    if product.stock > threshold:
+        product.low_stock_notified_at = None
 
     await session.commit()
     await session.refresh(product)
     return product
 
 
-async def delete_product(session: AsyncSession, clerk_id: str, product_id: UUID):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+async def delete_product(session: AsyncSession, clerk_id: str, product_id: UUID, vendor_id: UUID | None = None):
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -212,9 +250,10 @@ async def get_vendor_orders(
     search_query: str = None, 
     status_filter: str = "All",
     skip: int = 0, 
-    limit: int = 50
+    limit: int = 50,
+    vendor_id: UUID | None = None,
 ):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -251,9 +290,10 @@ async def get_vendor_products(
     search_query: str = None, 
     stock_filter: str = "All",
     limit: int = 20, 
-    offset: int = 0
+    offset: int = 0,
+    vendor_id: UUID | None = None,
 ):
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -286,14 +326,22 @@ async def get_vendor_products(
     return result.scalars().all()
 
 
-async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UUID, new_status: str):
+async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UUID, new_status: str, vendor_id: UUID | None = None):
     from services.order_service import validate_status_transition
 
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    order = await session.get(Order, order_id)
+    # Locked for the rest of the transaction. Two staff members on two devices
+    # is not a hypothetical — it is what the staff feature is *for* — and an
+    # unlocked read-then-write let both accept the same order, run the cash-float
+    # check against a stale balance, and restore stock twice on a double
+    # rejection. `assign_order_rider` has always taken a lock; this did not.
+    result = await session.execute(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    order = result.scalars().first()
     if not order or order.vendor_id != vendor.id:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -309,14 +357,35 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
         )
 
     # --- Wholesale Vendor Cash Float Check ---
+    # `Decimal`, not `float`. This comparison decides whether a vendor may trade
+    # at all, and binary floating point cannot represent 0.10 exactly — a balance
+    # of exactly the required amount could compare as short. The platform rule is
+    # that money is never a float; this was the one place that broke it.
     if new_status == "accepted" and order.payment_method == "cash":
-        required_float = float(order.platform_total or 0)
-        current_balance = float(vendor.wallet_balance or 0)
-        if current_balance < required_float:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Insufficient Wallet Balance to cover Platform Commission. Please top up KSH {required_float:,.2f} to accept this Cash order."
+        from decimal import Decimal
+
+        from services.settlement_service import committed_cash_float_for_vendor
+
+        required_float = Decimal(str(order.platform_total or 0))
+        balance = Decimal(str(vendor.wallet_balance or 0))
+        # Balance alone is not what is spendable: earlier cash orders have
+        # already claimed part of it, and `POST /api/wallet/withdraw` refuses on
+        # the same figure. Accepting against the raw balance is how a vendor ends
+        # up owing the platform on delivery.
+        committed = await committed_cash_float_for_vendor(session, vendor.id)
+        available = balance - committed
+        if available < required_float:
+            shortfall = required_float - available
+            detail = (
+                f"Your float can't cover the platform commission on this cash order. "
+                f"Top up KSH {shortfall:,.2f} to accept it."
             )
+            if committed > 0:
+                detail += (
+                    f" (KSH {committed:,.2f} of your KSH {balance:,.2f} balance is already "
+                    f"committed to open cash orders.)"
+                )
+            raise HTTPException(status_code=402, detail=detail)
 
     order.order_status = new_status
 
@@ -367,10 +436,10 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
     return {"message": f"Order status updated to '{new_status}'"}
 
 
-async def get_vendor_dashboard(session: AsyncSession, clerk_id: str):
+async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: UUID | None = None):
     from datetime import datetime, timedelta
     
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -423,6 +492,21 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str):
             day_index = order_date.weekday() # 0 = Monday, 6 = Sunday
             weekly_revenue_arr[day_index] += float(amount)
 
+    # What needs restocking, so the vendor sees it before a customer does.
+    low_stock_q = (
+        select(Product.id, Product.name, Product.stock, Product.low_stock_threshold)
+        .where(
+            and_(
+                Product.vendor_id == vendor.id,
+                Product.low_stock_threshold > 0,
+                Product.stock <= Product.low_stock_threshold,
+            )
+        )
+        .order_by(Product.stock.asc(), Product.name.asc())
+        .limit(20)
+    )
+    low_stock_rows = (await session.execute(low_stock_q)).all()
+
     return {
         "vendor_id": str(vendor.id),
         "business_name": vendor.business_name,
@@ -434,12 +518,21 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str):
         "product_count": product_count,
         "rating": vendor.rating or 0,
         "weekly_revenue": weekly_revenue_arr,
+        "low_stock_products": [
+            {
+                "id": str(pid),
+                "name": name,
+                "stock": stock,
+                "low_stock_threshold": threshold,
+            }
+            for pid, name, stock, threshold in low_stock_rows
+        ],
     }
 
 
-async def cancel_order(session: AsyncSession, clerk_id: str, order_id: UUID):
+async def cancel_order(session: AsyncSession, clerk_id: str, order_id: UUID, vendor_id: UUID | None = None):
     """Cancel an order before preparation"""
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -484,10 +577,10 @@ async def cancel_order(session: AsyncSession, clerk_id: str, order_id: UUID):
     return {"message": "Order cancelled successfully", "order_id": str(order.id)}
 
 
-async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUID, rider_id: str):
+async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUID, rider_id: str, vendor_id: UUID | None = None):
     from models.deliverer_model import Deliverer
 
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -620,6 +713,7 @@ async def receive_bottles_from_rider(
     received_10L: int,
     received_20L: int,
     note: str | None = None,
+    vendor_id: UUID | None = None,
 ):
     """
     Clear empty-bottle debt when a rider physically hands bottles back to the vendor.
@@ -635,7 +729,7 @@ async def receive_bottles_from_rider(
       checked the limit client-side; the API accepted anything.
     * Every settlement leaves a record of who confirmed it and when.
     """
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
@@ -651,9 +745,9 @@ async def receive_bottles_from_rider(
     )
 
 
-async def get_vendor_bottle_debtors(session: AsyncSession, clerk_id: str):
+async def get_vendor_bottle_debtors(session: AsyncSession, clerk_id: str, vendor_id: UUID | None = None):
     """Every rider holding this vendor's empties, registered or not."""
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
+    vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 

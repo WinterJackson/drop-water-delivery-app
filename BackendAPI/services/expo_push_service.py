@@ -53,8 +53,12 @@ async def purge_dead_token(token: str):
         async with get_db_session() as session:
             await session.execute(update(User).where(User.push_token == token).values(push_token=None))
             await session.execute(update(Vendor).where(Vendor.push_token == token).values(push_token=None))
+            # Staff tokens live on the membership row now, so one dead token
+            # can be held by several people across several stores.
+            from models.vendor_staff_model import VendorStaff
+
             await session.execute(
-                update(Vendor).where(Vendor.staff_push_token == token).values(staff_push_token=None)
+                update(VendorStaff).where(VendorStaff.push_token == token).values(push_token=None)
             )
             await session.execute(update(Deliverer).where(Deliverer.push_token == token).values(push_token=None))
             await session.commit()

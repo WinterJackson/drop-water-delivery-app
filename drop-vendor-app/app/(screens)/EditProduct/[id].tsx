@@ -1,8 +1,9 @@
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useContext, useState, useEffect } from "react";
+import { useCallback, useContext, useState, useEffect } from "react";
 import { useImageUpload } from "@/hooks/useImageUpload";
 import { Toast } from "@/lib/toast";
 import * as Haptics from "expo-haptics";
@@ -25,7 +26,7 @@ export default function EditProduct() {
   const { id } = useLocalSearchParams();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { getToken } = useAuth();
+  const { get, put } = useApiRequest();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { imageUri, uploading: imageUploading, error, pickImage, handleImageUpload } = useImageUpload();
@@ -34,6 +35,16 @@ export default function EditProduct() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  /**
+   * What the server last gave us for this product's image.
+   *
+   * The API returns a **presigned** URL, valid for 15 minutes. Sending it back
+   * unchanged would store an expiring URL as the product's permanent image, and
+   * the photo would 403 for every customer a quarter of an hour later. So when
+   * the vendor has not touched the image, `image_url` is simply left out of the
+   * update — it is optional on the server and an absent field means "unchanged".
+   */
+  const [serverImageUrl, setServerImageUrl] = useState("");
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
   const [capacity, setCapacity] = useState("");
@@ -41,38 +52,40 @@ export default function EditProduct() {
   const [minQty, setMinQty] = useState("1");
   const [unit, setUnit] = useState("litres");
   const [stock, setStock] = useState("");
+  const [lowStockThreshold, setLowStockThreshold] = useState("5");
   const [loading, setLoading] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const fetchProduct = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const data = await get<any>(VendorApiRoutes.GetProduct(id as string).path);
+      setName(data.name || "");
+      setDescription(data.description || "");
+      setImageUrl(data.image_url || "");
+      setServerImageUrl(data.image_url || "");
+      setPrice(data.price?.toString() || "");
+      setDiscount(data.discount?.toString() || "0");
+      setCapacity(data.capacity?.toString() || "");
+      setWeightKg(data.weight_kg?.toString() || "20");
+      setMinQty(data.minimum_order_qty?.toString() || "1");
+      setUnit(data.unit || "litres");
+      setStock(data.stock?.toString() || "");
+      setLowStockThreshold(data.low_stock_threshold?.toString() ?? "5");
+    } catch (e) {
+      // The form must not render half-populated: saving it would blank whatever
+      // failed to load. Previously the fields simply stayed empty and the
+      // vendor could submit them over a perfectly good product.
+      setLoadError(errorMessage(e, "Could not load this product."));
+    } finally {
+      setLoadingData(false);
+    }
+  }, [id, get]);
+
   useEffect(() => {
-    const fetchProduct = async () => {
-      const token = await getToken();
-      try {
-        const res = await fetch(VendorApiRoutes.GetProduct(id as string).path, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setName(data.name || "");
-          setDescription(data.description || "");
-          setImageUrl(data.image_url || "");
-          setPrice(data.price?.toString() || "");
-          setDiscount(data.discount?.toString() || "0");
-          setCapacity(data.capacity?.toString() || "");
-          setWeightKg(data.weight_kg?.toString() || "20");
-          setMinQty(data.minimum_order_qty?.toString() || "1");
-          setUnit(data.unit || "litres");
-          setStock(data.stock?.toString() || "");
-        } else {
-          Toast.error("Error", "Could not load product details.");
-        }
-      } catch (e) {
-        if (__DEV__) console.error(e);
-      } finally {
-        setLoadingData(false);
-      }
-    };
     if (id) fetchProduct();
-  }, [id, getToken]);
+  }, [id, fetchProduct]);
 
   const handleSubmit = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -96,35 +109,29 @@ export default function EditProduct() {
     }
 
     setLoading(true);
-    const token = await getToken();
-    const payload = {
-      name, description, image_url: finalImageUrl,
+    const payload: Record<string, unknown> = {
+      name, description,
       price: parseFloat(price), discount: parseFloat(discount || "0"),
-      capacity: parseFloat(capacity), 
+      capacity: parseFloat(capacity),
       weight_kg: parseFloat(weightKg),
       minimum_order_qty: parseInt(minQty || "1"),
       unit, stock: parseInt(stock),
+      low_stock_threshold: parseInt(lowStockThreshold || "0") || 0,
     };
+    // Only send the image when it actually changed — see `serverImageUrl`.
+    if (finalImageUrl && finalImageUrl !== serverImageUrl) {
+      payload.image_url = finalImageUrl;
+    }
+
     try {
-      const route = VendorApiRoutes.UpdateProduct(id as string);
-      const res = await fetch(route.path, {
-        method: route.method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Toast.success("Product updated!", "Your product details have been saved.");
-        queryClient.invalidateQueries({ queryKey: ["vendorProducts"] });
-        router.back();
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        const err = await res.json();
-        Toast.error("Error", err.detail || "Failed to update product");
-      }
+      await put(VendorApiRoutes.UpdateProduct(id as string).path, payload);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Toast.success("Product updated!", "Your product details have been saved.");
+      queryClient.invalidateQueries({ queryKey: ["vendorProducts"] });
+      router.back();
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Toast.error("Error", "Network error. Please check your connection.");
+      Toast.error("Error", errorMessage(e, "Could not save those changes."));
     } finally {
       setLoading(false);
     }
@@ -144,6 +151,27 @@ export default function EditProduct() {
             <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Edit Product</Text>
           </View>
           <VendorEditProductSkeleton />
+      </SafeAreaView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <SafeAreaView className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-black" : ""}`}>
+        <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
+        <Ionicons name="cloud-offline-outline" size={44} color={darkTheme ? BRAND.gray400 : BRAND.gray500} />
+        <Text className={`text-lg font-bold mt-4 mb-2 text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
+          Couldn&apos;t load this product
+        </Text>
+        <Text className={`text-center mb-6 ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>{loadError}</Text>
+        <View className="flex-row gap-3">
+          <PressableScale onPress={() => { setLoadingData(true); fetchProduct(); }} className="bg-accentbg px-6 py-3 rounded-xl">
+            <Text className="text-white font-bold">Try again</Text>
+          </PressableScale>
+          <PressableScale onPress={() => router.back()} className={`px-6 py-3 rounded-xl border ${darkTheme ? "border-slate-700" : "border-slate-200"}`}>
+            <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Go back</Text>
+          </PressableScale>
+        </View>
       </SafeAreaView>
     );
   }
@@ -266,6 +294,17 @@ export default function EditProduct() {
             <View>
               <Text className={labelStyle}>Stock Quantity *</Text>
               <TextInput className={inputStyle} placeholder="100" placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"} value={stock} onChangeText={setStock} keyboardType="numeric" />
+            </View>
+
+            {/* Per product, because a shop selling 200 refills a day and one
+                selling a dispenser a month cannot share a number. 0 turns the
+                warning off for products where "low" means nothing. */}
+            <View>
+              <Text className={labelStyle}>Warn me at</Text>
+              <TextInput className={inputStyle} placeholder="5" placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"} value={lowStockThreshold} onChangeText={setLowStockThreshold} keyboardType="numeric" />
+              <Text className={`text-xs mt-2 ml-1 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
+                You&apos;ll get one notification when stock drops to this level. Set 0 to turn it off.
+              </Text>
             </View>
 
             <PressableScale

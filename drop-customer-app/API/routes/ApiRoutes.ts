@@ -188,6 +188,20 @@ export const ROUTES = {
     PLACES_AUTOCOMPLETE: `${BASE_URL}/api/maps/places/autocomplete`,
     PLACE_DETAILS: `${BASE_URL}/api/maps/places/details`,
 
+    // Support
+    //
+    // `user_type` is a query parameter on every one of these, exactly as it is
+    // on the notification routes and for the same reason: one Clerk identity can
+    // be a customer *and* a rider, so the account being acted on is stated
+    // rather than guessed. The server resolves it by `clerk_id` and will only
+    // ever return tickets that account raised.
+    CREATE_SUPPORT_TICKET: `${BASE_URL}/api/support/tickets?user_type=customer`,
+    GET_SUPPORT_TICKETS: `${BASE_URL}/api/support/tickets?user_type=customer`,
+    GET_SUPPORT_TICKET: (id: string) => `${BASE_URL}/api/support/tickets/${id}?user_type=customer`,
+    REPLY_TO_SUPPORT_TICKET: (id: string) =>
+        `${BASE_URL}/api/support/tickets/${id}/reply?user_type=customer`,
+    SUPPORT_CATEGORIES: `${BASE_URL}/api/support/categories`,
+
     // Misc
     APP_VERSION: `${BASE_URL}/api/app-version`,
 } as const;

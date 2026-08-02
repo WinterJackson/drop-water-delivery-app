@@ -1,5 +1,8 @@
 import { UIThemeContext } from "@/context/ThemeContext";
-import { isClerkAPIResponseError, useSignUp } from "@clerk/clerk-expo";
+import { isClerkAPIResponseError, useAuth, useSignUp } from "@clerk/clerk-expo";
+import { apiFetch } from "@/API/apiFetch";
+import { errorMessage } from "@/API/errors";
+import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useContext, useState } from "react";
@@ -27,6 +30,7 @@ const { width } = Dimensions.get("window");
 
 export default function SignUp() {
     const { isLoaded, signUp, setActive } = useSignUp();
+    const { getToken } = useAuth();
     const router = useRouter();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -139,33 +143,26 @@ export default function SignUp() {
                 ID_number: idNumber,
             };
 
-            const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
-            const apiCall = await fetch(`${BASE_URL}/api/auth/create_rider`, {
+            // This call was sent with no Authorization header. `create_rider`
+            // takes the caller's identity from the verified token — it overwrites
+            // the posted `clerk_id` with `user["sub"]` precisely so nobody can
+            // claim someone else's account — so an unauthenticated POST was
+            // rejected 401 and every sign-up ended on "Failed to save rider
+            // details". `setActive` above has just established the session, so a
+            // token is available here.
+            const token = await getToken();
+            await apiFetch(RiderApiRoutes.Register.path, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                token,
+                body: payload,
             });
-            const response = await apiCall.json();
-            
-            if (!apiCall.ok) {
-                console.error("CREATE RIDER ERROR:", response);
-                // Safely extract human-readable error from Pydantic detail
-                let errMsg = "Failed to save rider details.";
-                if (Array.isArray(response.detail)) {
-                    errMsg = response.detail.map((e: any) => e.msg || String(e)).join(", ");
-                } else if (typeof response.detail === "string") {
-                    errMsg = response.detail;
-                } else if (response.message) {
-                    errMsg = response.message;
-                }
-                setErrors(errMsg);
-                setLoading(false);
-                return;
-            }
-            
+
             router.replace("/(screens)");
         } catch (error) {
-            setErrors("Failed to save rider details.");
+            // `errorMessage` already flattens a Pydantic 422 array into a
+            // sentence, so the hand-rolled `detail` unwrapping is gone.
+            if (__DEV__) console.error("CREATE RIDER ERROR:", error);
+            setErrors(errorMessage(error, "Failed to save rider details."));
             setLoading(false);
         }
     };

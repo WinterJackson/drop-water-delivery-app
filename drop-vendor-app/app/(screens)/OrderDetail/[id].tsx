@@ -1,6 +1,7 @@
 import { Skeleton } from "@/components/ui/Skeleton";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useUpdateOrderStatus, useVendorOrders } from "@/hooks/queries/useVendorOrders";
+import { useOrderReview, useUpdateOrderStatus, useVendorOrder } from "@/hooks/queries/useVendorOrders";
+import { isUnderReview, orderStatusStyle } from "@/constants/orderStatus";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useContext, useState } from "react";
@@ -9,8 +10,11 @@ import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from "@gorhom/
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@clerk/clerk-expo";
+import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
+import { useApiRequest } from "@/API/useApiClient";
+import { useVendorRiders } from "@/hooks/queries/useVendorRiders";
+import { Toast } from "@/lib/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -19,35 +23,6 @@ import { BRAND } from "@/constants/brandColors";
 import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts";
 import { useRef, useMemo, useCallback } from "react";
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-amber-500/20 border-amber-500/30",
-  accepted: "bg-accentbg/20 border-accentbg/30",
-  preparing: "bg-purple-500/20 border-purple-500/30",
-  ready: "bg-green-500/20 border-green-500/30",
-  rejected: "bg-red-500/20 border-red-500/30",
-
-  picked_up: "bg-sky-500/20 border-sky-500/30",
-  delivered: "bg-green-500/20 border-green-500/30",
-  unassigned: "bg-slate-500/20 border-slate-500/30",
-  cancelled: "bg-red-500/20 border-red-500/30",
-  refund_pending: "bg-amber-500/20 border-amber-500/30",
-  refunded: "bg-slate-500/20 border-slate-500/30",
-};
-
-const STATUS_TEXT_COLORS: Record<string, string> = {
-  pending: "text-amber-500",
-  accepted: "text-accentbg",
-  preparing: "text-purple-500",
-  ready: "text-green-500",
-  rejected: "text-red-500",
-
-  picked_up: "text-sky-500",
-  delivered: "text-green-500",
-  unassigned: "text-slate-500",
-  cancelled: "text-red-500",
-  refund_pending: "text-amber-500",
-  refunded: "text-slate-500",
-};
 
 export default function OrderDetail() {
   const { id } = useLocalSearchParams();
@@ -55,12 +30,20 @@ export default function OrderDetail() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
-  const { data: orders = [], isLoading } = useVendorOrders();
+  // Fetched by id, not searched for in a list the dashboard happened to load —
+  // see `useVendorOrder`.
+  const { data: order, isLoading } = useVendorOrder((id as string) || null);
   const { mutateAsync: updateStatusMutation } = useUpdateOrderStatus();
   const queryClient = useQueryClient();
-  const { getToken } = useAuth();
+  const { put } = useApiRequest();
 
-  const [riders, setRiders] = useState<any[]>([]);
+  // The roster comes from the shared hook, which already refetches and caches
+  // it; this screen used to keep a third copy in `useState`.
+  const { data: allRiders = [] } = useVendorRiders();
+  const riders = useMemo(
+    () => allRiders.filter((r: any) => r.status === "approved" && r.is_available),
+    [allRiders]
+  );
 
   const assignRiderSheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ["50%", "75%"], []);
@@ -69,10 +52,10 @@ export default function OrderDetail() {
     <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.5} />
   ), []);
 
-  const order = orders.find((o: any) => o.id === id);
-
   // Cross-party contact info (only fetched during active states)
   const { data: contactsData } = useOrderContacts(order?.id || null, order?.order_status || null);
+  // Only fetched for the two states that can actually park an order.
+  const { data: review } = useOrderReview(order?.id || null, order?.order_status || null);
   const contacts = contactsData?.contacts || [];
   const customerContact = contacts.find((c: ContactInfo) => c.role === "customer");
   const riderContact = contacts.find((c: ContactInfo) => c.role === "rider");
@@ -87,36 +70,25 @@ export default function OrderDetail() {
       Linking.openURL(`tel:${phone}`);
   };
 
-  const fetchRiders = async () => {
-    const token = await getToken();
-    try {
-      const res = await fetch(VendorApiRoutes.GetMyRiders.path, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRiders(data.filter((r: any) => r.status === "approved" && r.is_available));
-      }
-    } catch (e) {
-      if (__DEV__) console.error(e);
-    }
-  };
+  const invalidateOrder = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["vendorOrder", id] });
+    queryClient.invalidateQueries({ queryKey: ["vendorOrders"] });
+    queryClient.invalidateQueries({ queryKey: ["vendorOrdersPaginated"] });
+  }, [queryClient, id]);
 
   const handleAssignRider = async (riderId: string) => {
     assignRiderSheetRef.current?.dismiss();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const token = await getToken();
     try {
-      const res = await fetch(VendorApiRoutes.AssignRider(id as string).path, {
-        method: VendorApiRoutes.AssignRider(id as string).method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ deliverer_id: riderId })
-      });
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ["vendorOrders"] });
-      }
+      await put(VendorApiRoutes.AssignRider(id as string).path, { deliverer_id: riderId });
+      invalidateOrder();
+      Toast.success("Rider assigned", "They have been notified.");
     } catch (e) {
-      if (__DEV__) console.error(e);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // `assign_order_rider` refuses an unapproved or unavailable rider with a
+      // reason. The previous version checked `res.ok` and, when it was false,
+      // did nothing at all — the sheet closed and the order stayed unassigned.
+      Toast.error("Couldn't assign", errorMessage(e, "That rider couldn't take this order."));
     }
   };
 
@@ -124,33 +96,23 @@ export default function OrderDetail() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     try {
       await updateStatusMutation({ orderId: id as string, status });
-    } catch (e: any) {
-      if (__DEV__) console.error("Failed to update status", e);
-      import("@/lib/toast").then(({ Toast }) => {
-        const errMsg = e.response?.data?.detail || (e as Error).message || "Failed to update status. Please check your connection.";
-        Toast.error("Update Failed", errMsg);
-      });
+    } catch (e: unknown) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // `errorMessage`, not `e.response?.data?.detail` — an `ApiError` has no
+      // `.response`, so that path always fell through to the generic string.
+      Toast.error("Update Failed", errorMessage(e, "Couldn't update that order."));
     }
   };
 
   const cancelOrder = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const token = await getToken();
     try {
-      const res = await fetch(VendorApiRoutes.CancelOrder(id as string).path, {
-        method: VendorApiRoutes.CancelOrder(id as string).method,
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ["vendorOrders"] });
-        import("@/lib/toast").then(({ Toast }) => Toast.success("Cancelled", "Order has been cancelled."));
-      } else {
-        const err = await res.json();
-        import("@/lib/toast").then(({ Toast }) => Toast.error("Error", err.detail || "Failed to cancel order."));
-      }
+      await put(VendorApiRoutes.CancelOrder(id as string).path);
+      invalidateOrder();
+      Toast.success("Cancelled", "Order has been cancelled.");
     } catch (e) {
-      if (__DEV__) console.error(e);
-      import("@/lib/toast").then(({ Toast }) => Toast.error("Error", "Network error while cancelling."));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Toast.error("Error", errorMessage(e, "Couldn't cancel that order."));
     }
   };
 
@@ -205,12 +167,74 @@ export default function OrderDetail() {
         <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           {/* Status indicator */}
           <View className="items-center mb-6">
-            <View className={`px-5 py-2.5 rounded-full border ${STATUS_COLORS[order.order_status] || "bg-slate-200 border-slate-300"}`}>
-              <Text className={`text-sm font-bold capitalize tracking-wider ${STATUS_TEXT_COLORS[order.order_status] || "text-slate-700"}`}>
-                {order.order_status.replace("_", " ")}
+            <View className={`px-5 py-2.5 rounded-full border border-transparent ${orderStatusStyle(order.order_status).pill}`}>
+              <Text className={`text-sm font-bold tracking-wider ${orderStatusStyle(order.order_status).text}`}>
+                {orderStatusStyle(order.order_status).label}
               </Text>
             </View>
           </View>
+
+          {/* Why this order stopped.
+
+              `mismatch_pending` and `pending_review` are reachable in ordinary
+              operation — a rider flags a damaged empty, or reports the customer
+              understated their floor — and neither string appeared anywhere in
+              this app. The vendor saw a blank pill over an order whose stock was
+              committed and whose payment was pending, with nothing to read and
+              nothing to do. */}
+          {isUnderReview(order.order_status) && (
+            <View className={`p-5 rounded-[24px] mb-5 border ${darkTheme ? "bg-amber-500/10 border-amber-500/20" : "bg-amber-50 border-amber-200"}`}>
+              <View className="flex-row items-center mb-3">
+                <Ionicons name="pause-circle-outline" size={22} color="#d97706" />
+                <Text className={`font-bold text-lg ml-2 ${darkTheme ? "text-amber-200" : "text-amber-900"}`}>
+                  {orderStatusStyle(order.order_status).label}
+                </Text>
+              </View>
+              <Text className={`text-sm leading-relaxed ${darkTheme ? "text-amber-100/80" : "text-amber-800"}`}>
+                {orderStatusStyle(order.order_status).explanation}
+              </Text>
+
+              {order.order_status === "mismatch_pending" && review?.actual_floor_level != null && (
+                <Text className={`text-sm mt-3 font-semibold ${darkTheme ? "text-amber-200" : "text-amber-900"}`}>
+                  Rider reports floor {review.actual_floor_level}.
+                </Text>
+              )}
+
+              {review?.bottle_rejection && (
+                <View className="mt-4">
+                  <Text className={`text-xs font-bold uppercase tracking-wider mb-1 ${darkTheme ? "text-amber-300/70" : "text-amber-700"}`}>
+                    Rider&apos;s reason
+                  </Text>
+                  <Text className={`text-sm leading-relaxed ${darkTheme ? "text-amber-100" : "text-amber-900"}`}>
+                    {review.bottle_rejection.reason_text}
+                  </Text>
+
+                  {review.bottle_rejection.photo_urls.length > 0 && (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      className="mt-3"
+                      contentContainerStyle={{ gap: 8 }}
+                    >
+                      {review.bottle_rejection.photo_urls.map((url: string) => (
+                        <Image
+                          key={url}
+                          source={{ uri: url }}
+                          style={{ width: 110, height: 110, borderRadius: 16 }}
+                          contentFit="cover"
+                        />
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
+
+              <Text className={`text-xs mt-4 ${darkTheme ? "text-amber-300/60" : "text-amber-600"}`}>
+                Nothing to do here — support resolves this and the order continues
+                on its own. Your stock stays reserved in the meantime.
+              </Text>
+            </View>
+          )}
 
           {/* Customer Details */}
           <View className={`p-5 rounded-[24px] mb-5 border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
@@ -492,7 +516,7 @@ export default function OrderDetail() {
             <View className="flex-row gap-3">
                {!order.rider && (
                 <PressableScale
-                  onPress={() => { fetchRiders(); assignRiderSheetRef.current?.present(); }}
+                  onPress={() => assignRiderSheetRef.current?.present()}
                   className={`flex-1 py-4 rounded-[16px] items-center shadow-sm border ${darkTheme ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
                 >
                   <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>Assign Fleet</Text>

@@ -1,3 +1,5 @@
+import { errorMessage } from "@/API/errors";
+import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -6,7 +8,6 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, ActivityIndicator 
 import { Stack, useRouter } from "expo-router";
 import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
@@ -18,7 +19,8 @@ export default function BankDetails() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
-    const { getToken } = useAuth();
+
+    const { put } = useApiRequest();
     const queryClient = useQueryClient();
 
     const { data: profile } = useRiderProfile();
@@ -50,26 +52,13 @@ export default function BankDetails() {
                 isDefault: paymentMethods.length === 0
             }];
             
-            const token = await getToken();
-            const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-                method: RiderApiRoutes.UpdateProfile.method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ payment_methods: newMethods })
-            });
-
-            if (res.ok) {
-                queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
-                Toast.success("Added", "Payout method added.");
-                setIsAdding(false);
-                setNewPhone("");
-            } else {
-                Toast.error("Error", "Could not save payout method.");
-            }
+            await put(RiderApiRoutes.UpdateProfile.path, { payment_methods: newMethods });
+            queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
+            Toast.success("Added", "Payout method added.");
+            setIsAdding(false);
+            setNewPhone("");
         } catch (error: unknown) {
-            Toast.error("Error", (error as Error).message || "Failed to add.");
+            Toast.error("Error", errorMessage(error, "Could not save payout method."));
         } finally {
             setIsSaving(false);
         }
@@ -92,24 +81,11 @@ export default function BankDetails() {
                 }
                 
                 try {
-                    const token = await getToken();
-                    const res = await fetch(RiderApiRoutes.UpdateProfile.path, {
-                        method: RiderApiRoutes.UpdateProfile.method,
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ payment_methods: newMethods })
-                    });
-
-                    if (res.ok) {
-                        queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
-                        Toast.success("Removed", "Payout method removed.");
-                    } else {
-                        Toast.error("Error", "Could not remove payout method.");
-                    }
+                    await put(RiderApiRoutes.UpdateProfile.path, { payment_methods: newMethods });
+                    queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });
+                    Toast.success("Removed", "Payout method removed.");
                 } catch (error: unknown) {
-                    Toast.error("Error", (error as Error).message || "Failed to remove.");
+                    Toast.error("Error", errorMessage(error, "Could not remove payout method."));
                 }
             }
         });

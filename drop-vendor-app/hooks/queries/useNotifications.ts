@@ -1,5 +1,6 @@
 import VendorApiRoutes from '@/API/routes/VendorApiRoutes';
-import { useAuth } from '@clerk/clerk-expo';
+import { retryTransientOnly } from '@/API/errors';
+import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,40 +16,28 @@ export interface NotificationItem {
     created_at: string | null;
 }
 
+// Notifications are addressed to the *account*, not to one store: every route
+// here already carries `?user_type=vendor` and the backend resolves the row from
+// the clerk id. They are therefore not store-scoped, and sending `X-Store-Id`
+// would change nothing — it is left on for consistency and costs nothing.
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 export function useNotifications() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<NotificationItem[], Error>({
         queryKey: ['vendor', 'notifications'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(`${VendorApiRoutes.GetNotifications.path}&t=${Date.now()}`, {
-                method: VendorApiRoutes.GetNotifications.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Notifications fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => get<NotificationItem[]>(VendorApiRoutes.GetNotifications.path),
         staleTime: 5 * 60 * 1000, // 5 minutes
+        retry: retryTransientOnly(),
     });
 }
 
 export function useMarkNotificationRead() {
-    const { getToken, signOut } = useAuth();
+    const { post } = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (notificationId: string) => {
-            const token = await getToken();
-            const res = await fetch(VendorApiRoutes.MarkNotificationRead.path, {
-                method: VendorApiRoutes.MarkNotificationRead.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ notification_id: notificationId }),
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Mark read failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (notificationId: string) =>
+            post(VendorApiRoutes.MarkNotificationRead.path, { notification_id: notificationId }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications'] });
         },
@@ -56,19 +45,10 @@ export function useMarkNotificationRead() {
 }
 
 export function useMarkAllNotificationsRead() {
-    const { getToken, signOut } = useAuth();
+    const { post } = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async () => {
-            const token = await getToken();
-            const res = await fetch(VendorApiRoutes.MarkAllNotificationsRead.path, {
-                method: VendorApiRoutes.MarkAllNotificationsRead.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Mark all read failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: () => post(VendorApiRoutes.MarkAllNotificationsRead.path),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications'] });
         },
@@ -76,38 +56,21 @@ export function useMarkAllNotificationsRead() {
 }
 
 export function useUnreadNotificationCount() {
-    const { getToken, signOut } = useAuth();
+    const { get } = useApiRequest();
     return useQuery<{ unread_count: number }, Error>({
         queryKey: ['vendor', 'notifications', 'unread-count'],
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch(`${VendorApiRoutes.GetUnreadNotificationCount.path}&t=${Date.now()}`, {
-                method: VendorApiRoutes.GetUnreadNotificationCount.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Unread count fetch failed: ${res.status}`);
-            return res.json();
-        },
+        queryFn: () => get<{ unread_count: number }>(VendorApiRoutes.GetUnreadNotificationCount.path),
         staleTime: 5 * 60 * 1000,
+        retry: retryTransientOnly(),
     });
 }
 
 export function useDeleteNotification() {
-    const { getToken, signOut } = useAuth();
+    const { del } = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (notificationId: string) => {
-            const token = await getToken();
-            const route = VendorApiRoutes.DeleteNotification(notificationId);
-            const res = await fetch(route.path, {
-                method: route.method,
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            if (res.status === 401) { await signOut(); throw new Error("401_UNAUTHORIZED"); }
-            if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
-            return res.json();
-        },
+        mutationFn: (notificationId: string) =>
+            del(VendorApiRoutes.DeleteNotification(notificationId).path),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications'] });
             queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications', 'unread-count'] });

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
-from dependencies.auth_dependencies import get_current_vendor
-from services.vendor_management_service import get_vendor_by_clerk_id
+from dependencies.auth_dependencies import get_active_store, get_owned_store
+from models.vendor_model import Vendor
 from models.vendor_rider_model import VendorRiderRegistry
 from models.deliverer_model import Deliverer
 from sqlalchemy import select, and_
@@ -22,12 +22,7 @@ class RiderActionRequest(BaseModel):
     action: str # "approve", "reject", "suspend"
 
 @router.get("/my-riders")
-async def get_vendor_riders(session: AsyncSession = Depends(get_db), user = Depends(get_current_vendor)):
-    clerk_id = user["sub"]
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-
+async def get_vendor_riders(session: AsyncSession = Depends(get_db), vendor: Vendor = Depends(get_active_store)):
     query = select(VendorRiderRegistry, Deliverer).join(
         Deliverer, VendorRiderRegistry.rider_id == Deliverer.id
     ).where(VendorRiderRegistry.vendor_id == vendor.id)
@@ -55,12 +50,17 @@ async def get_vendor_riders(session: AsyncSession = Depends(get_db), user = Depe
     return riders
 
 @router.put("/rider-action")
-async def manage_rider_status(request: RiderActionRequest, session: AsyncSession = Depends(get_db), user = Depends(get_current_vendor)):
-    clerk_id = user["sub"]
-    vendor = await get_vendor_by_clerk_id(session, clerk_id)
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+async def manage_rider_status(request: RiderActionRequest, session: AsyncSession = Depends(get_db), vendor: Vendor = Depends(get_owned_store)):
+    """Owner only.
 
+    Approving a rider decides who may carry this store's goods and collect its
+    cash — the same class of decision as changing the payout account, not a
+    shop-floor one. `RiderManagement.tsx` already redirects staff away; that was
+    the only thing enforcing it.
+
+    Reading the roster (`GET /my-riders`) stays open to staff: the assign-rider
+    sheet in `OrderDetail` needs it to dispatch an order.
+    """
     query = select(VendorRiderRegistry).where(
         and_(
             VendorRiderRegistry.vendor_id == vendor.id,

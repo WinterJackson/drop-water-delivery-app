@@ -41,6 +41,7 @@ class Product(Base):
       Index('idx_product_category_available', 'category', 'is_available', 'created_at'),
       Index('idx_product_discount_created', 'discount', 'created_at'),
       Index('idx_products_search_vector', 'search_vector', postgresql_using='gin'),
+      Index('idx_products_vendor_low_stock', 'vendor_id', 'stock'),
   )
   id = Column(UUID(as_uuid=True), unique=True, primary_key=True, default=uuid.uuid4, index=True)
   vendor_id = Column(UUID(as_uuid=True), ForeignKey("Vendors.id"), index=True)
@@ -54,6 +55,13 @@ class Product(Base):
   minimum_order_qty = Column(Integer, nullable=False, default=1, index=True)
   unit = Column(String, nullable=False, index=True)
   stock = Column(Integer, nullable=False, index=True)
+  #: Warn the vendor at or below this level. 0 disables the warning entirely —
+  #: some products (a dispenser the vendor orders in on request) have no
+  #: meaningful "low".
+  low_stock_threshold = Column(Integer, nullable=False, server_default="5", default=5)
+  #: When the vendor was last told about this product. One notification per
+  #: crossing, not one per unit sold below the line.
+  low_stock_notified_at = Column(TIMESTAMP(timezone=True), nullable=True)
   is_available = Column(Boolean, default=True, index=True)
   category = Column(
       Enum(ProductCategory, name="product_category", create_type=False),

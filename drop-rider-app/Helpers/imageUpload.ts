@@ -1,7 +1,24 @@
 import * as ImageManipulator from 'expo-image-manipulator';
+
+import { apiFetch } from '@/API/apiFetch';
+import { errorMessage } from '@/API/errors';
+import RiderApiRoutes from '@/API/routes/RiderApiRoutes';
 import { Toast } from '@/lib/toast';
 
-const SecureUpload = async (uri: string, name: string | null | undefined, getToken: () => Promise<string | null>) => {
+/**
+ * What `POST /api/rider/upload_proof` returns. `secure_url` is the S3 key that
+ * gets attached to the delivery-completion call — not a public URL; the backend
+ * signs it on the way out.
+ */
+export interface UploadedProof {
+  secure_url: string;
+}
+
+const SecureUpload = async (
+  uri: string,
+  name: string | null | undefined,
+  getToken: () => Promise<string | null>
+): Promise<UploadedProof> => {
   const formData = new FormData();
   let processedUri = uri;
   let mimeType = 'image/webp';
@@ -15,7 +32,7 @@ const SecureUpload = async (uri: string, name: string | null | undefined, getTok
     );
     processedUri = manipResult.uri;
   } catch (e) {
-    console.warn("Failed to compress to WebP, falling back to original", e);
+    if (__DEV__) console.warn("Failed to compress to WebP, falling back to original", e);
     // Fall back to jpeg as standard if WebP fails
     mimeType = 'image/jpeg';
     processedName = name ? name.split('.')[0] + '.jpg' : 'delivery_proof.jpg';
@@ -31,23 +48,20 @@ const SecureUpload = async (uri: string, name: string | null | undefined, getTok
 
   try {
     const token = await getToken();
-    const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/rider/upload_proof`, {
+    // A photo over a rider's connection needs longer than the default 15s, and
+    // this upload is the gate on completing a delivery with missing bottles —
+    // timing it out is worse than waiting.
+    return await apiFetch<UploadedProof>(RiderApiRoutes.UploadProof.path, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: formData,
+      token,
+      formData,
+      timeoutMs: 60_000,
     });
-
-    if (!res.ok) {
-        throw new Error(`Upload failed with status ${res.status}`);
-    }
-
-    const data = await res.json();
-    return data;
   } catch (err: unknown) {
     if (__DEV__) console.error('Secure upload error:', err);
-    Toast.error('Upload Error', 'Failed to upload proof photo. Please try again.');
+    // The backend rejects non-images and oversized files with a reason; showing
+    // it lets the rider fix the photo instead of retrying the same one.
+    Toast.error('Upload Error', errorMessage(err, 'Failed to upload proof photo. Please try again.'));
     throw err;
   }
 };
