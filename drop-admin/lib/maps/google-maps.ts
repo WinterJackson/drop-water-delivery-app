@@ -35,65 +35,105 @@ import { useEffect, useState } from "react";
 /** Extra libraries are deliberately not requested — this map draws markers. */
 const SCRIPT_ID = "google-maps-js-api";
 
+/**
+ * Name of the global Google calls once the API is genuinely usable.
+ *
+ * **`load` is not that moment.** With `loading=async` the URL returns a small
+ * *bootstrap*, which then fetches the library itself. The `<script>` element's
+ * `load` event fires when the bootstrap arrives — at which point `google.maps`
+ * exists as an object but `google.maps.Map` is still `undefined`, and
+ * constructing one throws "google.maps.Map is not a constructor".
+ *
+ * `callback` is the documented signal, and the only one that means the classes
+ * are defined.
+ */
+const CALLBACK = "__dropGoogleMapsReady";
+
 type State = { ready: boolean; error: string | null };
 
 export const GOOGLE_MAPS_BROWSER_KEY =
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY ?? "";
 
-export function useGoogleMaps(): State {
-  const [state, setState] = useState<State>(() => ({
-    // Already loaded by an earlier mount — a second <script> would re-execute
-    // the API and warn about being included twice.
-    ready: typeof window !== "undefined" && Boolean(window.google?.maps),
-    error: null,
-  }));
+/**
+ * One load per page, shared by every caller.
+ *
+ * Module-level rather than per-hook: two components mounting together must not
+ * append two script tags, and React 18's development double-mount makes that
+ * the normal case rather than the edge case.
+ */
+let loader: Promise<void> | null = null;
 
-  useEffect(() => {
-    if (state.ready) return;
+function loadGoogleMaps(): Promise<void> {
+  if (loader) return loader;
 
-    if (!GOOGLE_MAPS_BROWSER_KEY) {
-      setState({
-        ready: false,
-        error:
-          "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY is not set on this deployment, so the map cannot load.",
-      });
+  loader = new Promise<void>((resolve, reject) => {
+    if (typeof window === "undefined") return; // server render: never settles
+
+    if (window.google?.maps?.Map) {
+      resolve();
       return;
     }
 
-    const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      // Mounted twice before the first load finished. Wait on the same tag
-      // rather than adding a second one.
-      existing.addEventListener("load", () => setState({ ready: true, error: null }));
-      existing.addEventListener("error", () =>
-        setState({ ready: false, error: "Google Maps failed to load." }),
+    if (!GOOGLE_MAPS_BROWSER_KEY) {
+      reject(
+        new Error(
+          "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY is not set on this deployment, so the map cannot load.",
+        ),
       );
       return;
     }
 
+    // Must exist before the script runs, or the bootstrap calls a global that
+    // is not there yet and the failure is silent.
+    (window as unknown as Record<string, unknown>)[CALLBACK] = () => resolve();
+
+    if (document.getElementById(SCRIPT_ID)) return; // its callback resolves this promise
+
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
-    script.defer = true;
-    // `loading=async` is what Google asks for; without it the API logs a
-    // performance warning on every page view.
     script.src =
       `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_BROWSER_KEY)}` +
-      `&loading=async&v=quarterly`;
+      `&loading=async&callback=${CALLBACK}&v=quarterly`;
 
-    script.addEventListener("load", () => setState({ ready: true, error: null }));
     script.addEventListener("error", () =>
-      setState({
-        ready: false,
-        // The commonest cause by far, and the one nobody guesses: the key is
-        // fine and the *referrer restriction* does not include this origin.
-        error:
+      reject(
+        new Error(
+          // The commonest cause by far, and the one nobody guesses: the key is
+          // fine and the *referrer restriction* does not include this origin.
           "Google Maps failed to load. Check that this origin is listed in the key's website restrictions.",
-      }),
+        ),
+      ),
     );
 
     document.head.appendChild(script);
-  }, [state.ready]);
+  });
+
+  return loader;
+}
+
+export function useGoogleMaps(): State {
+  const [state, setState] = useState<State>(() => ({
+    ready: typeof window !== "undefined" && Boolean(window.google?.maps?.Map),
+    error: null,
+  }));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadGoogleMaps().then(
+      () => {
+        if (!cancelled) setState({ ready: true, error: null });
+      },
+      (cause: Error) => {
+        if (!cancelled) setState({ ready: false, error: cause.message });
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return state;
 }

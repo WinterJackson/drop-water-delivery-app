@@ -193,6 +193,10 @@ exports `useGoogleMaps()`, `DARK_MAP_STYLE` and `LIGHT_MAP_STYLE`.
   services and stay behind `routes/maps_routes.py` with the IP-restricted server
   key. Restrict this key to **Websites** + **Maps JavaScript API only** — an
   unrestricted browser key is billed to the project by whoever finds it.
+- **Readiness is the `callback` parameter, never the script's `load` event.**
+  `loading=async` returns a *bootstrap*; `load` fires when that arrives, while
+  `google.maps.Map` is still `undefined`. Constructing one then throws
+  "not a constructor" — on a cold cache only, so it survives a dev session.
 - Layers refetch on **`idle`**, not `bounds_changed`: the latter fires on every
   animation frame of a drag. Do not load every rider on the platform and filter
   client-side.

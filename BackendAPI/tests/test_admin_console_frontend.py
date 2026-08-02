@@ -485,6 +485,32 @@ def test_the_map_refetches_on_idle_not_on_every_frame():
     )
 
 
+def test_the_maps_loader_waits_for_the_callback_not_the_script_load_event():
+    """`loading=async` returns a *bootstrap*, not the API.
+
+    The `<script>` element's `load` event fires when that bootstrap arrives, at
+    which point `google.maps` exists as an object but `google.maps.Map` is still
+    `undefined` — so treating `load` as "ready" produces
+    `google.maps.Map is not a constructor` on the first render, and only on a
+    cold cache, which is why it survives a dev session and breaks in production.
+
+    `callback=` is the documented ready signal. This test pins it, because the
+    broken version looks completely reasonable.
+    """
+    loader = (ADMIN / "lib" / "maps" / "google-maps.ts").read_text()
+
+    assert "callback=" in loader, "the loader no longer passes a callback to the bootstrap"
+
+    if "loading=async" in loader:
+        assert "callback=" in loader, "loading=async requires callback= to know when Map exists"
+
+    code = _code_only(ADMIN / "lib" / "maps" / "google-maps.ts")
+    assert 'addEventListener("load"' not in code, (
+        "the script's load event fires before google.maps.Map is defined — "
+        "resolve on the callback instead"
+    )
+
+
 def test_a_missing_maps_key_explains_itself():
     """Every other screen works without the key, so a blank rectangle here reads
     as a broken backend rather than an unset variable."""
