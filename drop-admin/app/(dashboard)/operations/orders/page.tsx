@@ -1,8 +1,9 @@
-import { ClipboardCheck } from "lucide-react";
+import { AlarmClock, ClipboardCheck, PauseCircle, Truck, Wallet } from "lucide-react";
 import Link from "next/link";
 
-import { Card, EmptyState, ErrorState } from "@/components/ui/primitives";
+import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import { OrderCard, OrderRow, type BoardOrder } from "./OrderRow";
 
@@ -28,17 +29,39 @@ export default async function OrdersPage({
   if (q.trim()) query.set("search", q.trim());
 
   type Board = { view: string; items: BoardOrder[]; next_cursor: string | null };
+  type Counts = {
+    paused: number;
+    stale: number;
+    active: number;
+    unassigned: number;
+    oldest_stale_minutes: number | null;
+    active_value: string;
+    stale_threshold_minutes: number;
+    delivered_24h: number;
+    cancelled_24h: number;
+  };
+
   let board: Board;
   let me: AdminMe;
+  // The counts are context, not the page. A slow aggregate must not blank the
+  // board — the stuck order is still the point of opening this screen.
+  let counts: Counts | null = null;
   try {
-    [board, me] = await Promise.all([
+    [board, me, counts] = await Promise.all([
       get<Board>(`/api/admin/orders?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
+      get<Counts>("/api/admin/orders/counts").catch(() => null),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the order board" detail={message} />;
   }
+
+  // A cancellation rate is only meaningful against the day's throughput; with
+  // nothing finished today it is not "0%", it is unanswerable.
+  const finished24h = counts ? counts.delivered_24h + counts.cancelled_24h : 0;
+  const cancelRate =
+    counts && finished24h > 0 ? Math.round((counts.cancelled_24h / finished24h) * 100) : null;
 
   const canIntervene = can(me, PERMISSIONS.ordersIntervene);
   const blurb = VIEWS.find((v) => v.key === active)?.blurb;
@@ -52,6 +75,54 @@ export default async function OrdersPage({
           orders are invisible inside four hundred healthy ones.
         </p>
       </div>
+
+      {counts ? (
+        <section aria-label="Board summary">
+          <h2 className="sr-only">Board summary</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Stuck right now"
+              value={formatNumber(counts.stale)}
+              hint={
+                counts.oldest_stale_minutes === null
+                  ? `Nothing past ${counts.stale_threshold_minutes} minutes`
+                  : `Oldest waiting ${formatDuration(counts.oldest_stale_minutes)}`
+              }
+              tone={counts.stale > 0 ? "danger" : "neutral"}
+              icon={<AlarmClock className="h-4 w-4" />}
+            />
+            <Stat
+              label="Paid, nobody carrying it"
+              value={formatNumber(counts.unassigned)}
+              hint="Unassigned after payment — dispatch has not found a rider"
+              tone={counts.unassigned > 0 ? "warning" : "neutral"}
+              icon={<Truck className="h-4 w-4" />}
+            />
+            <Stat
+              label="Awaiting a decision"
+              value={formatNumber(counts.paused)}
+              hint="Bottle mismatch or floor review — blocked on an administrator"
+              tone={counts.paused > 0 ? "warning" : "neutral"}
+              icon={<PauseCircle className="h-4 w-4" />}
+            />
+            <Stat
+              label="Value in flight"
+              value={formatMoney(counts.active_value)}
+              hint={`${formatNumber(counts.active)} orders not yet delivered or cancelled`}
+              icon={<Wallet className="h-4 w-4" />}
+            />
+          </div>
+
+          <p className="mt-3 text-xs text-muted">
+            Last 24 hours: {formatNumber(counts.delivered_24h)} delivered,{" "}
+            {formatNumber(counts.cancelled_24h)} cancelled
+            {cancelRate === null
+              ? " — no orders have finished yet, so there is no rate to quote"
+              : ` (${cancelRate}% of everything that finished)`}
+            .
+          </p>
+        </section>
+      ) : null}
 
       <nav aria-label="Filter orders" className="scroll-x -mx-1 px-1">
         <ul className="flex gap-1">

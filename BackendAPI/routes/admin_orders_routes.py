@@ -177,6 +177,30 @@ async def order_counts(
             query = query.where(clause)
         return int((await db.execute(query)).scalar() or 0)
 
+    day_ago = now - timedelta(hours=24)
+
+    async def money(*where):
+        query = select(func.coalesce(func.sum(Order.total_amount), 0))
+        for clause in where:
+            query = query.where(clause)
+        return str(Decimal((await db.execute(query)).scalar() or 0).quantize(Decimal("0.01")))
+
+    # Age of the oldest thing still waiting. A count says "twelve are stuck";
+    # this says whether the worst has been stuck for nine minutes or nine hours,
+    # which is the difference between a queue and an incident.
+    oldest = (
+        await db.execute(
+            select(func.min(Order.created_at)).where(
+                Order.order_status.in_(("pending", "accepted", "ready")),
+                Order.created_at < stale_before,
+            )
+        )
+    ).scalar()
+
+    unassigned = await count(
+        Order.order_status == "unassigned", Order.deliverer_id.is_(None)
+    )
+
     return {
         "paused": await count(Order.order_status.in_(PAUSED_STATUSES)),
         "stale": await count(
@@ -184,6 +208,22 @@ async def order_counts(
             Order.created_at < stale_before,
         ),
         "active": await count(Order.order_status.notin_(TERMINAL_STATUSES)),
+        # Paid and nobody is carrying it. The one number a dispatcher acts on.
+        "unassigned": unassigned,
+        "oldest_stale_minutes": (
+            round((now - oldest).total_seconds() / 60) if oldest else None
+        ),
+        # Value in flight, so "twelve stuck orders" can be weighed against what
+        # they are worth. Money is summed in the database as Decimal and
+        # serialised as a string — never through float.
+        "active_value": await money(Order.order_status.notin_(TERMINAL_STATUSES)),
+        "stale_threshold_minutes": STALE_AFTER_MINUTES,
+        "delivered_24h": await count(
+            Order.order_status == "delivered", Order.updated_at >= day_ago
+        ),
+        "cancelled_24h": await count(
+            Order.order_status == "cancelled", Order.updated_at >= day_ago
+        ),
     }
 
 

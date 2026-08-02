@@ -99,3 +99,28 @@ export function formatDateTime(iso: string | null | undefined): string {
     hour: "2-digit", minute: "2-digit",
   });
 }
+
+/**
+ * A duration in minutes, as a human would say it.
+ *
+ * Operational screens report ages — how long an order has been stuck, how long
+ * the oldest KYC application has waited. "4,127 minutes" is technically the
+ * answer and tells nobody anything; "2d 20h" is read at a glance, which is the
+ * whole point of putting it above a queue.
+ */
+export function formatDuration(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return "—";
+  const total = Math.max(0, Math.round(minutes));
+
+  if (total < 60) return `${total}m`;
+
+  const hours = Math.floor(total / 60);
+  if (hours < 24) {
+    const rest = total % 60;
+    return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  const rest = hours % 24;
+  return rest ? `${days}d ${rest}h` : `${days}d`;
+}
