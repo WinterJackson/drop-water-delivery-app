@@ -79,8 +79,8 @@ Four processes. Each in its own terminal.
 
 ```bash
 # 1 — Redis (rate limits, the config version counter, the job queue)
-redis-server
-# already have one? check with:  redis-cli ping   → PONG
+docker start drop-redis
+# already running? check with:  docker exec drop-redis redis-cli ping   → PONG
 
 # 2 — The API
 cd "BackendAPI"
@@ -101,6 +101,44 @@ pnpm dev              # http://localhost:3000
 The worker is not optional if you intend to test **broadcast**: the send
 endpoint queues the campaign and returns; without a worker it stays `queued` for
 ever, which is the correct behaviour and looks like a bug.
+
+### Redis
+
+It runs in Docker rather than as a system package — no `sudo`, nothing installed
+on the host, and it sits alongside the containers already on this machine. It was
+created once with:
+
+```bash
+docker run -d --name drop-redis --restart unless-stopped \
+  -p 127.0.0.1:6379:6379 -v drop-redis-data:/data \
+  redis:7-alpine redis-server --appendonly yes
+```
+
+Three parts of that are deliberate:
+
+- **`127.0.0.1:6379`**, not `6379`. Publishing a bare port binds `0.0.0.0`, and
+  Redis has no password here — that would expose the job queue and every cached
+  quote to anything on the café wifi.
+- **`--appendonly yes` with a named volume.** ARQ's queue lives in Redis. Without
+  persistence, restarting the container silently discards every queued broadcast
+  and sweep.
+- **`--restart unless-stopped`**, so it comes back after a reboot and you never
+  debug this again.
+
+Day to day it is `docker start drop-redis` / `docker stop drop-redis`.
+
+**The API decides Redis is available at startup**, so start Redis *first*. Without
+it the API still runs, announcing what it has given up:
+
+```
+Redis not accessible for rate limiting, falling back to memory://
+Redis not available. WebSockets will fallback to local-only mode
+```
+
+Neither stops you opening the console. Both matter for broadcast, the job queue
+and the config-version counter that propagates a pricing change to the apps.
+A healthy start says `Redis Pub/Sub WebSocket listener initialized` and nothing
+about falling back.
 
 ### "The console can't load right now — could not reach the server"
 
