@@ -23,7 +23,7 @@ import { useEffect, useState } from "react";
  * In the Google Cloud console, on this key alone:
  *
  * - **Application restrictions → Websites**, listing exactly the console's
- *   origins (`https://your-console.vercel.app/*`, `http://localhost:3000/*`).
+ *   origins (`https://drop-admin-five.vercel.app/*`, `http://localhost:3000/*`).
  * - **API restrictions → Maps JavaScript API** only. Not Directions, not
  *   Places, not Geocoding — an unrestricted key lifted from this page would bill
  *   the project for whatever the finder likes.

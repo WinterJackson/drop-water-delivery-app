@@ -84,8 +84,8 @@ console, on this key alone:
 
   ```
   http://localhost:3000/*
-  https://<project>.vercel.app/*
-  https://<project>-*.vercel.app/*     # only if you use preview deployments
+  https://drop-admin-five.vercel.app/*
+  https://drop-admin-five-*.vercel.app/*   # only if you use preview deployments
   ```
 
 - **API restrictions → Maps JavaScript API**. Nothing else. Not Directions, not

@@ -258,7 +258,7 @@ pnpm build
   `/operations/map` runs without it.
 
 Deployed on **Vercel** with root directory `drop-admin` (this is a monorepo).
-The resulting `https://<project>.vercel.app` is the origin to list in the backend's
+The resulting `https://drop-admin-five.vercel.app` is the origin to list in the backend's
 `ALLOWED_ORIGINS`, in the Maps key restriction and in Clerk — see
 `docs/render-environment.md`.
 

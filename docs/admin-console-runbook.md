@@ -153,7 +153,7 @@ audit trail with Clerk.
 
 ```bash
 cd "BackendAPI" && source venv/bin/activate
-python scripts/admin_access.py grant-roles --domain drop.test --clerk-test
+python scripts/admin_access.py grant-roles --domain example.com --clerk-test
 ```
 
 `--clerk-test` inserts Clerk's `+clerk_test` subaddress, and that is not
@@ -165,11 +165,11 @@ That creates one row per preset, each *awaiting sign-in*:
 
 | Email | Role | Capabilities |
 |---|---|---|
-| `super-admin+clerk_test@drop.test` | `super_admin` | 26 |
-| `operations+clerk_test@drop.test` | `operations` | 16 |
-| `finance+clerk_test@drop.test` | `finance` | 9 |
-| `support+clerk_test@drop.test` | `support` | 9 |
-| `analyst+clerk_test@drop.test` | `analyst` | 2 |
+| `super-admin+clerk_test@example.com` | `super_admin` | 26 |
+| `operations+clerk_test@example.com` | `operations` | 16 |
+| `finance+clerk_test@example.com` | `finance` | 9 |
+| `support+clerk_test@example.com` | `support` | 9 |
+| `analyst+clerk_test@example.com` | `analyst` | 2 |
 
 > `+clerk_test` and `424242` work on a **development** Clerk instance only. That
 > suits this platform: a development instance's Frontend API is not domain-locked,
@@ -416,7 +416,7 @@ application restriction, and an Android-package restriction rejects a browser.
 In the Google Cloud console, on the new key:
 
 - **Application restrictions → Websites**: `http://localhost:3000/*` and
-  `https://<project>.vercel.app/*`.
+  `https://drop-admin-five.vercel.app/*`.
 - **API restrictions → Maps JavaScript API** only.
 
 Without both, a key lifted from the page's JavaScript bundle is billed to the

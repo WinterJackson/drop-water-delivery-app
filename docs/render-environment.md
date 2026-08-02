@@ -283,7 +283,7 @@ What it does cost:
 Set it to the origins that actually run in a browser:
 
 ```
-ALLOWED_ORIGINS=https://drop-admin.vercel.app
+ALLOWED_ORIGINS=https://drop-admin-five.vercel.app
 ```
 
 **The three mobile apps are unaffected** — React Native's `fetch` does not
@@ -313,13 +313,13 @@ The steps, once:
 3. Environment variables (Production): `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
    `CLERK_SECRET_KEY`, `BACKEND_BASE_URL=https://vepo-backend.onrender.com`,
    `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY`.
-4. Deploy. You get `https://<project>.vercel.app` — stable, HTTPS, yours until
+4. Deploy. You get `https://drop-admin-five.vercel.app` — stable, HTTPS, yours until
    you delete the project.
 5. Put that exact origin in `ALLOWED_ORIGINS` on Render, in the Google Maps key's
    website restrictions, and in Clerk's allowed origins.
 
 The project name decides the hostname, so name it `drop-admin` and the origin is
-`https://drop-admin.vercel.app`. If that name is taken globally you will get a
+`https://drop-admin-five.vercel.app`. If that name is taken globally you will get a
 suffix — read the real URL off the deployment before you paste it anywhere.
 
 **Preview deployments.** Vercel builds every branch and every pull request at a

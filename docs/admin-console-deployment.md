@@ -101,21 +101,33 @@ Pages cannot run any of it. This is not a preference; the app would not function
    fails.
 4. Framework preset: **Next.js** (detected). Build command, output directory and
    install command: leave every one on the default.
-5. **Project name → `drop-admin`.** This decides the URL. You get
-   `https://drop-admin.vercel.app` — unless the name is taken globally, in which
-   case Vercel appends a suffix. **Read the real URL off the first deployment**
-   before pasting it into parts 3, 4 and 5.
+5. **Project name.** This decides the URL. `drop-admin` was already taken
+   globally, so Vercel appended a suffix and the live URL is:
+
+   ```
+   https://drop-admin-five.vercel.app
+   ```
+
+   That is the value used throughout the rest of this document, in
+   `ALLOWED_ORIGINS`, in the Maps key restriction and in Clerk. Vercel's suffix is
+   stable for the life of the project — it does not change between deployments.
 6. **Environment Variables** — add all four to **Production** (tick Preview and
    Development too; harmless and saves a trip):
 
    | Name | Value |
    |---|---|
    | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` — the same value as `drop-admin/.env.local` |
-   | `CLERK_SECRET_KEY` | `sk_test_…` — Clerk dashboard → **API keys**. Your `.env.local` currently holds a **placeholder**, so copy it from Clerk, not from the file |
+   | `CLERK_SECRET_KEY` | `sk_test_…` — Clerk → **API keys**, from the application whose domain matches `CLERK_ISSUER`. See "Which Clerk application" below |
    | `BACKEND_BASE_URL` | `https://vepo-backend.onrender.com` |
    | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY` | from part 3 — add it now if you have done part 3, otherwise add it after and redeploy |
 
 7. **Deploy.**
+
+> **Only those four.** Vercel runs the console; it reads no backend variables.
+> `ADMIN_2FA_REQUIRED`, `ALLOWED_ORIGINS`, `NEONDB_URL`, `CLERK_ISSUER` and the
+> rest belong to Render alone. `CLERK_SECRET_KEY` is the one variable that is
+> genuinely needed in **both** places, because both the console's server and the
+> API talk to Clerk — and it must be the same value in both.
 
 ### The backend really is the same one
 
@@ -124,9 +136,10 @@ all three apps' production build profiles — `drop-rider-app/eas.json:23`,
 `drop-vendor-app/eas.json:23`, `drop-customer-app/eas.json:31` and `:45`. One
 Render service, one Neon database, one Clerk application. There is no second API.
 
-> The commented-out `multivendor-water-delivery-app.onrender.com` line in the
-> apps' `.env` files is a dead relic of an older service. Ignore it; nothing
-> reads it. `.env` is for local development and is overridden at build time.
+> A commented-out `multivendor-water-delivery-app.onrender.com` line used to sit
+> in the apps' `.env` files, left over from an older Render service. It has been
+> deleted — a dead URL in a config file is something somebody eventually
+> uncomments.
 
 ### Turn preview deployments off
 
@@ -134,7 +147,7 @@ Vercel → project → **Settings → Git → Ignored Build Step**, or simply de
 the production branch.
 
 Every branch and pull request otherwise builds at its own hostname
-(`drop-admin-<hash>-<scope>.vercel.app`). That hostname is in none of the three
+(`drop-admin-five-<hash>-<scope>.vercel.app`). That hostname is in none of the three
 allow-lists you are about to configure, so a preview will sign in and then fail
 to draw a map — and `ALLOWED_ORIGINS` cannot help, because `main.py` compares
 strings and supports no wildcard. An operations console gains nothing from
@@ -174,7 +187,7 @@ Still on the key's page:
 
 ```
 http://localhost:3000/*
-https://drop-admin.vercel.app/*
+https://drop-admin-five.vercel.app/*
 ```
 
 (substitute the real Vercel URL from part 2.) Include `localhost` and the map
@@ -229,6 +242,42 @@ come from the backend, not from Google.
 
 ## Part 4 — Clerk test accounts that work on the Vercel URL
 
+### Which Clerk application — read this first
+
+There are **two** Clerk applications on this account, and only one of them is the
+platform's identity provider.
+
+| | Frontend API domain | Instance id | Used by |
+|---|---|---|---|
+| **The live one** | `pet-airedale-22.clerk.accounts.dev` | `ins_2x8bpcDIKN2T7cuquYzNfDWigYW` | all three apps' `.env` **and** all three `eas.json` production profiles, the backend's `CLERK_ISSUER` / `CLERK_JWKS_URL` / `FRONTEND_CLERK_API_KEY`, and the users already in Neon |
+| The other one | `safe-marmot-72.clerk.accounts.dev` | `ins_3EVEIgEZGdiqvolZq2ZwKiYVfhS` | nothing |
+
+**Everything below happens in the `pet-airedale-22` application.** Switch to it
+with the application switcher at the top-left of the Clerk dashboard, then check
+**Configure → Domains → Primary domain** reads `pet-airedale-22.clerk.accounts.dev`
+before you touch anything.
+
+Take `CLERK_SECRET_KEY` from **that** application's **API keys** page and set it
+in three places: `BackendAPI/.env`, Render, and Vercel. Then:
+
+```bash
+cd BackendAPI && source venv/bin/activate
+python scripts/check_clerk_secret.py
+```
+
+A key from the *other* application is the worst kind of wrong, because it looks
+right: token verification keeps working (that reads `CLERK_JWKS_URL`), and only
+the *binding* fails. Every administrator signs in successfully and is then
+refused as "not an administrator", with nothing in the logs naming the cause.
+That script exists solely to catch this, and it compares instance ids rather than
+trusting the key's appearance — a secret key is an opaque string with no instance
+name in it.
+
+The `pet-airedale-22` name is an auto-generated development subdomain. It is not
+customer-visible, it appears in no UI, and it is replaced by your own domain when
+you create a **production** instance. There is nothing to fix about it.
+
+
 ### Why `424242` needs different addresses
 
 Clerk's fixed verification code is not a dashboard setting. It is a property of
@@ -236,7 +285,7 @@ Clerk's fixed verification code is not a dashboard setting. It is a property of
 `+clerk_test` subaddress:
 
 ```
-super-admin+clerk_test@drop.test
+super-admin+clerk_test@example.com
 ```
 
 For any such address Clerk **sends no email at all** and accepts the code
@@ -250,7 +299,7 @@ the account never verifies. Those five rows are deleted and replaced.
 > **Development instance only.** `+clerk_test` and `424242` do nothing on a
 > production (`pk_live_`) instance. That is fine and in fact required here: a
 > development instance's Frontend API is `<slug>.clerk.accounts.dev`, which is
-> not domain-locked, so it works from `drop-admin.vercel.app` with no DNS
+> not domain-locked, so it works from `drop-admin-five.vercel.app` with no DNS
 > records. A production instance needs a domain you own and CNAMEs, which is
 > exactly the thing you do not have yet.
 
@@ -260,17 +309,17 @@ Run against your Neon database — nothing to do, shown for reference:
 
 | Email | Role | Capabilities |
 |---|---|---|
-| `super-admin+clerk_test@drop.test` | `super_admin` | 26 |
-| `operations+clerk_test@drop.test` | `operations` | 16 |
-| `finance+clerk_test@drop.test` | `finance` | 9 |
-| `support+clerk_test@drop.test` | `support` | 9 |
-| `analyst+clerk_test@drop.test` | `analyst` | 2 |
+| `super-admin+clerk_test@example.com` | `super_admin` | 26 |
+| `operations+clerk_test@example.com` | `operations` | 16 |
+| `finance+clerk_test@example.com` | `finance` | 9 |
+| `support+clerk_test@example.com` | `support` | 9 |
+| `analyst+clerk_test@example.com` | `analyst` | 2 |
 
 Regenerate at any time with:
 
 ```bash
 cd BackendAPI && source venv/bin/activate
-python scripts/admin_access.py grant-roles --domain drop.test --clerk-test
+python scripts/admin_access.py grant-roles --domain example.com --clerk-test
 python scripts/admin_access.py list
 ```
 
@@ -313,10 +362,12 @@ python scripts/check_clerk_secret.py
 It fails loudly if the key belongs to a *different* Clerk instance than
 `CLERK_ISSUER` — the second-commonest cause of "authenticated but refused".
 
-**`ADMIN_2FA_REQUIRED=false`.** These five accounts have no second factor, and
-the default (`true`) answers every one of them with `two_factor_required` instead
-of a dashboard. You need it on Render for the Vercel console to be usable by
-them. It is a real weakening of a console that reads national IDs and approves
+**`ADMIN_2FA_REQUIRED=false` — on Render only, never on Vercel.** It is read by
+`BackendAPI/dependencies/admin_dependencies.py:81`, and the backend is the only
+thing that reads it. Vercel runs the console, which does not enforce this check
+at all; setting it there does nothing but mislead the next person. The five
+accounts have no second factor, and the default (`true`) answers every one of
+them with `two_factor_required` instead of a dashboard. It is a real weakening of a console that reads national IDs and approves
 payouts — so set it while testing and **turn it back on before a real
 administrator exists**, at which point that person enables 2FA on their own Clerk
 account and signs in fresh (the check reads a session claim, so it needs a new
@@ -354,15 +405,15 @@ different, confusing symptom in each case.
 
 | Where | Value | Symptom if missing |
 |---|---|---|
-| **Render** → `ALLOWED_ORIGINS` | `https://drop-admin.vercel.app` | Nothing today (the console's browser never calls FastAPI — the Next server does). It is fail-closed insurance for the first client-side call anyone adds |
-| **Google Cloud** → key → Websites | `https://drop-admin.vercel.app/*` | `RefererNotAllowedMapError`; the map panel appears, the rest of the page is fine |
-| **Clerk** → Configure → Domains / allowed origins | `https://drop-admin.vercel.app` | Usually nothing on a development instance; check here first if sign-in redirects in a loop |
+| **Render** → `ALLOWED_ORIGINS` | `https://drop-admin-five.vercel.app` | Nothing today (the console's browser never calls FastAPI — the Next server does). It is fail-closed insurance for the first client-side call anyone adds |
+| **Google Cloud** → key → Websites | `https://drop-admin-five.vercel.app/*` | `RefererNotAllowedMapError`; the map panel appears, the rest of the page is fine |
+| **Clerk** → Configure → Domains / allowed origins | `https://drop-admin-five.vercel.app` | Usually nothing on a development instance; check here first if sign-in redirects in a loop |
 
 Replace the whole `ALLOWED_ORIGINS` value; do not append to `*`, which would
 leave the wildcard branch active:
 
 ```
-ALLOWED_ORIGINS=https://drop-admin.vercel.app,http://localhost:3000
+ALLOWED_ORIGINS=https://drop-admin-five.vercel.app,http://localhost:3000
 ```
 
 Comma-separated, no spaces, no trailing slash, no wildcards — `main.py` splits on
