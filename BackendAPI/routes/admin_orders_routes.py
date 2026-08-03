@@ -27,6 +27,7 @@ from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_DISPUTES_READ,
     PERM_DISPUTES_RESOLVE,
+    PERM_GEO_VIEW,
     PERM_ORDERS_INTERVENE,
     PERM_ORDERS_READ,
 )
@@ -35,7 +36,7 @@ from models.deliverer_model import Deliverer
 from models.order_model import Order
 from models.user_model import User
 from models.vendor_model import Vendor
-from services import admin_service
+from services import admin_delivery_replay_service, admin_service
 from services.notification_service import create_notification
 from utils.s3_utils import generate_presigned_url
 
@@ -225,6 +226,20 @@ async def order_counts(
             Order.order_status == "cancelled", Order.updated_at >= day_ago
         ),
     }
+
+
+# Declared before `/orders/{order_id}` on purpose: FastAPI matches in
+# declaration order, and "replayable" would otherwise be parsed as an order id
+# and rejected as a malformed UUID rather than reaching this handler.
+@router.get("/orders/replayable", summary="Orders with a recorded path")
+@limiter.limit("60/minute")
+async def replayable_orders(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_GEO_VIEW)),
+):
+    return {"items": await admin_delivery_replay_service.tracked_orders(db, limit=limit)}
 
 
 @router.get("/orders/{order_id}", summary="One order, in full")
@@ -529,3 +544,37 @@ async def resolve_dispute(
 
     await db.commit()
     return {"id": str(ticket.id), "status": body.outcome}
+
+
+# ── Delivery replay ───────────────────────────────────────────────────────
+#
+# `Order_Tracking_Logs` is written on every rider location ping and was read by
+# nothing. "The rider says they delivered it, the customer says they didn't" was
+# unanswerable while the platform held the evidence.
+#
+# Gated on `geo.view` rather than `orders.read`. A breadcrumb trail is a person's
+# precise movements, and `geo.view` exists precisely because that is its own
+# decision — the fact that these coordinates are historical rather than live
+# makes them no less identifying.
+
+
+@router.get("/orders/{order_id}/replay", summary="Replay one delivery")
+@limiter.limit("60/minute")
+async def replay_delivery(
+    request: Request,
+    order_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_GEO_VIEW)),
+):
+    """The rider's recorded path for one order, and what it does and does not show.
+
+    `reached_destination` is deliberately three-valued. `None` means the data
+    cannot answer — no delivery coordinates, or no pings at all, which happens
+    routinely when the rider app lacks permission, signal or battery. Rendering
+    that as `false` would turn an absence of evidence into evidence of absence
+    on the one screen used to decide whether somebody is stealing.
+    """
+    result = await admin_delivery_replay_service.replay(db, order_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No such order.")
+    return result

@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Package,
   PackageSearch,
+  Route,
   ScrollText,
   Settings,
   SlidersHorizontal,
@@ -163,6 +164,15 @@ export const NAV_SECTIONS: NavSection[] = [
         mobilePriority: 10,
         badge: "disputes",
         blurb: "Deliveries where the bottle count did not agree.",
+      },
+      {
+        href: "/operations/replay",
+        label: "Delivery replay",
+        short: "Replay",
+        icon: Route,
+        permission: PERMISSIONS.geoView,
+        mobilePriority: 17,
+        blurb: "Where the rider actually went, when the two accounts disagree.",
       },
       {
         href: "/operations/reviews",

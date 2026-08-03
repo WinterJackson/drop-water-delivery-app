@@ -178,4 +178,13 @@ Ordered by value per unit of work.
    its callback is indistinguishable from one that failed, and a second reversal
    pays the customer twice out of the platform's own float. Also closes the
    "no cash-float exposure" gap in §C.
-8. **Delivery replay from `Order_Tracking_Logs`.**
+8. ~~**Delivery replay from `Order_Tracking_Logs`.**~~ **Done.**
+   `services/admin_delivery_replay_service.py` and `/operations/replay`.
+   `closest_approach_m` is the answer to the dispute: a rider whose nearest
+   recorded point was four kilometres away did not deliver that order.
+   `reached_destination` is deliberately three-valued — `None` when the order has
+   no coordinates or nothing was ever recorded, because rendering an absence of
+   evidence as evidence of absence on the screen used to decide whether somebody
+   is stealing would be the worst bug the module could have. Gated on `geo.view`,
+   not `orders.read`: a breadcrumb trail is a person's precise movements, and
+   historical coordinates are no less identifying than live ones.
