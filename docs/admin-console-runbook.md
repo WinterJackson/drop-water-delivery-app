@@ -579,3 +579,90 @@ Worth knowing before you conclude a screen is broken:
 - **6 orders in flight**, which is what the order board and the map render.
 
 Empty screens here are honest, not broken.
+
+---
+
+## 10. Settling a refund by hand
+
+The console does not send refunds. It records that somebody else did. The reason
+is [ADR-0001](./decisions/0001-no-automated-refund-retry.md): a reversal that
+succeeded but lost its callback is indistinguishable from one that failed, and
+re-sending pays the customer twice out of the platform's own float.
+
+That decision hands the work to a human, so this is the human's procedure. It
+only protects the customer if somebody actually runs it.
+
+### Who
+
+`finance.refund_approve` — held by the **finance** and **super admin** presets.
+Operations and support can see the queue on `/finance/settlement` but cannot mark
+anything settled, which is correct: seeing that a customer is owed money and
+being allowed to close the record are different permissions.
+
+### When
+
+Check `/finance/settlement` at least daily. Two figures need action:
+
+| Figure | Meaning | Action |
+|---|---|---|
+| **Failed** | The reversal was refused, or no original receipt was found | Always needs a person. Start here |
+| **Sent, unconfirmed** over 6h | Safaricom accepted it and the callback never arrived | Verify before assuming either outcome |
+
+"Owed to customers" is the total of both plus anything still queued. If it is
+rising day on day, the sweep is failing rather than lagging — check that the ARQ
+worker process is actually running before working the queue by hand.
+
+### The procedure
+
+1. **Open the order.** The row links to it. Note the amount and the customer.
+
+2. **Find the original payment in the M-Pesa portal.** Search by the customer's
+   number and the amount around the order's creation time. You are looking for
+   the receipt the reversal was issued against.
+
+3. **Establish what actually happened.** This is the step the platform cannot do
+   for you:
+   - *A reversal already settled against that receipt* → the money went back. The
+     callback was lost, nothing more. Go to step 5.
+   - *No reversal, and the original payment is there* → the customer is genuinely
+     owed. Go to step 4.
+   - *No original payment at all* → the order was never paid for. Nothing is
+     owed; record that in the reason and go to step 5.
+
+4. **Reverse it in the portal.** Not from the console — there is no control here
+   that will do it. Record the M-Pesa reference the portal gives you.
+
+5. **Mark it settled**, with a reason that will still make sense to somebody
+   reading the audit log in a year. Include the reference:
+
+   > `Reversed manually in the portal, ref QK4H8T2LMN`
+   > `Callback lost — reversal already settled 03/08, ref QK4H8T2LMN`
+   > `No original payment found; order was never charged`
+
+   The reason is mandatory and at least 8 characters. It is stored on the audit
+   row and the row disappears from the screen once submitted, so "done" is not an
+   acceptable entry — it is the only record that will exist.
+
+### What not to do
+
+**Do not mark a row settled to clear the screen.** The queue is small on purpose.
+A settled row is indistinguishable from a genuinely refunded one afterwards, and
+the customer has no way to tell you they never got the money except by leaving.
+
+**Do not reverse twice because the first reference is hard to find.** If step 3
+is ambiguous, leave the row. An unsettled row costs a customer a wait; a double
+reversal costs the platform the money with no recovery.
+
+**Do not adjust the customer's wallet instead.** `finance.adjust` credits an
+in-platform balance, which is not the same thing as returning their money and is
+not what they asked for. It also requires a capability that no preset but super
+admin holds, for exactly that reason.
+
+### If this becomes routine
+
+The procedure exists because the platform cannot query whether a reversal
+settled. That is a missing integration, not a law of nature — Safaricom's
+Transaction Status API answers it, and the platform already uses the equivalent
+call for incoming payments. ADR-0001 records what implementing it would change.
+If step 3 is consuming real time every day, that integration is the fix, not a
+retry button.

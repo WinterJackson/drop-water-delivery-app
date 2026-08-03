@@ -93,6 +93,12 @@ Broadcast · Pricing · Deployment settings.
 
 ## ⚖️ Decisions worth knowing before you change something
 
+Four of these are written up as full decision records in
+[docs/decisions/](../docs/decisions/README.md), with what each one costs, what
+was rejected, and what would have to change for it to be revisited. They are the
+ones where the obvious improvement is the harmful one — read the record before
+undoing any of them.
+
 **A rate is never quoted below its minimum sample.** A rider with one delivery
 and one cancellation has a 100% cancellation rate and means nothing. Below the
 threshold the console writes "under 5 orders", not a number it would have to

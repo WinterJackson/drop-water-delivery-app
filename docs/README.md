@@ -13,10 +13,29 @@ get something running, the per-surface READMEs are shorter:
 | If you want to… | Read |
 |---|---|
 | Understand the whole platform | [../README.md](../README.md) |
+| Know why a surprising choice was made | [decisions/](./decisions/README.md) |
 | Deploy or redeploy the admin console | [admin-console-deployment.md](./admin-console-deployment.md) |
 | Operate the console day to day | [admin-console-runbook.md](./admin-console-runbook.md) |
 | Set an environment variable correctly | [render-environment.md](./render-environment.md) |
 | Know what is still missing | [platform-audit.md](./platform-audit.md) |
+
+---
+
+## Decisions
+
+### [decisions/](./decisions/README.md)
+
+Architecture decision records for the choices that are counter-intuitive,
+expensive to reverse, or likely to be undone by somebody acting reasonably. Each
+one states what it costs, what was rejected, and what would have to change for it
+to be revisited.
+
+| # | Decision |
+|---|---|
+| [0001](./decisions/0001-no-automated-refund-retry.md) | The console never re-sends a refund |
+| [0002](./decisions/0002-three-valued-delivery-verdict.md) | A delivery verdict has three values, not two |
+| [0003](./decisions/0003-review-moderation-is-structurally-enforced.md) | Moderation is enforced by a test that reads the source |
+| [0004](./decisions/0004-delivery-replay-gated-on-geo-view.md) | Replay needs `geo.view`, not `orders.read` |
 
 ---
 

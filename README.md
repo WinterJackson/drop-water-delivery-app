@@ -343,6 +343,7 @@ fails the build.
 | Document | What it covers |
 |---|---|
 | [docs/README.md](./docs/README.md) | Index of everything below |
+| [docs/decisions/](./docs/decisions/README.md) | Decision records — why the surprising choices were made, and what would change them |
 | [docs/admin-dashboard-architecture.md](./docs/admin-dashboard-architecture.md) | Why the console is built the way it is, decision by decision |
 | [docs/admin-console-deployment.md](./docs/admin-console-deployment.md) | Vercel, Google Cloud, Clerk, allow-lists — end to end |
 | [docs/admin-console-runbook.md](./docs/admin-console-runbook.md) | Running it, and checking every screen as every role |
