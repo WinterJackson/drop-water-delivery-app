@@ -1,101 +1,219 @@
 # Drop Rider App 🛵
 
-> The delivery agent application for the Drop Multivendor Water Delivery Platform. Built with Expo, React Native, and Tailwind CSS (NativeWind).
+> The delivery app for the Drop platform. Riders find work, run deliveries,
+> reconcile the empties they are carrying, and see exactly what they earned.
+> It serves independent gig riders and stores' own in-house fleets alike.
 
-## 📱 Overview
+---
 
-The Drop Rider App empowers delivery personnel to find work, fulfill water orders efficiently, manage empty bottles, and track their daily earnings. It serves both independent gig riders and in-house fleet riders.
+## 📱 What it does
 
-### Core Features
-- **Trip Radar**: A real-time dispatch screen showing nearby available orders with expected payouts and distances.
-- **Active Delivery**: A focused, distraction-free screen guiding the rider through the pickup and drop-off process using integrated mapping.
-- **Live Tracking**: Broadcasts the rider's GPS location via WebSockets to the customer during active deliveries.
-- **Proof of Delivery**: Mandatory photo capture to verify successful drop-offs or to document bottle rejections.
-- **Empty Bottle Management**: A structured workflow for picking up empty bottles from customers and reconciling them with vendors.
-- **Earnings Dashboard**: A transparent ledger of all completed trips, base pay, tips, and deductions.
+| Area | What it covers |
+|---|---|
+| **Onboarding** | Sign-up and KYC — identity documents, vehicle, and a wait for an administrator's decision |
+| **Trip Radar** | Nearby available orders in real time, with the payout and distance up front |
+| **Active delivery** | One focused screen: navigate, collect, deliver, prove |
+| **Live tracking** | The rider's position, streamed to the waiting customer |
+| **Bottles** | What empties they are holding, and for which store |
+| **Earnings** | Every trip, base pay, surcharges, deductions and the withdrawable balance |
+| **Pending sync** | Anything done offline that has not reached the server yet |
+| **Support** | Raise a ticket that lands in the operations console — reachable **before** verification |
 
-## 🛠️ Tech Stack
+---
 
-- **Framework**: React Native with [Expo SDK 54](https://expo.dev/)
-- **Routing**: [Expo Router](https://docs.expo.dev/router/introduction/) (File-based routing)
-- **Styling**: [NativeWind v4](https://www.nativewind.dev/) (Tailwind CSS)
-- **State Management**: [Zustand](https://zustand-demo.pmnd.rs/) & [TanStack Query v5](https://tanstack.com/query/latest)
-- **Authentication**: [Clerk](https://clerk.com/) (Email, Phone OTP, OAuth)
-- **Real-time**: `socket.io-client` for WebSockets (Order Updates & GPS Broadcasting)
-- **Background Location**: `expo-location` (Foreground tracking via WebSocket, background tracking via REST API)
-- **Maps & Routing**: `react-native-maps`
+## 🚧 The verification gate fails closed
 
-## 🚀 Getting Started
+A rider cannot accept a delivery until an administrator has approved their KYC.
 
-### Prerequisites
-- Node.js (v20+)
-- pnpm
-- Expo CLI (`npm i -g expo-cli`)
-- iOS Simulator or Android Emulator
+`app/(screens)/_layout.tsx` blocks unless `kyc_status === "approved"` is
+**positively confirmed**. It used to skip its own check whenever the status query
+errored, so turning wifi off at the right moment granted access to Trip Radar.
+The backend enforces this independently through `get_verified_rider`, but the
+client must not lean on that to behave.
 
-### Installation
+KYC status has exactly one reader: `hooks/queries/useKycStatus`. Three screens
+used to fetch it separately while `VerificationWall` kept its own copy in
+`useState` — on approval the wall pushed forward while the layout's cache pushed
+back, a redirect loop that only broke when the `staleTime` expired.
 
-1. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+**Support is deliberately let through the gate.** A rider on day four of a "less
+than 24 hours" review is exactly the person who needs to ask why, and the wall
+itself links to it.
 
-2. Configure Environment Variables:
-   Create a `.env` file in the root of this app and add:
-   ```env
-   EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-   EXPO_PUBLIC_BACKEND_BASE_URL=http://<YOUR_IP>:8000
+---
 
-   # Native Maps SDK keys — build-time only, injected by app.config.js.
-   # Deliberately not EXPO_PUBLIC_*: they belong in AndroidManifest.xml /
-   # Info.plist, not the JS bundle. One key per platform, because a Google API
-   # key can carry only one application restriction.
-   GOOGLE_MAPS_ANDROID_API_KEY=...   # restricted to com.drop.rider + SHA-1
-   GOOGLE_MAPS_IOS_API_KEY=...       # restricted to bundle id com.drop.rider
-   ```
+## 📡 Location tracking
 
-3. Run the app:
-   ```bash
-   pnpm start
-   ```
+`services/locationTracking.ts` owns this. **Do not add another
+`watchPositionAsync` loop.**
 
-## 📂 Project Structure
+* The **durable** path is the `expo-task-manager` task → SQLite buffer → `POST /api/rider/location-ping`. The WebSocket is a low-latency optimisation on top of it, never the only writer: a `sendMessage` with no socket used to be swallowed by a `try/catch` that only logged, so every fix produced in patchy coverage was lost.
+* Reporting **starts at `picked_up` and stops at `delivered`/`cancelled`**. Tracking from acceptance spends battery on the leg to the store and shows the rider's position to a customer whose order has not been collected.
+* `Accuracy.Balanced` at 25 m. `High` at 5 s / 10 m holds the GPS radio open, and a delivery dot on a city map cannot show the difference.
+* Background permission is asked for at **first pickup, after an explanation** — never at launch. Android 11+ will not offer "Allow all the time" in the same prompt as the foreground one, and an unexplained prompt is the main cause of a permanent denial. A refusal does not block the delivery; it degrades to foreground-only tracking and says so.
+
+Those pings are also the platform's record of where a delivery went. When a
+customer says an order never arrived, the operations console replays the path and
+measures the closest the rider came to the door — which is why a gap in the record
+is reported as a gap rather than quietly averaged over, and why no tracking data
+produces *no verdict* rather than an accusation.
+
+---
+
+## 📴 Nothing done offline is deleted silently
+
+`services/offlineQueue.ts` retries on four triggers with exponential backoff. An
+action the server refuses **on the merits** is marked `needs_attention` and shown
+on the **Pending Sync** screen with the server's own reason — it is not dropped.
+For a `delivered` action, dropping it destroys the rider's proof of work and
+their pay. Only an explicit tap in that screen discards one.
+
+Delivery completion is therefore retried, which is why the backend's bottle
+accrual is idempotent at the database level rather than in application code.
+
+---
+
+## 🛠️ Tech stack
+
+React Native · [Expo SDK 54](https://expo.dev/) · React 19 ·
+[Expo Router](https://docs.expo.dev/router/introduction/) ·
+[NativeWind v4](https://www.nativewind.dev/) ·
+[TanStack Query v5](https://tanstack.com/query/latest) ·
+[Zustand](https://zustand-demo.pmnd.rs/) · [Clerk](https://clerk.com/) ·
+`socket.io-client` · `expo-location` + `expo-task-manager` · `react-native-maps` ·
+`expo-image-manipulator`
+
+---
+
+## 🚀 Getting started
+
+```bash
+pnpm install
+cp .env.example .env      # fill in
+pnpm start                # a = Android, i = iOS
+npx tsc --noEmit          # before every push
+```
+
+### `.env`
+
+```env
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+EXPO_PUBLIC_BACKEND_BASE_URL="http://10.0.2.2:8000"
+
+# Native Maps SDK keys — build-time only, injected by app.config.js into the
+# manifest and plist. Deliberately NOT EXPO_PUBLIC_*: those are inlined into the
+# JS bundle and readable by anyone who unzips the APK. One key per platform,
+# because a Google key carries exactly one application restriction.
+GOOGLE_MAPS_ANDROID_API_KEY=...   # restricted to com.drop.rider + SHA-1
+GOOGLE_MAPS_IOS_API_KEY=...       # restricted to bundle id com.drop.rider
+```
+
+`10.0.2.2` is the Android emulator's alias for the host machine. On a physical
+device use your computer's LAN address — `localhost` reaches the handset.
+
+> **Never commit a Google key.** `app.json` carries none; `app.config.js` reads
+> the two above from the environment, with EAS secrets in CI. See
+> [docs/security/google-api-key-rotation.md](../docs/security/google-api-key-rotation.md).
+
+---
+
+## 📂 Structure
 
 ```
 drop-rider-app/
 ├── app/
-│   ├── (Auth)/           # Authentication and KYC Onboarding
-│   ├── (screens)/        # Core app screens (Radar, Active, Earnings)
-│   └── _layout.tsx       # Root layout
+│   ├── (Auth)/           # Sign-in and KYC onboarding
+│   ├── (screens)/        # Radar, ActiveDelivery, Bottles, Earnings, PendingSync, Support
+│   └── _layout.tsx       # Root layout, session cleanup
 ├── API/
-│   └── routes/           # Strictly typed Rider API definitions
+│   ├── useApiClient.ts   # The only way React code talks to the backend
+│   ├── apiFetch.ts       # For the store, the offline queue, the location task
+│   └── routes/           # Typed endpoint definitions
 ├── components/
-│   ├── delivery/         # Map overlays, swipe-to-complete buttons
-│   ├── radar/            # Trip radar cards
-│   └── ui/               # Base UI elements
-├── constants/            # Theme, images, icons
-├── context/              # Context providers (LocationContext)
-├── hooks/
-│   └── queries/          # TanStack Query data fetching
-└── lib/                  # Utilities (Toast, Location formatting)
+│   ├── delivery/         # Map overlays, swipe-to-complete
+│   ├── radar/            # Trip cards
+│   └── ui/
+├── services/
+│   ├── locationTracking.ts
+│   └── offlineQueue.ts
+├── constants/  context/  hooks/queries/  lib/
 ```
 
-## 🔄 Business Logic Details
+`ActiveDelivery.tsx` is the most complex screen; keep its logic in smaller
+components under `components/delivery/`.
 
-### Dispatch & Trip Radar
-When an order is created, if a vendor doesn't have an in-house rider available, it hits the "Trip Radar". 
-1. Backend finds all online gig riders within the search radius (2km for retail).
-2. Broadcasts the order via WebSockets to those riders.
-3. The first rider to swipe "Accept" claims the order (handled via atomic database row-locking on the backend to prevent race conditions).
+---
 
-### Delivery Workflow & Bottle Rejection
-1. Rider navigates to Vendor, taps "Confirm Pickup".
-2. Rider navigates to Customer.
-3. If the customer is returning empty bottles (a "Quick Swap" order), the rider must verify the bottle count.
-4. **Dispute**: If the customer promised 4 bottles but only has 2, the rider flags a "Bottle Mismatch". They take a photo of the 2 bottles as proof. The order goes into `pending_review` and a background worker handles the financial adjustment.
-5. If everything is correct, the rider takes a Proof of Delivery photo and swipes to complete. Status shifts to `delivered`.
+## 🔄 How the work actually flows
 
-### Background GPS Tracking
-During an active delivery, the app watches the device's location.
-- **WebSocket (Primary)**: Broadcasts `{ lat, lng, speed, heading }` to `/ws/rider/{rider_id}` every few seconds for smooth customer viewing.
-- **REST Fallback**: If the app is backgrounded, a background task periodically posts to `POST /api/rider/location`.
+### Getting an order
+
+1. A paid order the store cannot cover with its own rider hits the Trip Radar.
+2. The backend finds online riders within the search radius — 2 km for retail, 15 km for wholesale — and broadcasts over WebSocket.
+3. The first rider to swipe **Accept** claims it. The race is settled by `SELECT ... FOR UPDATE` on the server, not by who rendered first. A rider who loses gets a **409** and must be told gracefully — not shown a stack trace.
+
+Registering with a store is a separate thing: the rider asks, the store approves,
+and from then on that store's orders are offered to them **before** the radar
+goes out at all.
+
+### Running it
+
+1. En route to the store — order is `accepted`, `preparing` or `ready`.
+2. At the store, tap **Confirm pickup** → `picked_up`. Location reporting starts here.
+3. En route to the customer.
+4. At the customer: verify the empties, take the proof photo, swipe to complete → `delivered`.
+
+### When the count is short
+
+If the customer promised four empties and has two, the rider triggers the bottle
+rejection flow: capture evidence, `POST /api/rider/bottle-rejection`, and the
+order moves to `pending_review`. The store sees the reason and the photos, and a
+background sweep auto-resolves it if nobody adjudicates.
+
+> **A photo is mandatory whenever `emptiesReceived < computedEmptiesExpected`.**
+> That check is never bypassed in a `catch` block — a failed upload is a failed
+> completion, not a reason to complete without evidence.
+
+### Bottles the rider is carrying
+
+Empties collected on a quick-swap belong to the **store**, not the rider. They
+accrue as a debt the moment the delivery completes and clear when the store
+confirms receipt. The app shows what is outstanding and to whom — something a
+rider previously had no way to see at all.
+
+Because tier-2 radar dispatch offers orders to any nearby rider, a rider can
+legitimately deliver for a store they never registered with, and the ledger
+records that too. It used to be skipped, and those bottles left with no record.
+
+### Earnings
+
+Every trip lists base pay, surcharges and deductions. What is **withdrawable** is
+the balance minus `committed_cash_float` — money already promised to open cash
+orders currently being carried. That is why "Insufficient balance: KSH 4,000 is
+committed as float" is a real and correct answer, and why it has to reach the
+rider in those words rather than as `402`.
+
+---
+
+## 📸 Photos
+
+`expo-image-picker` to capture, `expo-image-manipulator` to compress hard (width
+800, quality 0.7, WebP), then upload to `POST /api/rider/upload_proof`. The
+response is an S3 **key**, which is what gets attached to the completion call —
+never a URL. Responses presign it for 15 minutes on the way out.
+
+---
+
+## 📜 Conventions
+
+* **Every backend call goes through the API client.** `useApiRequest()` in React; `apiFetch` in the Zustand store, the offline queue and the location task. Raw `fetch` is banned and `BackendAPI/tests/test_rider_api_client.py` fails the build if one reappears — it has no timeout, no 401 handling and no error normalisation. Nineteen hooks used to throw the HTTP status at the rider.
+* **Surface the backend's message** with `errorMessage(err, fallback)`. Branch on `err instanceof ApiError && err.status`, never on `err.response` — an `ApiError` has none.
+* **`retry` is `retryTransientOnly`.** A 4xx is a refusal, not a dropped packet, and retrying a 401 fires the sign-out handler once per attempt.
+* **Optimistic status transitions** use `onMutate` for an instant feel, and always handle `onError` to roll the cache back.
+* **Never call a Google web service from the app.** The embedded keys are SDK-restricted and cannot; a key that could would be extractable from the binary. Use the backend proxy — see [docs/maps-architecture.md](../docs/maps-architecture.md).
+* **Never read the Maps key back at runtime.** Expo scrubs it from the public manifest, so `Constants.expoConfig?...googleMaps` is always `undefined`.
+* **`user_type=rider` on every support call.** One Clerk identity can be a rider *and* a customer; the account being acted on is stated, never guessed.
+* **Dark mode everywhere**, and `SafeAreaView` from `react-native-safe-area-context` so nothing clips on a notched device.
+* **Session teardown** is mounted once in the root layout and wipes local state whenever Clerk's session ends — including the ends nobody taps, like a 401 or a revoked session. `clearPushToken()` must run *before* `signOut()`, or the device keeps receiving the previous account's notifications.
+
+More detail, stated as rules: [CLAUDE.md](./CLAUDE.md).

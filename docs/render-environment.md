@@ -544,3 +544,29 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 `CRON_SECRET` can be rotated freely — update Render and the cron-job.org headers.
 `MPESA_CALLBACK_SECRET` cannot: it lives in URLs registered with Safaricom, so
 rotating it means updating the portal in the same window or callbacks 403.
+
+## `ALLOW_STAFF_COLUMN_DROP` — a deploy-time gate, not a runtime setting
+
+Not a variable Render should carry. It exists so that a routine
+`alembic upgrade head` cannot reach `e6b2c8d40f17` and drop
+`Vendor.staff_clerk_id` / `staff_push_token` out from under whatever is
+deployed — which turns every vendor request into `UndefinedColumn`, and is a
+problem in the running code rather than in the data, so no assertion in the
+migration can detect it.
+
+Set it **only** for the single command that applies that revision, and only after
+step 3 of the sequence in the migration's own docstring has actually happened:
+
+```bash
+ALLOW_STAFF_COLUMN_DROP=true alembic upgrade head
+```
+
+Until then, routine deploys should run:
+
+```bash
+alembic upgrade a9f4b2c71d63
+```
+
+which is the last ungated revision. Leaving the variable set permanently on
+Render defeats the guard entirely — the next deploy would apply the drop
+unattended.

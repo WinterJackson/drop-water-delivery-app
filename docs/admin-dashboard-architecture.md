@@ -862,3 +862,228 @@ already on each row.
 
 It still draws nothing, and that part is correct: a cell needs **two** orders
 before it appears, because one order in a cell is a customer's front door.
+
+---
+
+## 15. Closing the audit: seven screens over data nobody could see
+
+[platform-audit.md](./platform-audit.md) found seven domains the platform wrote
+to and never read back, and eight console pages that were a table with a search
+box. This section covers the work that closed both.
+
+The common shape: the data already existed. `bottle_ledger_entries` recorded
+every empty; `Order_Tracking_Logs` recorded every rider ping; `payouts` recorded
+every disbursement including the failed ones. What was missing was any query that
+would tell a human whether something had gone wrong.
+
+### 15.1 The bottle float — `/operations/bottles`
+
+A 20L bottle carries a refundable deposit the platform has already collected from
+the customer. Bottles a rider never returns are money the platform owes and
+cannot recover, and nobody could see the total.
+
+Three decisions worth recording.
+
+**Value comes from `bottle_deposit_by_capacity`, not a constant.** A float priced
+at a number this module invented is a number nobody can reconcile against a
+receipt. It reads the same setting the customer was charged.
+
+**Every total nets per (rider, vendor, capacity) before summing.** A rider can
+hold store A's bottles while store B carries a credit against them from an
+over-recorded return. Summing the raw signed column platform-wide lets B's
+negative cancel A's positive and reports *less* float than exists. The `HAVING`
+clause keeps only the positive side of each pair.
+
+**`drift()` checks an invariant that was declared and never verified.**
+`bottle_ledger_service` states it in its own module docstring:
+
+```
+SUM(bottle_ledger_entries.quantity) == VendorRiderRegistry.pending_{n}L_empties
+```
+
+An invariant nobody checks is a comment. The check is on a screen rather than in
+a test because the ways it breaks — a hand-edited row, a half-applied migration,
+a crash between the ledger write and the counter — all happen in production and
+never in CI. Repair rewrites the counter *from* the ledger and never the reverse,
+because the ledger is append-only and attributed while the counter is a
+denormalisation with neither property.
+
+The repair is a button, not something the read path does quietly. Drift means
+something wrote a counter without a ledger row, and that is a bug worth finding
+rather than a nuisance worth papering over.
+
+Hand corrections go through the ledger too — signed, attributed, with a mandatory
+note that travels into both apps' history. Gated on `finance.adjust`, the same
+capability as crediting a wallet, because a written-off deposit is money moved by
+assertion rather than by an event.
+
+### 15.2 Review moderation — `/operations/reviews`
+
+`reviews` had no moderation state and no admin reader at all. A review naming a
+rider's home address could only be removed with a `DELETE`, which loses that the
+review existed, releases `uq_customer_order_target_review` so the customer can
+leave another, and strands the target's counters on a row that is gone.
+
+Migration `a9f4b2c71d63` adds `hidden_at` / `hidden_by` / `hidden_reason`, and
+**five read paths across four modules** now filter on it. That number only goes
+up, so the guard is structural: a test walks every `select` over `reviews` with
+`ast` and fails the build on one that does not filter — verified by removing a
+filter and watching it catch.
+
+**Hiding is not enough on its own.** Taking a one-star review out of the list and
+leaving it in the average is theatre: the store still sits at 2.1 for a review
+nobody can read. `set_hidden` rebuilds the target's counters from the visible
+rows in the same transaction. That rebuild is the one sanctioned `SUM()` over
+`reviews` — a single indexed aggregate for one target on a rare admin action, not
+the per-write recomputation the incremental path exists to avoid.
+
+A resubmit of a hidden review is a **409**, not an edit. Folding its rating back
+in would be a working way round moderation.
+
+**Nothing here is user-reported** — no app has a report button — so the default
+view is a heuristic and the page says so in those words: comments that look like
+they carry a phone number or an email, and low ratings that came with something
+written. A heuristic presented as a queue of confirmed problems is how a
+moderator learns to clear a screen without reading it.
+
+### 15.3 Settlement — `/finance/settlement`
+
+Three things that move money without a person pressing anything.
+
+**Refunds.** `refund_service` sweeps cancelled paid orders into an M-Pesa
+reversal and leaves them `refunded` or `refund_failed`, and nothing surfaced
+either. A failed refund is somebody who paid for water they never got and never
+got their money back; the only trace was a column on a row nobody queried. Those
+customers do not write in — they leave. `refund_processing` is the quieter one:
+the reversal was accepted and the callback never arrived, which is
+indistinguishable from success except by age.
+
+**Payouts.** Two invariants `payout_service` declares in prose and nothing
+checked. A payout is debited from the wallet *before* the B2C call so the money
+cannot be spent twice in flight, which makes returning it on failure mandatory —
+a failed payout with no matching refund transaction is money the platform took
+and did not give back. The check is a correlated `EXISTS` on
+`reference_id = payout.id`. The second is a `completed` disbursement carrying no
+M-Pesa receipt: recorded as paid with nothing to evidence it.
+
+**Cash float.** `committed_cash_float` gates every withdrawal and is computed one
+provider at a time, so the platform's total cash-at-risk had never been visible.
+Same arithmetic, aggregated, with negative rider balances called what they are:
+cash collected and not remitted.
+
+**There is no retry, and two tests enforce it** — one on the routes, one on the
+page's own labels. A reversal that succeeded but lost its callback looks exactly
+like one that failed, and sending a second pays the customer twice out of the
+platform's own float with no way to claw it back. The administrator settles it in
+the M-Pesa portal and records that here, which is the same reasoning as the
+webhook reconciliation screen.
+
+The payout destination is encrypted at rest and never enters the payload. The
+screen carries *whether* a receipt exists, not where the money went.
+
+### 15.4 Delivery replay — `/operations/replay`
+
+`Order_Tracking_Logs` was written on every location ping and read by nothing, so
+"the rider says they delivered it, the customer says they didn't" was
+unanswerable while the platform held the evidence.
+
+`closest_approach_m` is the answer: the minimum distance between any recorded
+ping and the order's delivery coordinates. A rider whose nearest approach was
+four kilometres did not deliver that order.
+
+**`reached_destination` is three-valued, and the `None` is the point of the whole
+module.** Tracking depends on the rider app having permission, signal and
+battery, so no path at all is routine and says nothing about where anyone went.
+Collapsing that into `false` would turn an absence of evidence into evidence of
+absence on the one screen used to decide whether somebody is stealing. The
+console prints *why* there is no verdict and declines to draw one.
+`largest_gap_minutes` exists for the same reason: a path with a thirty-minute
+hole is two paths.
+
+Gated on **`geo.view`, not `orders.read`**. A breadcrumb trail is a person's
+precise movements, and the coordinates being historical rather than live makes
+them no less identifying. The photo proof is reported as present or absent, never
+as a URL — presigning an image of somebody's doorstep on every page load is the
+same mistake as prefetching KYC documents.
+
+The map draws the proximity radius the backend actually used, read from the
+payload rather than duplicated, so the circle and the verdict cannot disagree.
+
+### 15.5 Performance — `/people/performance`
+
+Deactivating somebody's income is the most consequential thing this console does
+to an individual, and it was being done from a roster showing a name and a phone
+number.
+
+**Every rate ships its denominator and nothing is ranked below five finished
+orders.** A rider with one delivery and one cancellation has a 100% cancellation
+rate and means nothing; a league table that puts them at the top is worse than no
+league table, because somebody acts on it. Below the threshold the console writes
+"under 5 orders" rather than a number it would have to caveat.
+
+For stores, "never sold anything" is surfaced deliberately: on a young platform
+that is the most actionable vendor figure there is — supply acquired and not
+activated.
+
+### 15.6 Fleet — `/people/fleet`
+
+`VendorRiderRegistry` decides dispatch priority and had no admin reader, so a
+store saying "no riders are being assigned to me" could not be checked. On this
+deployment the answer is one number: **every store has no approved rider**, so
+every order falls straight through to the gig radar.
+
+Building it turned up a latent crash. `Deliverer_Vendors` is a second table for
+the same relationship that nothing reads or writes, and its model declared
+`back_populates="vendors"` / `"deliverers"` against properties that exist on
+neither mapper. Importing that module *from the application* raised
+`InvalidRequestError` on the first ORM query in the process and took every
+unrelated query with it. It survived because the only importer is
+`alembic/env.py`, which wants the metadata for autogenerate and never compiles an
+ORM query. The relationships are gone, the table declaration stays so Alembic
+still describes it, and a test fails the build if a relationship returns.
+
+### 15.7 Notification delivery — `/platform/notifications`
+
+The figure that matters is not how many were sent but **how many recipients could
+ever have been interrupted**. A `Notification` row is always written; the push
+needs a device token and the recipient's own preference.
+
+On this deployment not one account has a `push_token`, while every notification
+is recorded as `delivered_via: "push"` — each one written as an interruption that
+could not arrive. On a platform where a rider learns about an order from a push,
+that is the difference between "they ignored it" and "they were never told".
+
+The feed **names no recipient**. It is readable with `analytics.read`, and who
+was told what belongs on their support ticket; the body is truncated because it
+can carry a delivery address or a phone number.
+
+### 15.8 Catalogue — and a false positive worth recording
+
+`Product` was read in exactly one place before this, the top-sellers query, so
+the platform could report what sold and not what was on the shelf. Price outliers
+are found within a band, against the **median** rather than the mean: one item
+priced at 40,000 by a misplaced decimal drags a mean far enough to hide itself,
+which is precisely the case the check exists to catch.
+
+The first implementation banded by capacity alone, and it was wrong. `accessories`
+(675–1,406) and `dispensers_coolers` (14,655–23,462) both carry `capacity = 0`,
+so they pooled into one group with a median of 1,250 and **every dispenser on the
+platform** was reported as an 18× outlier — 21 false positives out of 114
+products, which is a screen nobody opens twice. The band is the pair
+`(category, capacity)`. With that fix the detector reports zero outliers on real
+data, and it was proved to still work by temporarily mispricing a real product
+12× and watching it flag at 24×.
+
+### 15.9 What these have in common
+
+Every one of them is a query over data that was already being written. None
+needed a new integration, and only one needed a migration. The work was almost
+entirely deciding **what question a screen exists to answer**, and then refusing
+to answer a different, easier one:
+
+* a rate is not quoted below its minimum sample,
+* a verdict has three values when the data has three states,
+* an aggregate is `None` rather than `0%` when the denominator is zero,
+* a heuristic is labelled as a heuristic,
+* and where a table is empty on this deployment, the module docstring says so
+  rather than implying the arithmetic has been observed against real volume.

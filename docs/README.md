@@ -1,0 +1,106 @@
+# Drop — documentation
+
+Everything here explains a decision, not just a procedure. If you only want to
+get something running, the per-surface READMEs are shorter:
+[root](../README.md) · [backend](../BackendAPI/README.md) ·
+[admin](../drop-admin/README.md) · [customer](../drop-customer-app/README.md) ·
+[rider](../drop-rider-app/README.md) · [vendor](../drop-vendor-app/README.md).
+
+---
+
+## Start here
+
+| If you want to… | Read |
+|---|---|
+| Understand the whole platform | [../README.md](../README.md) |
+| Deploy or redeploy the admin console | [admin-console-deployment.md](./admin-console-deployment.md) |
+| Operate the console day to day | [admin-console-runbook.md](./admin-console-runbook.md) |
+| Set an environment variable correctly | [render-environment.md](./render-environment.md) |
+| Know what is still missing | [platform-audit.md](./platform-audit.md) |
+
+---
+
+## Architecture and design
+
+### [admin-dashboard-architecture.md](./admin-dashboard-architecture.md)
+Why the console is built the way it is, decision by decision: the BFF transport
+and why the browser never holds a token, capabilities rather than job titles,
+the four authorisation layers and which one actually decides, how personal data
+is revealed, and a running log of the defects found while building each screen.
+The longest document here and the one worth reading before changing anything.
+
+### [maps-architecture.md](./maps-architecture.md)
+Six mobile keys restricted to the Maps SDK, one IP-restricted server key, and one
+deliberately public browser key. Which call belongs on which, why Directions,
+Places and Geocoding can never run on a client, and how the proxy caches and
+sanitises Google's responses.
+
+### [cash-settlement.md](./cash-settlement.md)
+`wallet_balance`, `committed_cash_float`, and
+`available_for_withdrawal = balance − float`. Why cash orders commit money from
+acceptance rather than delivery, and why a rider's negative balance is a debt
+rather than a bug.
+
+### [push-notifications.md](./push-notifications.md)
+The two sanctioned push paths — `queue_push` before a commit, `dispatch_background`
+after — why `asyncio.create_task` is neither, the preference model, and which
+message types are transactional and therefore unmutable.
+
+### [cron-jobs.md](./cron-jobs.md)
+The scheduled sweeps, their cadences, and how they are triggered in an
+environment without a persistent worker.
+
+---
+
+## Operations
+
+### [admin-console-deployment.md](./admin-console-deployment.md)
+End to end: the repository, Vercel with the monorepo root directory, the Google
+Cloud key restrictions, Clerk test accounts for all five roles, and the three
+allow-lists an origin has to appear in. Missing any one of them produces a
+different confusing failure, and the document names each.
+
+### [admin-console-runbook.md](./admin-console-runbook.md)
+Running it, and walking every screen as every role, so a capability that was
+supposed to hide a control can be seen not hiding it.
+
+### [render-environment.md](./render-environment.md)
+Every environment variable the backend reads, annotated with what breaks when it
+is wrong. Includes the ones that fail *silently* — a missing Clerk issuer makes
+signature verification skip its audience check without erroring.
+
+### [security/google-api-key-rotation.md](./security/google-api-key-rotation.md)
+What to do when a Maps key leaks, in the order that minimises downtime.
+
+---
+
+## Audits and plans
+
+These are historical records. They describe what was found at a point in time
+and what was done about it; the findings marked done have shipped.
+
+| Document | Scope |
+|---|---|
+| [platform-audit.md](./platform-audit.md) | The whole platform: domains with no admin visibility, console pages that were a bare table, missing operational capability, and data-correctness findings. The remediation sequence at the end is complete |
+| [rider-app-remediation-plan.md](./rider-app-remediation-plan.md) | Rider app findings and the plan that followed |
+| [vendor-app-remediation-plan.md](./vendor-app-remediation-plan.md) | Vendor app findings and the plan that followed |
+| [audit/phase1-backend-customer-audit.md](./audit/phase1-backend-customer-audit.md) | The first backend and customer-app pass |
+| [audit/phase1-implementation-plan.md](./audit/phase1-implementation-plan.md) | What that pass turned into |
+
+---
+
+## Conventions in these documents
+
+**Decisions carry their cost.** Where a document says something was chosen, it
+says what was given up. A rule with no stated reason gets deleted by the next
+person who finds it inconvenient.
+
+**Defects are recorded, not tidied away.** Several documents contain a list of
+bugs found while building the thing they describe, including the ones introduced
+by the same work. That is deliberate — the shape of a mistake is usually more
+useful than the fix.
+
+**"Done" means shipped and verified**, not merged. Where a figure is quoted
+against this deployment's data, it was read from the database rather than
+estimated, and where a table is empty the document says so rather than implying
+the numbers have been observed.

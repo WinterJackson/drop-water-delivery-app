@@ -1,4 +1,4 @@
-+-# Push notifications
+# Push notifications
 
 ## How a push reaches a device
 

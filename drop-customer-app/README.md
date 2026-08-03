@@ -1,102 +1,173 @@
 # Drop Customer App 💧
 
-> The consumer-facing application for the Drop Multivendor Water Delivery Platform. Built with Expo, React Native, and Tailwind CSS (NativeWind).
+> The consumer app for the Drop platform. Find a nearby water station, order a
+> refill or a wholesale load, pay with M-Pesa, and watch the rider arrive.
 
-## 📱 Overview
+---
 
-The Drop Customer App allows users to browse nearby water vendors, order water (both retail refills and wholesale), track deliveries in real-time, and manage empty bottle returns.
+## 📱 What it does
 
-### Core Features
-- **Location-based Discovery**: Find nearby vendors using device GPS and GeoSpatial queries (H3 hex indexing).
-- **Checkout & Payments**: Seamless integration with Safaricom M-Pesa (STK Push) for instant payments.
-- **Real-Time Tracking**: WebSocket integration for live rider location tracking on a map.
-- **Gamification & Loyalty**: Welcome discounts, wallet cashback, and repeat-order incentives.
-- **Empty Bottle Management**: Track bottle debt and return empty bottles to vendors during delivery (Quick Swap).
-- **Dark Mode Support**: Full theming support aligned with the Drop BRAND design system.
+| Area | What it covers |
+|---|---|
+| **Discovery** | Nearby stores from the device's location, filtered by what can actually reach you |
+| **Cart and checkout** | Saved addresses, an itemised quote from the server, M-Pesa STK Push |
+| **Live tracking** | The rider's marker moving on the map, over WebSocket |
+| **Empties** | Quick Swap — hand back your empties when the delivery arrives |
+| **Wallet and loyalty** | Welcome discount, cashback, repeat-order incentives |
+| **Ratings** | Rate the store and the rider once the order lands |
+| **Support** | Raise a ticket that lands in the operations console, with the order already attached |
 
-## 🛠️ Tech Stack
+Full theming support: dark mode is a first-class path, not an afterthought.
 
-- **Framework**: React Native with [Expo SDK 54](https://expo.dev/)
-- **Routing**: [Expo Router](https://docs.expo.dev/router/introduction/) (File-based routing)
-- **Styling**: [NativeWind v4](https://www.nativewind.dev/) (Tailwind CSS)
-- **State Management**: [Zustand](https://zustand-demo.pmnd.rs/) (Client state) & [TanStack Query v5](https://tanstack.com/query/latest) (Server state)
-- **Authentication**: [Clerk](https://clerk.com/) (Email, Phone OTP, OAuth)
-- **Maps**: `react-native-maps` + Google Maps SDK
-- **Real-time**: `socket.io-client` for WebSockets
-- **Animations**: `react-native-reanimated`
+---
 
-## 🚀 Getting Started
+## 💸 Prices come from the server. Always.
 
-### Prerequisites
-- Node.js (v20+)
-- pnpm
-- Expo CLI (`npm i -g expo-cli`)
-- iOS Simulator or Android Emulator
+**Never compute an order total on the client.** `useCartQuote()` returns the
+authoritative itemised breakdown from `POST /api/cart/quote`; render those
+numbers verbatim.
 
-### Installation
+A local copy of the pricing formula is precisely how the displayed price, the
+amount charged, and the amount recorded on the order came to disagree. On the
+backend there is exactly one function that prices an order, one value pushed to
+M-Pesa, and one value written to the row — and a test asserts all three match
+across every combination of vendor type, surge window, first-order state, wallet
+credit and delivery type.
 
-1. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+Bottle deposits, service fees, delivery pricing and the welcome discount are all
+rows in `Platform_Settings`, editable from the operations console and live here
+on the next quote. Nothing in this app hard-codes a shilling.
 
-2. Configure Environment Variables:
-   Create a `.env` file in the root of this app and add:
-   ```env
-   EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-   EXPO_PUBLIC_BACKEND_BASE_URL=http://<YOUR_IP>:8000
+---
 
-   # Native Maps SDK keys — build-time only, injected by app.config.js.
-   # Deliberately not EXPO_PUBLIC_*: they belong in AndroidManifest.xml /
-   # Info.plist, not in the JS bundle. One key per platform, because a Google
-   # API key can carry only one application restriction.
-   GOOGLE_MAPS_ANDROID_API_KEY=...   # restricted to com.drop.customer + SHA-1
-   GOOGLE_MAPS_IOS_API_KEY=...       # restricted to bundle id com.drop.customer
-   ```
-   > **Note**: For physical device testing, `EXPO_PUBLIC_BACKEND_BASE_URL` must be your computer's local IP address, not `localhost`.
+## 🛠️ Tech stack
 
-   > **Never commit a Google key.** `app.json` carries no key; `app.config.js`
-   > reads the two above from the environment (EAS secrets in CI). See
-   > [docs/security/google-api-key-rotation.md](../docs/security/google-api-key-rotation.md).
+React Native · [Expo SDK 54](https://expo.dev/) · React 19 ·
+[Expo Router](https://docs.expo.dev/router/introduction/) ·
+[NativeWind v4](https://www.nativewind.dev/) ·
+[TanStack Query v5](https://tanstack.com/query/latest) ·
+[Zustand](https://zustand-demo.pmnd.rs/) · [Clerk](https://clerk.com/) ·
+`react-native-maps` · `socket.io-client` · `react-native-reanimated`
 
-3. Run the app:
-   ```bash
-   pnpm start
-   ```
-   Press `a` for Android, `i` for iOS.
+---
 
-## 📂 Project Structure
+## 🚀 Getting started
+
+```bash
+pnpm install
+cp .env.example .env      # fill in
+pnpm start                # a = Android, i = iOS
+npx tsc --noEmit          # before every push
+```
+
+### `.env`
+
+```env
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+EXPO_PUBLIC_BACKEND_BASE_URL="http://10.0.2.2:8000"
+
+# Native Maps SDK keys — build-time only, injected by app.config.js into the
+# manifest and plist. Deliberately NOT EXPO_PUBLIC_*: those are inlined into the
+# JS bundle and readable by anyone who unzips the APK. One key per platform,
+# because a Google key carries exactly one application restriction.
+GOOGLE_MAPS_ANDROID_API_KEY=...   # restricted to com.drop.customer + SHA-1
+GOOGLE_MAPS_IOS_API_KEY=...       # restricted to bundle id com.drop.customer
+```
+
+`10.0.2.2` is the Android emulator's alias for the host machine. On a physical
+device use your computer's LAN address — `localhost` reaches the handset, not
+your laptop.
+
+> **Never commit a Google key.** `app.json` carries none; `app.config.js` reads
+> the two above from the environment, with EAS secrets in CI. See
+> [docs/security/google-api-key-rotation.md](../docs/security/google-api-key-rotation.md).
+
+---
+
+## 📂 Structure
 
 ```
 drop-customer-app/
 ├── app/
-│   ├── (Auth)/           # Authentication screens (Login, OTP)
-│   ├── (screens)/        # Main app screens (Dashboard, Map, Profile, etc.)
-│   └── _layout.tsx       # Root layout & providers
+│   ├── (Auth)/           # Sign-in, OTP
+│   ├── (screens)/        # Dashboard, Map, Cart, Orders, OrderDetail, Wallet, Support
+│   └── _layout.tsx       # Providers, session cleanup
 ├── API/
-│   └── routes/           # Strictly typed API route definitions
+│   ├── useApiClient.ts   # The only way React code talks to the backend
+│   ├── errors.ts         # ApiError, errorMessage, retryTransientOnly
+│   └── routes/ApiRoutes.ts   # Every backend path, in one place
 ├── components/
-│   ├── common/           # Reusable UI components (Bento grids, lists)
-│   ├── dashboard/        # Dashboard specific components
-│   └── ui/               # Base UI elements (Buttons, Inputs, Skeletons)
-├── constants/            # Theme colors (BRAND), images, icons
-├── context/              # Context providers (ThemeContext)
+│   ├── common/           # Bento grids, lists
+│   ├── dashboard/
+│   └── ui/               # Buttons, inputs, skeletons, PressableScale
+├── constants/            # brandColors.ts, images, icons
+├── context/              # UIThemeContext
 ├── hooks/
-│   ├── queries/          # TanStack Query hooks for API fetching
-│   └── useWebSocket.ts   # Real-time WebSocket connection logic
-├── stores/               # Zustand state stores
-└── lib/                  # Utilities (Toast, formatting)
+│   ├── queries/          # TanStack Query hooks — useCart, useOrders, useCartQuote…
+│   └── useWebSocket.ts
+├── stores/               # Zustand
+└── lib/                  # toast.ts, popup.ts, formatting
 ```
 
-## 🔄 Business Logic Details
+---
 
-### Order Placement Flow
-1. User adds items to the Cart (checked against vendor distance limits: 2km for retail, 15km for wholesale).
-2. User proceeds to checkout, selects delivery location.
-3. System calculates delivery fee based on distance (Haversine formula on backend).
-4. User initiates M-Pesa STK Push.
-5. App polls the backend for payment confirmation.
-6. On success, the order is placed and auto-dispatched to a rider.
+## 🔄 How it actually works
 
-### Tracking Flow
-When an order status is `picked_up`, the app connects to `/ws/track/{order_id}` on the backend to receive live coordinates from the rider. The `react-native-maps` component smoothly animates the rider's marker to the new coordinates.
+### Finding a store
+
+The device's coordinates go to the backend, which filters with H3 res-8 bucketing
+and then PostGIS `ST_DWithin` for the exact pass. Retail stores serve 2 km;
+wholesale serves 15 km. A store that cannot reach you is not shown as
+"unavailable" — it is not a result.
+
+### Checkout
+
+1. A delivery location must be selected first — the quote depends on it.
+2. Cart and location go to `POST /api/cart/quote`; the app renders the breakdown as given.
+3. M-Pesa STK Push is triggered for `quote.stk_amount`.
+4. The app polls until the payment callback lands and the order moves from `pending` (unpaid) to `unassigned` (paid, awaiting a rider).
+5. Dispatch offers it to the store's own rider first, then to nearby gig riders.
+
+### Tracking
+
+Once the order reaches `picked_up`, the app opens `/ws/track/{order_id}` and
+receives `{ lat, lng }` as the rider moves. The marker is interpolated between
+fixes so it glides rather than jumping.
+
+Tracking deliberately starts at pickup, not at acceptance — before then the rider
+is on their way to the store and their position is nothing to do with this order.
+
+### Quick Swap
+
+On a refill order, the empties handed back go with the rider and are credited to
+the store. If the count is short, the rider records what was actually there with
+a photo and the order pauses for review; the app shows that state rather than
+pretending the delivery is complete.
+
+### Ratings
+
+Rating the store and rating the rider are two separate submissions, which is why
+"has this order been rated" means *every* ratable party — the store, plus the
+rider when one was assigned. A repeat submission is treated as an edit, not an
+error, so a retry after a partial failure completes rather than 500-ing.
+
+Reviews are moderated: one taken down by the platform disappears from the listing
+**and** leaves the store's average in the same transaction.
+
+---
+
+## 📜 Conventions
+
+* **All fetching goes through a hook in `hooks/queries/`**, and every hook goes through `useApiRequest()`. It injects the Clerk JWT, signs the user out on a 401, and converts every failure into an `ApiError` whose `message` is the backend's own `detail`.
+* **Every backend path lives in `API/routes/ApiRoutes.ts`.** Never build one inline — `BackendAPI/tests/test_route_contract.py` parses that file and fails CI if a path does not resolve, which is how five 404-ing endpoints were caught.
+* **`ApiError` has no `.response`.** `error.response.data.type` is always `undefined`; reading it that way silently disabled the vendor-conflict prompt and hid every backend message behind a generic fallback. Branch with `isVendorConflict(err)` / `vendorConflictInfo(err)`, and surface text with `errorMessage(err, fallback)`.
+* **`retry` is `retryTransientOnly`.** A 4xx is a refusal, not a dropped packet, and retrying a 401 fires the sign-out handler once per attempt.
+* **Order statuses live in one place** — `ORDER_STATUS_GROUPS` / `matchesOrderFilter` / `CANCELLABLE_ORDER_STATUSES` in `hooks/queries/useOrders`. Screens that listed them inline drifted: the Orders filters once covered neither `preparing` nor `ready`, so an order being packed matched no filter and offered no action.
+* **Null-safe rendering.** Optional chaining on API data, and prices formatted defensively.
+* **`Toast` for feedback, `Popup` for confirmation** — both theme-aware. Native `Alert` is reserved for the blocking forced-update prompt. Never show a bare status code.
+* **Never call a Google web service from the app.** The embedded keys are SDK-restricted and cannot; a key that could would be extractable from the binary. Use the backend proxy — see [docs/maps-architecture.md](../docs/maps-architecture.md).
+* **Theme from `UIThemeContext`**, colours from `constants/brandColors.ts`, never a hardcoded hex for a primary element.
+* **`PressableScale` over `TouchableOpacity`**, and `React.memo` for list items with complex props.
+* **Session teardown** is mounted once in the root layout and wipes local state whenever Clerk's session ends — including the ends nobody taps, like a 401 or a revoked session. `clearPushToken()` must run *before* `signOut()`, or the device keeps receiving the previous account's notifications.
+
+More detail, stated as rules: [CLAUDE.md](./CLAUDE.md).
