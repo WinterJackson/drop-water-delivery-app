@@ -966,7 +966,13 @@ async def get_deliverer_reviews(session: AsyncSession, clerk_id: str, limit: int
 
     result = await session.execute(
         select(Review)
-        .where(and_(Review.target_type == 'rider', Review.target_id == deliverer.id))
+        .where(
+            and_(
+                Review.target_type == 'rider',
+                Review.target_id == deliverer.id,
+                Review.hidden_at.is_(None),
+            )
+        )
         .order_by(Review.created_at.desc())
         .offset(max(0, offset))
         .limit(max(1, min(limit, 100)))

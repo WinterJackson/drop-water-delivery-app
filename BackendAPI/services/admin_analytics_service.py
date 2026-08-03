@@ -846,7 +846,7 @@ async def quality(session: AsyncSession, *, days: int = 90) -> dict:
     ratings = (
         await session.execute(
             select(Review.target_type, Review.rating, func.count(Review.id))
-            .where(Review.created_at >= start)
+            .where(Review.created_at >= start, Review.hidden_at.is_(None))
             .group_by(Review.target_type, Review.rating)
         )
     ).all()

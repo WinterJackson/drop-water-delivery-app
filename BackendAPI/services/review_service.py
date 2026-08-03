@@ -112,6 +112,16 @@ async def create_review(session: AsyncSession, clerk_id: str, data: ReviewCreate
     ).scalar_one_or_none()
 
     previous_rating = None
+    if existing and existing.hidden_at is not None:
+        # A moderated review is out of the target's counters. Treating a resubmit
+        # as an edit would fold its rating back in without unhiding it, so the
+        # average would move for a review nobody can see — and the customer would
+        # have a working way round moderation.
+        raise HTTPException(
+            status_code=409,
+            detail="This review was removed by the platform and cannot be changed.",
+        )
+
     if existing:
         previous_rating = float(existing.rating)
         existing.rating = data.rating
@@ -146,7 +156,13 @@ async def get_target_rating_summary(session: AsyncSession, target_type: str, tar
     rows = (
         await session.execute(
             select(func.round(Review.rating).label("star"), func.count(Review.id))
-            .where(Review.target_type == target_type, Review.target_id == target_id)
+            .where(
+                Review.target_type == target_type,
+                Review.target_id == target_id,
+                # A hidden review is not merely invisible in the list: it must
+                # leave the average too, or moderation is theatre.
+                Review.hidden_at.is_(None),
+            )
             .group_by("star")
         )
     ).all()
@@ -183,7 +199,11 @@ async def recount_target_rating(session: AsyncSession, target_type: str, target_
     count, total = (
         await session.execute(
             select(func.count(Review.id), func.coalesce(func.sum(Review.rating), 0.0))
-            .where(Review.target_type == target_type, Review.target_id == target_id)
+            .where(
+                Review.target_type == target_type,
+                Review.target_id == target_id,
+                Review.hidden_at.is_(None),
+            )
         )
     ).one()
 

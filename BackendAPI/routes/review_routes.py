@@ -34,7 +34,12 @@ async def list_reviews_for_target(
         raise HTTPException(status_code=400, detail="target_type must be 'vendor' or 'rider'")
     query = (
         select(Review)
-        .where(Review.target_type == target_type, Review.target_id == target_id)
+        .where(
+            Review.target_type == target_type,
+            Review.target_id == target_id,
+            # Moderated reviews stay in the table and out of every public read.
+            Review.hidden_at.is_(None),
+        )
         .order_by(desc(Review.created_at))
         .offset(offset)
         .limit(limit)

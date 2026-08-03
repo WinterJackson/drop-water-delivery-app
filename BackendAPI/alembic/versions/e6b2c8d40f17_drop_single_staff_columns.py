@@ -44,7 +44,7 @@ store gained a staff member through an older build after the backfill ran, and
 dropping would silently revoke them.
 
 Revision ID: e6b2c8d40f17
-Revises: b4c7e2a91f30
+Revises: a9f4b2c71d63
 Create Date: 2026-08-01 00:00:00.000000
 
 """
@@ -56,7 +56,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'e6b2c8d40f17'
-down_revision: Union[str, Sequence[str], None] = 'b4c7e2a91f30'
+down_revision: Union[str, Sequence[str], None] = 'a9f4b2c71d63'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

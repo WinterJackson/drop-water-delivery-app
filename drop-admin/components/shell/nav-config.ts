@@ -13,6 +13,7 @@ import {
   // `Map` constructor for the whole module.
   Map as MapIcon,
   Megaphone,
+  MessageSquare,
   Package,
   PackageSearch,
   ScrollText,
@@ -161,6 +162,15 @@ export const NAV_SECTIONS: NavSection[] = [
         mobilePriority: 10,
         badge: "disputes",
         blurb: "Deliveries where the bottle count did not agree.",
+      },
+      {
+        href: "/operations/reviews",
+        label: "Reviews",
+        short: "Reviews",
+        icon: MessageSquare,
+        permission: PERMISSIONS.disputesRead,
+        mobilePriority: 15,
+        blurb: "What customers said, and the comments worth reading.",
       },
     ],
   },

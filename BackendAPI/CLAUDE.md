@@ -204,6 +204,17 @@ into a 500. Editing moves `rating_sum` and leaves `rating_count` alone.
 plus the rider when one was assigned. `ReviewOut` must never carry
 `customer_clerk_id`: the target-review endpoint is unauthenticated.
 
+**Moderation is `hidden_at`, and every read filters on it.** A delete would lose
+that the review existed, release `uq_customer_order_target_review` so the
+customer can simply leave another, and strand the target's counters on a row
+that is gone. `admin_review_service.set_hidden` rebuilds the target's
+`rating_count`/`rating_sum` from the visible rows in the same transaction — a
+one-star review taken out of the list and left in the average is moderation
+theatre. That rebuild is the *one* sanctioned `SUM()` over `reviews`: it is a
+single indexed aggregate for one target on a rare admin action, not the per-write
+recomputation the incremental path exists to avoid. A resubmit of a hidden review
+is a 409, not an edit; folding its rating back in would be a way round moderation.
+
 ## ⚙️ Background jobs
 
 ARQ runs as its **own process** (`arq worker.WorkerSettings`), never inside the

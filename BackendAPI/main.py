@@ -284,6 +284,7 @@ from routes import (
     admin_geo_routes,
     admin_orders_routes,
     admin_people_routes,
+    admin_review_routes,
     admin_support_routes,
 )
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["Admin Dashboard"])
@@ -299,6 +300,7 @@ app.include_router(admin_support_routes.router, prefix="/api/admin", tags=["Admi
 app.include_router(admin_finance_routes.router, prefix="/api/admin", tags=["Admin Finance"])
 app.include_router(admin_catalogue_routes.router, prefix="/api/admin", tags=["Admin Catalogue"])
 app.include_router(admin_bottle_routes.router, prefix="/api/admin", tags=["Admin Bottles"])
+app.include_router(admin_review_routes.router, prefix="/api/admin", tags=["Admin Reviews"])
 
 # App-facing support intake. Without this the ticket queue is an inbox
 # nobody can write to.

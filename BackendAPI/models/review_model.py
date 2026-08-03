@@ -1,3 +1,12 @@
+"""Customer reviews of vendors and riders.
+
+Moderation is a **hide**, never a delete. Deleting loses the fact that the
+review existed, releases `uq_customer_order_target_review` so the customer can
+leave another, and strands the target's `rating_sum`/`rating_count` on a row
+that is gone. `hidden_at` carries the state; every read path filters on it, and
+the target's counters are rebuilt from the visible rows the moment one is
+hidden.
+"""
 from sqlalchemy import Column, String, Float, ForeignKey, DateTime, func, Text, UniqueConstraint, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -22,3 +31,9 @@ class Review(Base):
     rating = Column(Float, nullable=False)
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    #: Moderation. Null means visible — that is the only test any read path
+    #: should make, so a future "pending" state cannot accidentally publish.
+    hidden_at = Column(DateTime(timezone=True), nullable=True)
+    hidden_by = Column(String, nullable=True)
+    hidden_reason = Column(String(500), nullable=True)

@@ -160,6 +160,13 @@ Ordered by value per unit of work.
    rate carries its denominator and nothing is ranked below five finished
    orders; below that the console writes "under 5 orders" rather than a figure
    it would have to caveat.
-6. **Review moderation.**
+6. ~~**Review moderation.**~~ **Done.** Migration `a9f4b2c71d63` adds
+   `hidden_at`/`hidden_by`/`hidden_reason`; `services/admin_review_service.py`
+   and `/operations/reviews`. Hiding is never a delete — a delete loses that the
+   review existed, frees `uq_customer_order_target_review` so the customer can
+   leave another, and strands the target's counters. The target's rating is
+   rebuilt from the visible rows in the same transaction, and a resubmit of a
+   hidden review is a 409 rather than an edit. Nothing is user-reported (no app
+   has a report button), so the default view is a labelled heuristic.
 7. **Refund and payout reconciliation.**
 8. **Delivery replay from `Order_Tracking_Logs`.**
