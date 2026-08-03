@@ -13,6 +13,7 @@ get something running, the per-surface READMEs are shorter:
 | If you want to… | Read |
 |---|---|
 | Understand the whole platform | [../README.md](../README.md) |
+| Understand how the *business* works — every rate, split and workflow | [business-logic.md](./business-logic.md) |
 | Know why a surprising choice was made | [decisions/](./decisions/README.md) |
 | Deploy or redeploy the admin console | [admin-console-deployment.md](./admin-console-deployment.md) |
 | Operate the console day to day | [admin-console-runbook.md](./admin-console-runbook.md) |
@@ -40,6 +41,16 @@ to be revisited.
 ---
 
 ## Architecture and design
+
+### [business-logic.md](./business-logic.md)
+The commercial rules of the platform, read out of the code rather than out of a
+specification: the 34 configurable settings and their defaults, the pricing engine
+in the order it executes, the revenue split with worked examples for retail cash,
+retail M-Pesa, a first order and a wholesale order, the order state machine, the
+three dispatch tiers, the bottle ledger and its invariant, stock, cash float and
+payouts, and the nightly sweeps. Ends with fourteen findings — two of them money
+defects that are live today — ranked with recommendations. Read this before
+changing a rate, a threshold or a settlement path.
 
 ### [admin-dashboard-architecture.md](./admin-dashboard-architecture.md)
 Why the console is built the way it is, decision by decision: the BFF transport
