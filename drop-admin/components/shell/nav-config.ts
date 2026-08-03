@@ -6,10 +6,12 @@ import {
   BadgeCheck,
   Banknote,
   BarChart3,
+  BellRing,
   ClipboardList,
   HandCoins,
   LayoutDashboard,
   LifeBuoy,
+  Link2,
   // Aliased: lucide exports this as `Map`, which would shadow the global
   // `Map` constructor for the whole module.
   Map as MapIcon,
@@ -213,6 +215,15 @@ export const NAV_SECTIONS: NavSection[] = [
         blurb: "Who is delivering, who is selling, and how reliably.",
       },
       {
+        href: "/people/fleet",
+        label: "Fleet",
+        short: "Fleet",
+        icon: Link2,
+        permission: PERMISSIONS.ridersRead,
+        mobilePriority: 18,
+        blurb: "Which riders are registered with which stores, and who has none.",
+      },
+      {
         href: "/people/customers",
         label: "Customers",
         short: "Customers",
@@ -310,6 +321,15 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: SlidersHorizontal,
         permission: PERMISSIONS.settingsManage,
         blurb: "What the platform charges, and what it keeps. Live in all three apps.",
+      },
+      {
+        href: "/platform/notifications",
+        label: "Notifications",
+        short: "Notices",
+        icon: BellRing,
+        permission: PERMISSIONS.analyticsRead,
+        mobilePriority: 19,
+        blurb: "What the platform told people, and whether it could reach them.",
       },
       {
         href: "/platform/broadcast",

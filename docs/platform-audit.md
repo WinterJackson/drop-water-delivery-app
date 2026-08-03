@@ -58,24 +58,44 @@ unaudited.
 Written on every status change and read by nothing. "The rider says they
 delivered it, the customer says they didn't" is unanswerable today.
 
-### A6. In-house rider relationships
+### A6. In-house rider relationships — **Done**
 
-`Deliverer_Vendors` and `VendorRiderRegistry` drive dispatch priority — an
-in-house rider is assigned before any gig rider. No admin screen shows these
-links, so a vendor claiming "no riders are being assigned to me" cannot be
-checked.
+`/people/fleet`, from `services/admin_fleet_service.py`. The headline is *stores
+with no approved rider*, which on this deployment is all 21 of them: every order
+falls straight through to the gig radar.
 
-### A7. Notifications — 66 rows, no delivery visibility
+Two findings came out of building it. `Deliverer_Vendors` is **dead** — declared,
+migrated, and read by no service or route; `VendorRiderRegistry` is the live one.
+And the dead model declared `back_populates="vendors"` / `"deliverers"` against
+properties that exist on neither mapper, so *importing it from the application*
+raised `InvalidRequestError` on the first ORM query in the process and took every
+unrelated query with it. It survived because the only importer was
+`alembic/env.py`, which never compiles an ORM query. The relationships are gone
+and a test fails the build if one returns.
 
-No view of what was sent, to whom, or what failed. Push failures are invisible,
-so "the customer was never told" cannot be confirmed or denied.
+### A7. Notifications — **Done**
+
+`/platform/notifications`. The figure that mattered turned out to be
+*reachability*: **not one of the 53 accounts on this deployment has a
+`push_token`**, while 78 notifications are recorded as `delivered_via: "push"`.
+Every one of those was written as an interruption that could not have arrived.
+On a platform where a rider learns about an order from a push, that is the
+difference between "they ignored it" and "they were never told".
+
+No recipient is named on the page — it is readable with `analytics.read`, and who
+was told what belongs on a support ticket.
+
+The original finding, for the record: no view of what was sent, to whom, or what
+failed, so "the customer was never told" could not be confirmed or denied.
 
 ---
 
-## B. Console pages that are a table and a filter
+## B. Console pages that are a table and a filter — **Closed**
 
-**8 of 13 pages** carry no aggregate at all. Every one is a list with a search
-box, so the operator sees rows and never the shape of the problem.
+*As originally found:* **8 of 13 pages** carried no aggregate at all — every one
+a list with a search box, so the operator saw rows and never the shape of the
+problem. Every page in the table below now carries a header of real aggregates,
+and a test fails the build if a queue page renders none.
 
 | Page | Today | What it cannot answer |
 |---|---|---|
@@ -143,7 +163,8 @@ Ordered by value per unit of work.
    the build if a queue page renders no aggregate, the other if a figure is
    coerced with `?? 0`.
 
-   Still bare: `people/[kind]` and `platform/audit`.
+   `people/[kind]` and `platform/audit` have since gained theirs too, so no
+   admin page is a bare table and search.
 2. ~~**Failed-webhook reconciliation screen.**~~ **Done.** See
    `services/admin_reconciliation_service.py` and `/finance/reconciliation`.
 3. ~~**Bottle ledger views.**~~ **Done.** `services/admin_bottle_service.py`
