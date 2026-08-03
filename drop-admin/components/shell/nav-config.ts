@@ -7,6 +7,7 @@ import {
   Banknote,
   BarChart3,
   ClipboardList,
+  HandCoins,
   LayoutDashboard,
   LifeBuoy,
   // Aliased: lucide exports this as `Map`, which would shadow the global
@@ -261,6 +262,15 @@ export const NAV_SECTIONS: NavSection[] = [
         mobilePriority: 9,
         badge: "reconciliation",
         blurb: "Payment callbacks that failed — money in, order still pending.",
+      },
+      {
+        href: "/finance/settlement",
+        label: "Settlement",
+        short: "Settle",
+        icon: HandCoins,
+        permission: PERMISSIONS.financeRead,
+        mobilePriority: 16,
+        blurb: "Refunds owed, payouts in flight, and cash in people's hands.",
       },
     ],
   },

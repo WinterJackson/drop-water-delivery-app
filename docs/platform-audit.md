@@ -168,5 +168,14 @@ Ordered by value per unit of work.
    rebuilt from the visible rows in the same transaction, and a resubmit of a
    hidden review is a 409 rather than an edit. Nothing is user-reported (no app
    has a report button), so the default view is a labelled heuristic.
-7. **Refund and payout reconciliation.**
+7. ~~**Refund and payout reconciliation.**~~ **Done.**
+   `services/admin_settlement_service.py` and `/finance/settlement`, covering
+   refunds, payouts and the platform's cash exposure. The load-bearing figure is
+   *failed payouts never returned to the wallet*: the debit happens before the
+   B2C call so the money cannot be spent twice in flight, which makes the refund
+   on failure mandatory — an invariant `payout_service` declared and nothing
+   checked. There is deliberately no retry: a reversal that succeeded and lost
+   its callback is indistinguishable from one that failed, and a second reversal
+   pays the customer twice out of the platform's own float. Also closes the
+   "no cash-float exposure" gap in §C.
 8. **Delivery replay from `Order_Tracking_Logs`.**

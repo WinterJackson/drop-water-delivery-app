@@ -21,9 +21,11 @@ from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_FINANCE_ADJUST,
     PERM_FINANCE_READ,
+    PERM_FINANCE_REFUND_APPROVE,
     PERM_PII_VIEW,
 )
 from models.deliverer_model import Deliverer
+from models.order_model import Order
 from models.payment_model import Payment
 from models.payout_model import Payout
 from models.user_model import User
@@ -33,7 +35,12 @@ from models.wallet_transaction_model import (
     TransactionType,
     WalletTransaction,
 )
-from services import admin_reconciliation_service, admin_service, wallet_service
+from services import (
+    admin_reconciliation_service,
+    admin_service,
+    admin_settlement_service,
+    wallet_service,
+)
 from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -561,3 +568,79 @@ async def resolve_failed_webhook(
     await db.commit()
 
     return {"id": webhook_id, "resolved": True}
+
+
+# ── Settlement: refunds, payouts and cash exposure ────────────────────────
+#
+# Three things that move money without a person pressing anything, none of
+# which had a reader. See `services/admin_settlement_service.py` — in
+# particular for why a failed payout with no matching wallet refund is the one
+# figure on this screen that means money has actually vanished.
+
+
+@router.get("/settlement", summary="Refunds, payouts and cash at risk")
+@limiter.limit("60/minute")
+async def settlement(
+    request: Request,
+    limit: int = Query(100, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
+):
+    return {
+        "refunds": await admin_settlement_service.refunds(db, limit=limit),
+        "payouts": await admin_settlement_service.payouts(db, limit=limit),
+        "cash": await admin_settlement_service.cash_exposure(db),
+    }
+
+
+class SettleRefund(BaseModel):
+    reason: str = Field(min_length=8, max_length=500)
+
+
+@router.post("/settlement/refunds/{order_id}/settle", summary="Record a refund made by hand")
+async def settle_refund(
+    order_id: UUID,
+    body: SettleRefund,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_REFUND_APPROVE)),
+):
+    """Mark a stuck or failed refund as settled outside the platform.
+
+    Deliberately **not** a retry. `refund_service` initiates an M-Pesa reversal,
+    and a reversal that in fact succeeded but lost its callback looks identical
+    to one that failed — retrying that pays the customer twice out of the
+    platform's own money, with no way to claw it back. The same reasoning as the
+    webhook screen: the administrator settles it in the M-Pesa portal, and this
+    is the note saying they did.
+
+    Requires `finance.refund_approve` rather than `finance.read`, because the
+    row stops being visible to anyone the moment it is marked settled.
+    """
+    order = await db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="No such order.")
+    if order.payment_status not in ("refund_pending", "refund_processing", "refund_failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This order is '{order.payment_status}' and has no outstanding refund.",
+        )
+
+    before = order.payment_status
+    order.payment_status = "refunded"
+
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="finance.refund_settle",
+        target_type="order",
+        target_id=str(order_id),
+        before={"payment_status": before},
+        after={
+            "payment_status": "refunded",
+            "amount": _money(order.total_amount),
+            "reason": body.reason.strip(),
+        },
+    )
+    await db.commit()
+
+    return {"order_id": str(order_id), "payment_status": "refunded"}
