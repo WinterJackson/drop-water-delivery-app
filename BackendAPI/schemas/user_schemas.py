@@ -11,6 +11,10 @@ class BaseUser(BaseModel):
     email : str 
     phone_number : str | None = None
     profile_pic : str | None = None
+    #: The handset this account was created on. Recorded once, at registration,
+    #: and never updated — it gates the one-per-device welcome offer, and letting
+    #: a client rewrite it would be the same as not having it.
+    device_id : str | None = None
     
     @field_validator('profile_pic', mode='after')
     @classmethod

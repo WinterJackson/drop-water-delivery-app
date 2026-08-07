@@ -11,27 +11,11 @@ from models.user_model import User
 from models.vendor_model import Vendor
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification
+from services.order_service import revert_order_side_effects
+from services import platform_config_service
 from routes.websocket_routes import manager
 
 logger = logging.getLogger(__name__)
-
-async def _restore_order_stock(session: AsyncSession, order: Order):
-    """Atomically restore product stock for all items in an auto-cancelled order."""
-    items_q = select(OrderItem).where(OrderItem.order_id == order.id)
-    result = await session.execute(items_q)
-    items = result.scalars().all()
-
-    for item in items:
-        await session.execute(
-            update(Product)
-            .where(Product.id == item.product_id)
-            .values(
-                stock=Product.stock + item.quantity,
-                is_available=True
-            )
-        )
-    if items:
-        logger.info(f"Restored stock for {len(items)} items from auto-cancelled order {order.id}")
 
 async def _release_customer_cart(session: AsyncSession, customer_id):
     """Unlock the cart left locked by an abandoned checkout.
@@ -49,7 +33,7 @@ async def _release_customer_cart(session: AsyncSession, customer_id):
 
 
 async def run_auto_cancel_orders(batch_size: int = 100):
-    """Auto-cancel orders that have sat unclaimed past the 15-minute SLA.
+    """Auto-cancel orders that have sat unclaimed past the acceptance SLA.
 
     Covers both `pending` (created but never paid) and `unassigned` (paid but
     never picked up by a vendor/rider). The status filter used to be `pending`
@@ -57,18 +41,28 @@ async def run_auto_cancel_orders(batch_size: int = 100):
     so this sweep silently matched nothing. It also referenced `User` without
     importing it, so the first matching row would have raised `NameError`.
 
+    The age comes from `order_auto_cancel_minutes` in `Platform_Settings`. It was
+    a hardcoded `INTERVAL '15 minutes'` alongside an editable console field that
+    was wired to nothing, so an owner giving vendors more time saw no change.
+
     Claims rows with FOR UPDATE SKIP LOCKED, and commits per order, so it is safe
     to run from multiple workers and one bad row cannot discard the batch.
     """
     logger.info("Running auto-cancel pending orders job...")
 
     async with get_db_session() as session:
+        await platform_config_service.ensure_fresh(session)
+        cutoff_minutes = platform_config_service.get_int("order_auto_cancel_minutes")
+
         query = (
             select(Order)
             .where(
                 and_(
                     Order.order_status.in_(["pending", "unassigned"]),
-                    func.now() - Order.created_at > text("INTERVAL '15 minutes'")
+                    func.now() - Order.created_at
+                    > text("make_interval(mins => :cutoff_minutes)").bindparams(
+                        cutoff_minutes=cutoff_minutes
+                    ),
                 )
             )
             .order_by(Order.created_at.asc())
@@ -92,17 +86,17 @@ async def run_auto_cancel_orders(batch_size: int = 100):
                 if order.order_status not in ("pending", "unassigned"):
                     continue
 
-                logger.info("Auto-cancelling order %s due to SLA breach (15 minutes).", order.id)
+                logger.info(
+                    "Auto-cancelling order %s due to SLA breach (%s minutes).",
+                    order.id, cutoff_minutes,
+                )
 
                 was_paid = order.payment_status == "paid"
                 order.order_status = "cancelled"
-                order.cancellation_reason = "acceptance_sla_breach"
 
-                if was_paid:
-                    order.payment_status = "refund_pending"
-                    order.commission_lost = order.platform_total
-
-                await _restore_order_stock(session, order)
+                await revert_order_side_effects(
+                    session, order, reason="acceptance_sla_breach"
+                )
                 await _release_customer_cart(session, order.customer_id)
 
                 # Notify Customer

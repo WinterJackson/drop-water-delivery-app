@@ -13,11 +13,15 @@ earlier document disagree, the code is what is written here.
 
 > Plain text describes **what the code does today**.
 
-> ⚠️ **Finding** blocks describe a gap, a loophole or an inconsistency **found while
-> reading**, with what it costs and what to do about it. Nothing in a Finding block
-> is currently implemented.
+> ⚠️ **Finding** blocks describe a gap, a loophole or an inconsistency found while
+> reading, with what it cost. **All fourteen have since been remediated** — each
+> block now ends with a `**Fixed:**` line naming what changed and the test that
+> holds it. They are kept rather than deleted because the shape of a mistake is
+> more useful than the fix, and because several of them are the reason a rule
+> exists that would otherwise look arbitrary.
 
-Findings are collected and ranked in [§18](#18-findings-and-recommendations).
+Findings are collected, ranked and cross-referenced in
+[§18](#18-findings-and-recommendations).
 
 ---
 
@@ -96,7 +100,7 @@ Staff are never wallet owners: `payout_service._get_provider_details` resolves o
 
 ## 2. Business values are rows, not constants
 
-`services/platform_config_service.py` defines **34 settings** in six groups.
+`services/platform_config_service.py` defines **46 settings** in seven groups (34 at the time of the audit; the twelve added by the remediation are listed in [§18](#forty-six-settings-not-thirty-four)).
 They live in the `Platform_Settings` table, are edited from the admin console, and
 apply to **the next quote** — no deploy, no restart. The class attributes in
 `DispatchPolicy` and the literals in `pricing_service` are *shipped defaults*, kept
@@ -185,6 +189,11 @@ takes **no** deposit on is a different thing from a deposit of nothing
 > minutes. `rider_kyc_sla_hours` is likewise read by nothing in the backend or the
 > console. A setting that does nothing is worse than no setting: it is a control
 > that lies about being connected.
+>
+> **Fixed.** `order_stale_after_minutes` drives the console's stuck-order board;
+> `rider_kyc_sla_hours` drives a new `overdue` count on the KYC queue. A separate
+> `order_auto_cancel_minutes` now drives the sweep, and a cross-field validator
+> refuses a configuration where orders would be cancelled before being flagged.
 
 ### What is deliberately *not* configurable
 
@@ -226,6 +235,9 @@ Three consequences that matter commercially:
 > the coercion sees it — and `OrderItem.Subtotal` is what `_cart_payload` sums into
 > `product_subtotal`, which is the base of every commission on the platform. The fix
 > is a migration to `Numeric(10,2)`, not more coercion.
+>
+> **Fixed.** Migration `b8e3d1a5c704` moves all five to `Numeric(10, 2)` with an
+> explicit rounding `USING` cast.
 
 ---
 
@@ -440,6 +452,13 @@ because stock can change in between.
 > behind an existing finance capability with an audit row; (c) until either ships,
 > the 402 message should tell the customer how to clear it — it currently says
 > "Please clear it before placing a new order" and names no mechanism.
+>
+> **Fixed.** `debt_balance` is now collected on the next order as a visible
+> `debt_settlement` line, cleared by `create_order` and restored by every
+> cancellation path. Only a balance at or above `max_customer_debt_before_block`
+> (KSH 500) refuses checkout, and the refusal names support as the way out.
+> `POST /api/admin/people/customers/{id}/debt/write-off` writes it off behind
+> `finance.adjust` with an audit row. `tests/test_debt_settlement.py`.
 
 ---
 
@@ -519,6 +538,12 @@ implicit in the difference between what was collected and what was paid out.
 > `platform_total` for wholesale, or add them to `vendor_net` — but stop storing a
 > non-zero `rider_net` on an order where no rider is ever paid, because analytics,
 > the admin console and any future reconciliation all read that column.
+>
+> **Fixed.** Wholesale now credits the surcharges to `vendor_net`, whose employee
+> did the carrying, and sets `rider_net` to zero — which is what the settlement
+> path has always assumed. `tests/test_revenue_split_identity.py` asserts
+> `vendor_net + rider_net + platform_total == gross − welcome_discount` across
+> every combination of vendor type, delivery type and surcharge.
 
 > ⚠️ **Finding F-03 — the bottle deposit is charged but never recorded on the order.**
 > `Order` has no `bottle_deposit` column. The deposit is folded into `vendor_net` and
@@ -533,6 +558,13 @@ implicit in the difference between what was collected and what was paid out.
 > owes customers. **Recommendation:** add `Order.bottle_deposit` (Numeric) and a
 > `customer_deposit_balance` on `Users`, credited on charge and debited on an
 > audited return action. This is a real liability that is currently invisible.
+>
+> **Fixed.** `Orders.bottle_deposit` records what was charged;
+> `Users.bottle_deposit_balance` and `Users.bottles_held` record what the
+> platform owes back. `services/customer_bottle_service.py` moves both counters
+> through a single `_apply`, and
+> `POST /api/admin/people/customers/{id}/deposit/return` credits the customer's
+> wallet. `tests/test_customer_bottle_deposit.py`.
 
 ---
 
@@ -749,6 +781,11 @@ Both states are counted as **open cash obligations** in `settlement_service.OPEN
 > the charge from `(actual_floor_level − free_floors) × staircase_surcharge_per_floor`,
 > compute it as `Decimal`, and route it through the same settlement as any other
 > surcharge rather than into `debt_balance`.
+>
+> **Fixed.** The charge is now
+> `(actual_floor_level − staircase_free_floors) × staircase_surcharge_per_floor`
+> as `Decimal`, minus whatever was already charged at checkout, so it cannot bill
+> twice. It still lands on `debt_balance`, which F-01 made settleable.
 
 ---
 
@@ -853,6 +890,9 @@ only effect is the commission rate.
 > add the same `h3_index_res8.in_(k_ring)` + `ST_DWithin` pair to the Tier 1 query.
 > It is a three-line change and it makes the strongest offer the platform sends also
 > the most relevant.
+>
+> **Fixed.** Tier 1 now uses `rider_search_bounds` — the same H3 ring and
+> `ST_Distance` bound Tiers 2 and 3 use — and orders by distance.
 
 > ⚠️ **Finding F-06 — `get_closest_deliverer` falls back to an unbounded global scan.**
 > The H3 pass is correct; when it returns nothing, the fallback query drops the H3
@@ -860,6 +900,9 @@ only effect is the commission rate.
 > scan of every rider row on every miss. It is not currently on the order-creation
 > path (dispatch uses `get_radar_deliverers`), which is why it has not caused a
 > problem — but it should be bounded before something starts calling it.
+>
+> **Fixed.** The fallback bound is now `ST_DWithin`, which can use the GiST index;
+> `ST_Distance` remains only in the `ORDER BY`.
 
 > ⚠️ **Finding F-07 — the 20-second Tier 1 wait is an in-process `asyncio.sleep`.**
 > `dispatch_order_to_riders` is a background task inside the API process. If that
@@ -869,6 +912,11 @@ only effect is the commission rate.
 > minutes instead of twenty seconds. **Recommendation:** enqueue the Tier 2
 > escalation as a delayed ARQ job instead of sleeping in-process. The worker already
 > exists and the pattern is used elsewhere.
+>
+> **Fixed.** `_schedule_trip_radar` enqueues `dispatch_trip_radar_task` with
+> `_defer_by`, keyed on the order id so a duplicate enqueue is a no-op. The
+> in-process sleep survives only as a fallback when no queue is reachable, and
+> says so in the log.
 
 ---
 
@@ -919,6 +967,11 @@ The platform rule — reinforced by a test that parses the source — is that th
 > a setting. **Recommendation:** route it through `apply_wallet_delta` with a
 > dedicated transaction type, and move the 10.0 into `Platform_Settings` under
 > `commission` or a new `loyalty` group.
+>
+> **Fixed.** It goes through `apply_wallet_delta` with a `reference_id`, and the
+> amount is the `loyalty_cashback_per_delivery` setting.
+> `tests/test_remediation_structural.py` fails the build on any direct
+> `wallet_balance` assignment in a money-moving module.
 
 ### Location tracking
 
@@ -1022,6 +1075,12 @@ after 3 minutes and **cancels the order**.
 > `keep_my_bottle` delivery and decrement it on return (which pairs naturally with
 > the deposit balance in F-03), or delete the column and the job. A cron job that
 > cannot fire is worse than no cron job — it reads as coverage that is not there.
+>
+> **Fixed, and it was worse than described.** `empty_bottles_held` had been
+> *dropped* by migration `3ba669eb21f3` while the job still read it, so the job
+> raised `AttributeError` on every run rather than matching nothing. It now reads
+> `Users.bottles_held`, which `customer_bottle_service` maintains in lockstep
+> with the deposit balance.
 
 > ⚠️ **Finding F-14 — `device_id` anti-fraud is declared but not implemented.**
 > `Users.device_id` is `unique=True, index=True` and carries the comment
@@ -1032,6 +1091,12 @@ after 3 minutes and **cancels the order**.
 > the discount is pure platform margin (§7), this is a direct revenue leak.
 > **Recommendation:** capture the device id at registration and check it alongside
 > `has_used_welcome_offer` when setting `is_welcome_offer`.
+>
+> **Fixed.** `device_id` is written at registration and read by
+> `pricing_service.welcome_offer_available`, which refuses the offer when another
+> account on the same handset has taken it. Its `unique=True` index became a
+> plain one — uniqueness blocked a household sharing a phone while doing nothing
+> about repeat offers. `tests/test_welcome_offer_antifraud.py`.
 
 ---
 
@@ -1094,6 +1159,11 @@ built from `stock <= low_stock_threshold AND low_stock_threshold > 0`.
 > bottles to the ledger (it logs a warning and skips). **Recommendation:**
 > soft-delete — set `is_available = False` and exclude from vendor listings — or
 > refuse the delete with a 409 when order items exist.
+>
+> **Fixed.** `Products.deleted_at`. `delete_product` withdraws rather than
+> deletes, and `product_service.live_product()` is the predicate every catalogue
+> read carries — enforced by an AST test that counts filters against
+> `select(Product)` calls per function.
 
 ---
 
@@ -1183,6 +1253,12 @@ the vendor.
 > hole today; (2) collapse the two paths into one, keeping `payout_service`'s, since
 > it also holds the advisory lock and writes a `Payout` row; (3) move the thresholds
 > and fee into `Platform_Settings`, where every other business figure already lives.
+>
+> **Fixed.** Both paths now call `settlement_service.assert_withdrawable`, and
+> both read one schedule from `settlement_service.withdrawal_terms`, which is
+> backed by eight new `payouts` settings. `tests/test_withdrawal_unification.py`
+> asserts the call structurally, per withdrawal function, so a third path cannot
+> be added without it.
 
 ### Payout mechanics
 
@@ -1340,54 +1416,98 @@ sent **only for what actually committed**.
 
 ## 18. Findings and recommendations
 
-Fourteen findings, ranked by what they cost. Nothing here is implemented; each is a
-recommendation.
+Fourteen findings, all **remediated**. The table records what each one cost, what
+changed, and the test that stops it coming back — a fix with no test is a fix
+with a shelf life.
 
-### Critical — money or access is wrong today
+Two of them were live money defects.
 
-| # | Finding | Cost | Fix |
-|---|---|---|---|
-| **F-01** | `debt_balance` is only ever incremented; any positive value returns 402 on every future order | A customer who cancels one accepted order is **permanently locked out** over KSh 50 | Settle it against the next order or a top-up; add an audited admin write-off; name the mechanism in the 402 |
-| **F-12** | `POST /api/wallet/withdraw` checks the raw balance, not `available_for_payout` | A rider can **withdraw the float backing their open cash orders** and go negative | Call `settlement_service.available_for_payout`; then collapse the two withdrawal paths; move thresholds into settings |
+### Critical — money or access was wrong
 
-### High — revenue is leaking or unrecorded
+| # | What was wrong | What it cost | Fix | Held by |
+|---|---|---|---|---|
+| **F-01** | `debt_balance` was incremented in two places and decremented nowhere; any positive value returned 402 on every future quote | **One late cancellation locked a customer out permanently** over KSH 50 | Collected on the next order as a visible `debt_settlement` line; only a balance at the KSH 500 ceiling refuses, and the refusal names support; admin write-off behind `finance.adjust` | `test_debt_settlement.py` |
+| **F-12** | `POST /api/wallet/withdraw` compared against the raw balance, not `available_for_payout` | **A rider could withdraw the float backing their open cash orders**, deliver, and go into uncollectable arrears | Both paths call `settlement_service.assert_withdrawable` and read one schedule from `withdrawal_terms` | `test_withdrawal_unification.py` |
 
-| # | Finding | Cost | Fix |
-|---|---|---|---|
-| **F-03** | The bottle deposit is charged, folded into `vendor_net`, and recorded nowhere; no refund path exists | An **invisible liability**; a `keep_my_bottle` customer cannot get their deposit back | Add `Order.bottle_deposit` and a customer deposit balance; add an audited return action |
-| **F-14** | `Users.device_id` is declared for "one offer per device" and read by nothing | The 30 % welcome discount — **pure platform margin** — can be farmed with fresh sign-ups from one handset | Capture and check it alongside `has_used_welcome_offer` |
-| **F-02** | Wholesale surcharges land in `rider_net` on an order where no rider is ever paid | KSh 80 per 10-unit order retained but **absent from `platform_total`**; analytics understate revenue | Allocate them to `platform_total` (or `vendor_net`) and stop storing a phantom `rider_net` |
+### High — revenue was leaking or unrecorded
+
+| # | What was wrong | What it cost | Fix | Held by |
+|---|---|---|---|---|
+| **F-03** | The bottle deposit was charged, folded into `vendor_net`, and recorded nowhere; no refund path existed | An **invisible liability**; a `keep_my_bottle` customer could never get their deposit back | `Orders.bottle_deposit`, `Users.bottle_deposit_balance`, `Users.bottles_held`, `customer_bottle_service`, and an audited admin return | `test_customer_bottle_deposit.py` |
+| **F-14** | `device_id` was declared for "one offer per device" and read by nothing | The 30% welcome discount — **pure platform margin** — was farmable with fresh sign-ups from one handset | `welcome_offer_available` checks the device; the `unique=True` index became a plain one | `test_welcome_offer_antifraud.py` |
+| **F-02** | Wholesale surcharges landed in `rider_net` on orders where no rider is ever paid | KSH 80 per 10-unit order collected and **allocated to nobody**; `platform_total` understated what was retained | Surcharges go to `vendor_net`; `rider_net` is zero on wholesale | `test_revenue_split_identity.py` |
 
 ### Medium — correctness and operational integrity
 
-| # | Finding | Cost | Fix |
+| # | What was wrong | Fix | Held by |
 |---|---|---|---|
-| **F-05** | Tier 1 dispatch applies no geographic filter | The **highest-priority** offer can go to a rider in another city | Add the H3 + `ST_DWithin` pair used by Tiers 2 and 3 |
-| **F-09** | The KSh 10 cashback bypasses `apply_wallet_delta` | No ledger row; a customer's transactions **no longer reconcile to their balance** | Route through `apply_wallet_delta`; move 10.0 into settings |
-| **F-04** | The KSh 30 mismatch charge is a hardcoded float, unrelated to `staircase_surcharge_per_floor`, that creates permanent debt | Inconsistent pricing; breaks the Decimal rule; compounds F-01 | Derive from the setting × floors, as `Decimal`, settled like any surcharge |
-| **F-07** | Tier 2 escalation waits on an in-process `asyncio.sleep(20)` | A restart during the window delays the order by **3 minutes** instead of 20 seconds | Enqueue a delayed ARQ job |
-| **F-13** | `delete_product` hard-deletes a row referenced by `OrderItem` | 500s or orphaned history; orphaned items contribute **zero** to the bottle ledger | Soft-delete, or refuse when order items exist |
+| **F-05** | Tier 1 dispatch had **no geographic predicate at all** | Uses `rider_search_bounds`, the same H3 + `ST_Distance` bound as Tiers 2 and 3, ordered by distance | `test_remediation_structural.py` |
+| **F-09** | The KSH 10 cashback was a bare `wallet_balance += 10.0` with no ledger row | Through `apply_wallet_delta`; amount is a setting | AST test bans direct `wallet_balance` assignment |
+| **F-04** | The KSH 30 mismatch charge was a hardcoded float, flat regardless of floors | Derived from `staircase_surcharge_per_floor` as `Decimal`, net of what checkout already charged | `test_remediation_structural.py` |
+| **F-07** | Tier 2 waited on an in-process `asyncio.sleep(20)` | Enqueued as a deferred ARQ job keyed on the order id; the sleep is a logged fallback | `test_remediation_structural.py` |
+| **F-13** | `delete_product` hard-deleted a row `Order_Items` references | `Products.deleted_at` + `live_product()` on every catalogue read | AST test counting filters per `select(Product)` |
 
 ### Low — inert code and hygiene
 
-| # | Finding | Cost | Fix |
-|---|---|---|---|
-| **F-10** | `User.empty_bottles_held` is never written; the 03:00 job matches nothing | A nightly job that **has never sent a message**, reading as coverage that is not there | Write the column, or delete it and the job |
-| **F-11** | `order_stale_after_minutes` (45) and `rider_kyc_sla_hours` (24) are read by nothing | Console controls that **lie about being connected** | Wire them up, or remove them from `SPECS` |
-| **F-08** | Several money columns are still `Double`/`Float` | Precision can be lost before the service layer's `Decimal` coercion sees it | Migrate to `Numeric(10,2)` |
-| **F-06** | `get_closest_deliverer` falls back to an unbounded global scan | A sequential scan of every rider on every miss, at scale | Bound the fallback |
+| # | What was wrong | Fix |
+|---|---|---|
+| **F-10** | `stale_asset_monitor` read `empty_bottles_held`, a **dropped** column — so it raised `AttributeError` on every run, worse than the "matched nothing" first reported | Reads `Users.bottles_held`, maintained with the deposit balance |
+| **F-11** | `order_stale_after_minutes` and `rider_kyc_sla_hours` were console fields wired to nothing | Both now drive real behaviour; a new `order_auto_cancel_minutes` drives the sweep, with a validator refusing an incoherent pair |
+| **F-08** | Five money columns were `Double` | Migration `b8e3d1a5c704` moves them to `Numeric(10, 2)` |
+| **F-06** | The fallback rider scan compared a computed `ST_Distance` | `ST_DWithin`, which can use the GiST index |
 
-### Suggested sequence
+Plus one inconsistency noted in §16: `commission_lost` was set on five of six
+reversal paths, missing exactly the vendor's own reject. All six now call
+`order_service.revert_order_side_effects`, which is the single implementation of
+what cancelling an order actually undoes — stock, wallet credit, settled debt,
+bottle deposit, welcome offer, refund flag and lost commission. A parametrised
+test asserts every reversal site calls it.
 
-1. **F-12** then **F-01** — both are live, both are small, and both are the kind of
-   defect a single user hits and cannot work around.
-2. **F-14** and **F-03** together — they are the same conversation about the deposit
-   and the welcome offer, and F-03's schema change is the larger of the two.
-3. **F-02**, **F-09**, **F-04** — three separate places where a figure ends up in the
-   wrong column. Fixing them together makes one reconciliation pass possible.
-4. **F-05** and **F-07** — dispatch quality, best done as one change to
-   `dispatch_order_to_riders`.
-5. The rest as hygiene.
+### What this changed in the numbers
+
+Two figures in §7 and §8 move as a result:
+
+* **Wholesale `rider_net` is now 0**, and Example D's KSH 80 payload surcharge
+  goes to `vendor_net` (5,825.00 → 5,905.00). The order now balances exactly:
+  5,905.00 + 222.50 = 6,127.50.
+* **`platform_total` gains any settled debt.** A customer clearing a KSH 50
+  penalty adds 50 to platform revenue on that order, and nothing to the vendor's
+  or the rider's share.
+
+### Forty-six settings, not thirty-four
+
+The configuration surface grew from 34 to **46** as figures came out of the code:
+
+| Group | Added |
+|---|---|
+| `fees` | `loyalty_cashback_per_delivery`, `late_cancellation_penalty` |
+| `limits` | `max_customer_debt_before_block` |
+| `payouts` *(new group)* | `payout_min_rider`, `payout_min_retail_vendor`, `payout_min_wholesale_vendor`, `payout_transaction_fee`, `payout_fee_waiver_rider`, `payout_fee_waiver_retail_vendor`, `payout_fee_waiver_wholesale_vendor`, `min_wallet_topup` |
+| `workflow` | `order_auto_cancel_minutes` |
+
+Three new cross-field validators refuse a configuration that cannot work: a
+withdrawal minimum at or below its own fee, a fee waiver below the minimum, and
+an auto-cancel age at or above the stale threshold.
+
+### Seeded data
+
+The seeders produced data no live code path could have created, and every fault
+silently broke a feature that looked fine in the database. Riders were scattered
+across Nairobi while all vendors sat in Ngong; **neither vendors nor riders had an
+`h3_index_res8`**, so every discovery and dispatch query — all of which pre-filter
+on it — found nothing; riders were `is_active=False` with unsubmitted KYC and no
+wallet balance, so none could have accepted a delivery; wholesale was priced
+*above* retail; and `total_sales`/`sales_amount` were random numbers unconnected
+to any order.
+
+`seed_orders.py` now builds a cart and asks **`compute_order_quote`** what it
+costs, exactly as `create_order` does, so every line item and every split is
+whatever the live engine returns. `seed_perfect_orders.py` — which assembled
+totals by hand, used a `delivery_type` the platform does not recognise, and could
+pick a KSH 14,000 dispenser for a water-delivery scenario, producing the
+implausibly large totals — is deleted.
+
+---
 
 ### What is already strong, and should not be disturbed
 
@@ -1403,8 +1523,9 @@ to what is right:
   commit per item.
 - **The atomic stock decrement.** `UPDATE ... WHERE stock >= qty RETURNING` makes
   overselling structurally impossible rather than unlikely.
-- **The cash-float mechanism** is the right design, correctly reasoned, and applied
-  in five of the six places it belongs. F-12 is one missing call, not a missing idea.
+- **The cash-float mechanism** is the right design, correctly reasoned, and was
+  applied in five of the six places it belonged. F-12 was one missing call, not a
+  missing idea — which is why closing it was four lines rather than a redesign.
 - **The bottle ledger's invariant** — evidence plus index, written only through
   `_apply_movement`, with a `drift()` check and a one-way `reseat_counters()` — is
   the strongest piece of accounting on the platform.

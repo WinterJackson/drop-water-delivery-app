@@ -19,27 +19,14 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 
-# ── BUG-05 FIX: Stock Restoration Helper ──────────────────────────────────
+# Stock restoration lives in `order_service` with the rest of the reversal, so
+# there is one implementation rather than three that drifted. Re-exported here
+# because this module's own callers and its tests import it by this name.
 async def _restore_order_stock(session: AsyncSession, order: Order):
     """Atomically restore product stock for all items in a cancelled/rejected order."""
-    items_q = select(OrderItem).where(OrderItem.order_id == order.id)
-    result = await session.execute(items_q)
-    items = result.scalars().all()
+    from services.order_service import restore_order_stock
 
-    for item in items:
-        await session.execute(
-            update(Product)
-            .where(Product.id == item.product_id)
-            .values(
-                stock=Product.stock + item.quantity,
-                is_available=True,  # Re-enable if it was auto-disabled
-                # Back above the line, so the next crossing warns again. Without
-                # this the vendor is told once, ever, per product.
-                low_stock_notified_at=None,
-            )
-        )
-    if items:
-        logger.info(f"Restored stock for {len(items)} items from order {order.id}")
+    return await restore_order_stock(session, order)
 
 
 async def _reachable_vendor_filter(session: AsyncSession, clerk_id: str):
@@ -236,12 +223,40 @@ async def delete_product(session: AsyncSession, clerk_id: str, product_id: UUID,
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     product = await session.get(Product, product_id)
-    if not product or product.vendor_id != vendor.id:
+    if not product or product.vendor_id != vendor.id or product.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Product not found or does not belong to this vendor")
 
-    await session.delete(product)
+    # Withdraw it, do not delete the row.
+    #
+    # `Order_Items.product_id` references this table with no `ondelete`, so a
+    # hard delete of a product that has ever sold is a foreign-key violation the
+    # vendor sees as a bare 500. Relaxing the constraint would be worse: the
+    # bottle ledger reads `item.product.capacity` to work out what a rider owes,
+    # and an order item with no product silently contributes no bottle debt.
+    #
+    # A withdrawn product disappears from the catalogue and from the vendor's own
+    # list, but stays readable for the orders that reference it.
+    from datetime import datetime, timezone
+
+    sold_before = (
+        await session.execute(
+            select(OrderItem.id).where(OrderItem.product_id == product.id).limit(1)
+        )
+    ).scalars().first()
+
+    product.deleted_at = datetime.now(timezone.utc)
+    product.is_available = False
     await session.commit()
-    return {"message": "Product deleted successfully"}
+
+    return {
+        "message": (
+            "Product withdrawn. It is no longer on sale; past orders that include "
+            "it are unaffected."
+            if sold_before
+            else "Product deleted successfully"
+        ),
+        "product_id": str(product.id),
+    }
 
 
 async def get_vendor_orders(
@@ -298,7 +313,11 @@ async def get_vendor_products(
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     from sqlalchemy import and_, or_
-    conditions = [Product.vendor_id == vendor.id]
+    from services.product_service import live_product
+
+    # A withdrawn product is gone from the vendor's own catalogue too. It is kept
+    # only so the orders that reference it still resolve — `Product.deleted_at`.
+    conditions = [Product.vendor_id == vendor.id, live_product()]
     
     order_by_clauses = []
     
@@ -389,12 +408,17 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
 
     order.order_status = new_status
 
-    # BUG-05 FIX: Restore stock on rejection/cancellation
+    # Restore stock, return the customer's wallet credit, put back any debt this
+    # order was collecting, release the bottle deposit and record the lost
+    # commission. This branch previously restored stock and flagged the refund
+    # and nothing else — so `commission_lost` was null on every vendor rejection,
+    # which is the most common kind, and any report summing it was wrong.
     if new_status in ("rejected", "cancelled"):
-        await _restore_order_stock(session, order)
-        # Flag paid orders for refund processing
-        if order.payment_status == "paid":
-            order.payment_status = "refund_pending"
+        from services.order_service import revert_order_side_effects
+
+        await revert_order_side_effects(
+            session, order, reason=f"{new_status}_by_vendor"
+        )
 
     await session.commit()
     
@@ -550,13 +574,9 @@ async def cancel_order(session: AsyncSession, clerk_id: str, order_id: UUID, ven
 
     order.order_status = "cancelled"
 
-    # BUG-05 FIX: Restore stock on cancellation
-    await _restore_order_stock(session, order)
-    # Flag paid orders for refund
-    if order.payment_status == "paid":
-        order.payment_status = "refund_pending"
-        # Track the platform revenue lost due to this cancellation
-        order.commission_lost = order.platform_total
+    from services.order_service import revert_order_side_effects
+
+    await revert_order_side_effects(session, order, reason="cancelled_by_vendor")
 
     # BUG-ORD-01 FIX: Commit critical state change FIRST before notifications
     # This prevents notification failures from rolling back the cancellation

@@ -122,3 +122,111 @@ export async function adjustWallet(
     return fail(error);
   }
 }
+
+// ── Customer balances ────────────────────────────────────────────────────
+//
+// Two obligations run in opposite directions: what the customer owes the
+// platform (debt_balance) and what the platform owes them (bottle_deposit_balance).
+// These actions surface and resolve both from the person detail page.
+
+export type CustomerBalances = {
+  customer_id: string;
+  wallet_balance: string;
+  debt_balance: string;
+  debt_ceiling: string;
+  debt_blocks_ordering: boolean;
+  bottle_deposit_balance: string;
+  bottles_held: number;
+};
+
+/** Fetch debt, deposit and wallet state for a customer. */
+export async function fetchCustomerBalances(
+  id: string,
+): Promise<ActionResult<CustomerBalances>> {
+  try {
+    const data = await get<CustomerBalances>(
+      `/api/admin/people/customers/${id}/balances`,
+    );
+    return { ok: true, data };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export type WriteOffResult = {
+  customer_id: string;
+  written_off: string;
+  debt_balance: string;
+};
+
+/** Write off some or all of what a customer owes. */
+export async function writeOffDebt(
+  id: string,
+  amount: string | null,
+  reason: string,
+): Promise<ActionResult<WriteOffResult>> {
+  if (reason.trim().length < 10) {
+    return {
+      ok: false,
+      error: "At least ten characters — this is recorded against your account.",
+    };
+  }
+
+  try {
+    const body: Record<string, unknown> = { reason: reason.trim() };
+    if (amount !== null && amount.trim() !== "") {
+      const parsed = Number(amount);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return { ok: false, error: "Enter a positive amount, or leave blank to clear everything." };
+      }
+      body.amount = amount;
+    }
+
+    const data = await post<WriteOffResult>(
+      `/api/admin/people/customers/${id}/debt/write-off`,
+      body,
+    );
+    revalidatePath(`/people/customers/${id}`);
+    return { ok: true, data };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export type DepositReturnResult = {
+  customer_id: string;
+  amount_refunded: string;
+  bottles_returned: number;
+  bottles_held: number;
+  bottle_deposit_balance: string;
+  wallet_balance: string;
+};
+
+/** Return a bottle deposit to the customer's wallet. */
+export async function returnDeposit(
+  id: string,
+  bottles: string,
+  reason: string,
+): Promise<ActionResult<DepositReturnResult>> {
+  const count = Number(bottles);
+  if (!Number.isInteger(count) || count < 1) {
+    return { ok: false, error: "Enter a whole number of bottles (at least 1)." };
+  }
+  if (reason.trim().length < 10) {
+    return {
+      ok: false,
+      error: "At least ten characters — this is recorded against your account.",
+    };
+  }
+
+  try {
+    const data = await post<DepositReturnResult>(
+      `/api/admin/people/customers/${id}/deposit/return`,
+      { bottles: count, reason: reason.trim() },
+    );
+    revalidatePath(`/people/customers/${id}`);
+    return { ok: true, data };
+  } catch (error) {
+    return fail(error);
+  }
+}

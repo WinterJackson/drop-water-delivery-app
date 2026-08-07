@@ -141,7 +141,9 @@ class TestOrdersIntegration:
             product_subtotal=Decimal("500.00"), delivery_fee=Decimal("68.00"),
             service_fee=Decimal("12.00"), surge_fee=Decimal("10.00"),
             delivery_markup=Decimal("0.00"), payload_surcharge=Decimal("0.00"),
-            staircase_surcharge=Decimal("0.00"), bottle_deposit=Decimal("0.00"),
+            staircase_surcharge=Decimal("0.00"),
+            bottle_deposit=Decimal("0.00"),
+            debt_settlement=Decimal("0.00"),
             welcome_discount=Decimal("0.00"), wallet_discount=Decimal("0.00"),
             total=Decimal("590"), surge_active=True, is_welcome_offer=False,
             revenue={

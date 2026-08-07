@@ -133,25 +133,39 @@ async def _get_available_balance(session: AsyncSession, clerk_id: str, provider_
         wallet_balance=owner.wallet_balance,
     )
 
+async def _vendor_type_of(session: AsyncSession, provider_id, provider_type: str) -> str | None:
+    """The store's business type, resolved **by id**.
+
+    A clerk-id lookup returns an arbitrary one of the owner's stores, so a
+    wholesale branch could be given the retail threshold — or vice versa —
+    depending on row order.
+    """
+    if provider_type != "vendor":
+        return None
+    vendor = await _vendor_by_id(session, provider_id)
+    if vendor is None or vendor.vendor_type is None:
+        return None
+    raw = vendor.vendor_type
+    return raw.value if hasattr(raw, "value") else str(raw)
+
+
 async def get_payout_limits(session: AsyncSession, clerk_id: str, provider_id, provider_type: str):
-    """
-    Determine minimum withdrawal threshold and transaction fee.
-    Transaction fee is borne by the provider (deducted from withdrawn amount) 
-    to ensure the platform does not lose margin on B2C charges.
-    """
-    minimum_threshold = 500.0
-    transaction_fee = 15.0  # Standard M-Pesa B2C tariff
+    """Minimum withdrawal and the transaction fee, from `Platform_Settings`.
 
-    if provider_type == "rider":
-        minimum_threshold = 250.0
-    else:
-        # By id, not by clerk id. A clerk-id lookup returns an arbitrary one of
-        # the owner's stores, so a wholesale branch could be given the retail
-        # threshold — or vice versa — depending on row order.
-        vendor = await _vendor_by_id(session, provider_id)
-        minimum_threshold = 1000.0 if (vendor and vendor.vendor_type == "wholesale_b2b") else 500.0
+    The fee is borne by the provider — deducted from the amount withdrawn — so
+    the platform does not lose margin on the M-Pesa B2C tariff.
 
-    return minimum_threshold, transaction_fee
+    Delegates to `settlement_service.withdrawal_terms`, which is also what
+    `wallet_service` reads. These were two sets of hardcoded literals that
+    disagreed on both the minimum and when the fee was waived.
+    """
+    from services.settlement_service import withdrawal_terms
+
+    vendor_type = await _vendor_type_of(session, provider_id, provider_type)
+    minimum, fee, _waiver = await withdrawal_terms(
+        session, provider_type=provider_type, vendor_type=vendor_type
+    )
+    return float(minimum), float(fee)
 
 
 async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreate):
@@ -168,18 +182,16 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
             # Already processed, return it (idempotent success)
             return existing_payout
 
-    # Get limits
-    min_threshold, tx_fee = await get_payout_limits(session, clerk_id, provider_id, provider_type)
-    
-    # ── Fee Waiver Logic (Anti-Fraud / Float Retention) ──
-    if provider_type == "rider" and data.amount >= 1000.0:
-        tx_fee = 0.0
-    elif provider_type == "vendor":
-        vendor = await _vendor_by_id(session, provider_id)
-        if vendor and vendor.vendor_type == "wholesale_b2b" and data.amount >= 5000.0:
-            tx_fee = 0.0
-        elif vendor and vendor.vendor_type != "wholesale_b2b" and data.amount >= 2500.0:
-            tx_fee = 0.0
+    # ── Limits and fee, from the one schedule ──
+    from services.settlement_service import fee_for, withdrawal_terms
+
+    vendor_type = await _vendor_type_of(session, provider_id, provider_type)
+    minimum, fee, waiver = await withdrawal_terms(
+        session, provider_type=provider_type, vendor_type=vendor_type
+    )
+    requested = Decimal(str(data.amount))
+    min_threshold = float(minimum)
+    tx_fee = float(fee_for(requested, fee, waiver))
 
     if data.amount < min_threshold:
         raise HTTPException(status_code=400, detail=f"Minimum withdrawal is KSH {min_threshold}")
@@ -195,28 +207,16 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
     # Lock the balance row before reading it, so a concurrent payout or a cash
     # order settling cannot move it between the check and the debit.
     owner = await _get_provider_row(session, provider_id, provider_type)
-    available_balance = await _get_available_balance(
-        session, clerk_id, provider_id, provider_type, owner=owner
+
+    from services.settlement_service import assert_withdrawable
+
+    available_balance = await assert_withdrawable(
+        session,
+        provider_id=provider_id,
+        provider_type=provider_type,
+        wallet_balance=owner.wallet_balance,
+        amount=requested,
     )
-
-    requested = Decimal(str(data.amount))
-    if requested > available_balance:
-        from services.settlement_service import committed_cash_float, committed_cash_float_for_vendor
-
-        committed = (
-            await committed_cash_float_for_vendor(session, provider_id)
-            if provider_type == "vendor"
-            else await committed_cash_float(session, provider_id)
-        )
-        detail = f"Insufficient balance. Available: KSH {available_balance:.2f}"
-        if committed > 0:
-            # Say why, or a rider stares at a balance they cannot withdraw.
-            detail += (
-                f" (KSH {committed:.2f} of your KSH {Decimal(str(owner.wallet_balance or 0)):.2f}"
-                " is held as float for cash orders you are carrying, and is released"
-                " when you deliver them)."
-            )
-        raise HTTPException(status_code=400, detail=detail)
 
     payout = Payout(
         provider_id=provider_id,

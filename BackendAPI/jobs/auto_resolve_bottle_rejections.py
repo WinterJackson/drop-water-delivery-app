@@ -4,7 +4,7 @@ from sqlalchemy import select, and_
 from dependencies.dependencies import get_db_session
 from models.bottle_rejection_model import BottleRejectionTicket, RejectionStatus
 from models.order_model import Order
-from services.vendor_management_service import _restore_order_stock
+from services.order_service import revert_order_side_effects
 from routes.websocket_routes import manager
 
 logger = logging.getLogger(__name__)
@@ -55,11 +55,9 @@ async def run_auto_resolve_bottle_rejections(batch_size: int = 100):
                 order = await session.get(Order, rejection.order_id)
                 if order and order.order_status == "pending_review":
                     order.order_status = "cancelled"
-                    order.cancellation_reason = "bottle_rejection_timeout"
-                    if order.payment_status == "paid":
-                        order.payment_status = "refund_pending"
-                        order.commission_lost = order.platform_total
-                    await _restore_order_stock(session, order)
+                    await revert_order_side_effects(
+                        session, order, reason="bottle_rejection_timeout"
+                    )
 
                     broadcasts.append({
                         "vendor_id": str(order.vendor_id),

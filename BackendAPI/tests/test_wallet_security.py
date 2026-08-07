@@ -229,9 +229,14 @@ async def test_withdrawal_below_minimum_is_rejected():
     from fastapi import HTTPException
     from services.wallet_service import initiate_wallet_withdrawal
 
-    with pytest.raises(HTTPException) as exc:
+    from models.user_model import User
+    with pytest.raises(HTTPException) as exc, \
+         patch("services.wallet_service.resolve_wallet_owner", new_callable=AsyncMock) as mock_resolve, \
+         patch("services.settlement_service.withdrawal_terms", new_callable=AsyncMock) as mock_terms:
+        mock_resolve.return_value = ("customer", User, MagicMock(id=uuid4()))
+        mock_terms.return_value = (Decimal("250"), Decimal("0"), Decimal("1000"))
         await initiate_wallet_withdrawal(
-            session=AsyncMock(), user_id="customer_clerk", user_type="customer",
+            session=_session_with(transaction=MagicMock(wallet_balance=Decimal("200"))), user_id="customer_clerk", user_type="customer",
             amount=100, phone="254700000000",
         )
     assert exc.value.status_code == 400
@@ -243,9 +248,12 @@ async def test_topup_rejects_malformed_phone():
     from fastapi import HTTPException
     from services.wallet_service import initiate_wallet_topup
 
-    with pytest.raises(HTTPException) as exc:
+    from models.user_model import User
+    with pytest.raises(HTTPException) as exc, \
+         patch("services.wallet_service.resolve_wallet_owner", new_callable=AsyncMock) as mock_resolve:
+        mock_resolve.return_value = ("customer", User, MagicMock(id=uuid4()))
         await initiate_wallet_topup(
-            session=AsyncMock(), user_id="customer_clerk", user_type="customer",
+            session=_session_with(transaction=MagicMock()), user_id="customer_clerk", user_type="customer",
             amount=500, phone="0700000000",
         )
     assert exc.value.status_code == 400

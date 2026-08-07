@@ -48,8 +48,10 @@ class Product(Base):
   name = Column(String, nullable=False, index=True)
   description = Column(Text, nullable=True)  #OPTIONAL
   image_url= Column(Text, nullable=False)
-  price = Column(Double, nullable=False, index=True)
-  discount = Column(Double, nullable=False, index=True , default=0)
+  # `Numeric`, not `Double`. The effective price (`price - discount`) is frozen
+  # onto every cart and order item, and is the base of the vendor commission.
+  price = Column(Numeric(10, 2), nullable=False, index=True)
+  discount = Column(Numeric(10, 2), nullable=False, index=True , default=0)
   capacity = Column(Double, nullable=False, index=True)
   weight_kg = Column(Numeric(5, 2), nullable=False, default=20.0, index=True)
   minimum_order_qty = Column(Integer, nullable=False, default=1, index=True)
@@ -63,6 +65,13 @@ class Product(Base):
   #: crossing, not one per unit sold below the line.
   low_stock_notified_at = Column(TIMESTAMP(timezone=True), nullable=True)
   is_available = Column(Boolean, default=True, index=True)
+  #: Set instead of deleting the row. `Order_Items.product_id` references this
+  #: table with no `ondelete`, so a hard delete of a product that has ever sold
+  #: is a foreign-key violation surfaced to the vendor as a 500 — and if the
+  #: constraint were relaxed it would be worse, because the bottle ledger reads
+  #: `item.product.capacity` and an order with no product contributes no debt.
+  #: A withdrawn product stays queryable for the history that references it.
+  deleted_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
   category = Column(
       Enum(ProductCategory, name="product_category", create_type=False),
       nullable=True,

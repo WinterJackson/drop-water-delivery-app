@@ -326,6 +326,8 @@ async def test_welcome_offer_is_not_returned_when_cancelling_an_unpaid_order():
     order.is_welcome_offer = True
     order.welcome_discount = Decimal("270")
     order.wallet_discount = Decimal("0")
+    order.debt_settlement = Decimal("0")
+    order.bottle_deposit = Decimal("0")
     order.deliverer_id = None
     order.vendor_id = uuid4()
 

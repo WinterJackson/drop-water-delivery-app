@@ -29,6 +29,7 @@ export interface CartQuote {
     payload_surcharge: number;
     staircase_surcharge: number;
     bottle_deposit: number;
+    debt_settlement: number;
     welcome_discount: number;
     wallet_discount: number;
     total: number;

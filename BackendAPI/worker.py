@@ -108,6 +108,25 @@ async def stale_asset_monitor_task(ctx):
     return "Swept stale assets"
 
 
+async def dispatch_trip_radar_task(ctx, order_id: str, params: dict):
+    """Tier 2 of the dispatch escalation, twenty seconds after Tier 1.
+
+    Enqueued with `_defer_by` rather than waited for with `asyncio.sleep` inside
+    the API process. The sleep meant a deploy or a restart during the window
+    killed the escalation, and the order was only rescued three minutes later by
+    the re-offer sweep. Redis survives the restart; the API process does not.
+
+    The job re-checks the order's status before broadcasting, so one accepted
+    during the wait is never offered twice.
+    """
+    from uuid import UUID
+
+    from services.order_service import broadcast_trip_radar
+
+    await broadcast_trip_radar(order_id=UUID(order_id), **params)
+    return f"Trip Radar evaluated for order {order_id}"
+
+
 async def run_broadcast_campaign(ctx, campaign_id: str):
     """Send an admin broadcast to its whole audience, in batches.
 
@@ -137,6 +156,7 @@ class WorkerSettings:
         reassign_unassigned_orders_task,
         check_push_receipts_task,
         stale_asset_monitor_task,
+        dispatch_trip_radar_task,
     ]
     redis_settings = redis_settings
     on_startup = startup

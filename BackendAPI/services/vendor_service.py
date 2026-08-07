@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from uuid import UUID
 from services import platform_config_service
 from services.dispatch_policy import DispatchPolicy
+from services.product_service import live_product
 
 
 #: Statuses that take a store out of the customer-facing app entirely.
@@ -110,7 +111,7 @@ async def get_nearby_vendors(session : AsyncSession, lat : float, lng : float ) 
               ST_DWithin(Vendor.location, user_point, max_distance_m),
           )
       )
-      .options(joinedload(Vendor.products))
+      .options(joinedload(Vendor.products.and_(live_product())))
       .order_by(ST_Distance(Vendor.location, user_point))
       .limit(3)
   )
@@ -180,7 +181,7 @@ async def get_vendor_by_id_service(session: AsyncSession, id: UUID) -> VendorWit
   query = (
       select(Vendor)
       .where(Vendor.id == id, discoverable_vendor())
-      .options(joinedload(Vendor.products))
+      .options(joinedload(Vendor.products.and_(live_product())))
   )
   result = await session.execute(query)
   vendor = result.unique().scalar_one_or_none()
@@ -236,7 +237,7 @@ async def get_vendor_directory(
 
     query = (
         select(Vendor)
-        .options(joinedload(Vendor.products))
+        .options(joinedload(Vendor.products.and_(live_product())))
         .where(
             discoverable_vendor(),
             Vendor.h3_index_res8.in_(neighbour_cells),

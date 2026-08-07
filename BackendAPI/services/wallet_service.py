@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 # The three wallet-bearing entities, keyed by the `user_type` a client may claim.
 _WALLET_OWNER_MODELS = {"customer": User, "vendor": Vendor, "rider": Deliverer}
 
+# Shipped defaults only. Both limits are `Platform_Settings` rows read through
+# `settlement_service.withdrawal_terms` / `platform_config_service`; these remain
+# so the module is readable on its own and so a running process still refuses an
+# absurd request with the settings table unreachable.
 MIN_TOPUP_KSH = Decimal("10")
-MIN_WITHDRAWAL_KSH = Decimal("500")
+MIN_WITHDRAWAL_KSH = Decimal("250")
 
 
 async def resolve_wallet_owner(
@@ -146,8 +150,12 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
     import re
 
     amount_dec = Decimal(str(amount))
-    if amount_dec < MIN_TOPUP_KSH:
-        raise HTTPException(status_code=400, detail=f"Minimum top-up amount is {MIN_TOPUP_KSH:.0f} KSH.")
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(session)
+    minimum_topup = config.get_decimal("min_wallet_topup")
+    if amount_dec < minimum_topup:
+        raise HTTPException(status_code=400, detail=f"Minimum top-up amount is {minimum_topup:.0f} KSH.")
     if amount_dec != amount_dec.to_integral_value():
         raise HTTPException(status_code=400, detail="Top-up amount must be a whole number of shillings.")
     if not re.match(r"^254[17]\d{8}$", phone or ""):
@@ -299,10 +307,6 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
     import re
 
     amount = Decimal(str(amount))
-    if amount < MIN_WITHDRAWAL_KSH:
-        raise HTTPException(
-            status_code=400, detail=f"Minimum withdrawal amount is {MIN_WITHDRAWAL_KSH:.0f} KSH."
-        )
     if amount != amount.to_integral_value():
         raise HTTPException(status_code=400, detail="Withdrawal amount must be a whole number of shillings.")
 
@@ -326,24 +330,52 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
         raise HTTPException(status_code=404, detail="User not found.")
 
     current_balance = Decimal(str(user.wallet_balance or 0))
-    if current_balance < amount:
-        raise HTTPException(status_code=400, detail="Insufficient wallet balance.")
 
-    transaction_fee = Decimal("15")
-    if user_type == "vendor":
-        raw_vendor_type = getattr(user, "vendor_type", "")
-        vendor_type_str = raw_vendor_type.value if hasattr(raw_vendor_type, "value") else str(raw_vendor_type)
-        threshold = Decimal("5000") if vendor_type_str == "wholesale_b2b" else Decimal("2500")
-        if current_balance >= threshold:
-            transaction_fee = Decimal("0")
-    elif user_type == "rider":
-        if current_balance >= Decimal("1000"):
-            transaction_fee = Decimal("0")
-    elif user_type == "customer":
-        transaction_fee = Decimal("0")
+    # ── The one withdrawal schedule ──
+    # Minimum, fee and waiver come from `settlement_service`, which
+    # `payout_service` also reads. This function used to carry its own set of
+    # literals: a flat 500 minimum against the other path's 250/500/1000, and a
+    # fee waived on the *balance held* rather than the amount withdrawn. The same
+    # withdrawal therefore cost a different amount depending on which endpoint
+    # the app called.
+    from services.settlement_service import (
+        assert_withdrawable,
+        fee_for,
+        withdrawal_terms,
+    )
 
+    raw_vendor_type = getattr(user, "vendor_type", None)
+    vendor_type_str = (
+        raw_vendor_type.value if hasattr(raw_vendor_type, "value")
+        else (str(raw_vendor_type) if raw_vendor_type else None)
+    )
+    minimum, fee, waiver = await withdrawal_terms(
+        session, provider_type=user_type, vendor_type=vendor_type_str
+    )
+
+    if amount < minimum:
+        raise HTTPException(
+            status_code=400, detail=f"Minimum withdrawal amount is {minimum:.0f} KSH."
+        )
+
+    transaction_fee = fee_for(amount, fee, waiver)
     if amount <= transaction_fee:
         raise HTTPException(status_code=400, detail=f"Withdrawal amount must be greater than network fee (KSH {transaction_fee}).")
+
+    # ── The float check this path was missing ──
+    # `wallet_balance` alone is not what is spendable: a rider carrying open cash
+    # orders has already promised part of it to the vendor's cut and the
+    # platform's, settled when they deliver. Comparing against the raw balance
+    # let them withdraw the float backing those orders and then deliver into a
+    # negative balance the platform has no way to collect — while
+    # `POST /api/payouts/request` refused the very same request.
+    await assert_withdrawable(
+        session,
+        provider_id=user.id,
+        provider_type=user_type,
+        wallet_balance=current_balance,
+        amount=amount,
+    )
 
     user.wallet_balance = current_balance - amount
     disbursement_amount = amount - transaction_fee

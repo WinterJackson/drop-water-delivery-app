@@ -155,6 +155,13 @@ SPECS: tuple[SettingSpec, ...] = (
     _money("min_chargeable_total", "fees", "Minimum chargeable total",
            "Discounts never take an order below this. Safaricom rejects an STK "
            "push for zero, so this cannot be 0.", 1.0, maximum=1_000.0),
+    _money("loyalty_cashback_per_delivery", "fees", "Loyalty cashback",
+           "Credited to the customer's wallet on every completed delivery, out of "
+           "platform margin. Set to 0 to switch it off.", 10.0, maximum=1_000.0),
+    _money("late_cancellation_penalty", "fees", "Late cancellation penalty",
+           "Charged when a customer cancels an order the vendor had already "
+           "accepted and is likely preparing. Added to their balance and collected "
+           "on their next order. Set to 0 to switch it off.", 50.0, maximum=10_000.0),
 
     # ── Delivery pricing ──────────────────────────────────────────────────
     _money("retail_delivery_base_fee", "delivery", "Retail delivery base fee",
@@ -193,6 +200,34 @@ SPECS: tuple[SettingSpec, ...] = (
     SettingSpec("wholesale_moq_kg", "limits", "Wholesale minimum order",
                 "Wholesale orders below this weight are refused.",
                 "int", 100, 1, 10_000, "kg"),
+    _money("max_customer_debt_before_block", "limits", "Debt ceiling",
+           "A customer owing less than this settles it automatically on their next "
+           "order, as a visible line item. Only a debt at or above this figure "
+           "blocks them from ordering at all.", 500.0, maximum=100_000.0),
+
+    # ── Withdrawals ───────────────────────────────────────────────────────
+    # One schedule, read by both withdrawal paths. These were four sets of
+    # hardcoded literals in two modules that disagreed with each other, so the
+    # same withdrawal cost a different amount depending on which endpoint the
+    # app happened to call.
+    _money("payout_min_rider", "payouts", "Rider minimum withdrawal",
+           "A rider cannot withdraw less than this.", 250.0, maximum=100_000.0),
+    _money("payout_min_retail_vendor", "payouts", "Retail vendor minimum withdrawal",
+           "", 500.0, maximum=100_000.0),
+    _money("payout_min_wholesale_vendor", "payouts", "Wholesale vendor minimum withdrawal",
+           "Higher than retail because the balances are larger and each "
+           "disbursement costs the platform an M-Pesa B2C tariff.", 1_000.0, maximum=1_000_000.0),
+    _money("payout_transaction_fee", "payouts", "Withdrawal fee",
+           "Deducted from the amount withdrawn, so the platform does not lose "
+           "margin on the M-Pesa B2C tariff.", 15.0, maximum=1_000.0),
+    _money("payout_fee_waiver_rider", "payouts", "Rider fee waiver threshold",
+           "A rider withdrawing at least this much pays no fee.", 1_000.0, maximum=1_000_000.0),
+    _money("payout_fee_waiver_retail_vendor", "payouts", "Retail vendor fee waiver threshold",
+           "", 2_500.0, maximum=1_000_000.0),
+    _money("payout_fee_waiver_wholesale_vendor", "payouts", "Wholesale vendor fee waiver threshold",
+           "", 5_000.0, maximum=1_000_000.0),
+    _money("min_wallet_topup", "payouts", "Minimum top-up",
+           "The smallest amount an STK push may be raised for.", 10.0, maximum=10_000.0),
 
     # ── Workflow switches ─────────────────────────────────────────────────
     SettingSpec("require_vendor_verification", "workflow",
@@ -206,8 +241,14 @@ SPECS: tuple[SettingSpec, ...] = (
                 "accept any delivery until reviewed, so this is a supply metric.",
                 "int", 24, 1, 720, "hours"),
     SettingSpec("order_stale_after_minutes", "workflow", "Order stale after",
-                "An accepted, undispatched order older than this is surfaced as stuck.",
+                "An accepted, undispatched order older than this is surfaced as stuck "
+                "on the console's order board. Surfacing only — nothing is cancelled.",
                 "int", 45, 5, 1440, "minutes"),
+    SettingSpec("order_auto_cancel_minutes", "workflow", "Auto-cancel unclaimed after",
+                "An order nobody has claimed by this age is cancelled outright, its "
+                "stock returned and a paid order flagged for refund. Must be below "
+                "the stale threshold, which only surfaces a warning.",
+                "int", 15, 5, 1440, "minutes"),
 )
 
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SPECS}
@@ -219,6 +260,7 @@ GROUP_LABELS = {
     "delivery": "Delivery pricing",
     "bottles": "Bottles and acquisition",
     "limits": "Operating limits",
+    "payouts": "Withdrawals",
     "workflow": "Workflow",
 }
 
@@ -343,6 +385,39 @@ def validate_all(proposed: dict[str, Any]) -> dict[str, Any]:
             "Vendor and rider commission together would take the entire order value. "
             "Nothing would be left to pay either of them."
         )
+
+    if merged["order_auto_cancel_minutes"] >= merged["order_stale_after_minutes"]:
+        raise ValueError(
+            "Orders would be cancelled before they were ever flagged as stuck. "
+            "The auto-cancel age must be below the stale threshold, or the console "
+            "never surfaces an order in time for anyone to rescue it."
+        )
+
+    # A withdrawal that cannot cover its own fee is a request the API can only
+    # refuse, so a configuration that guarantees one is a configuration error.
+    for minimum_key, label in (
+        ("payout_min_rider", "rider"),
+        ("payout_min_retail_vendor", "retail vendor"),
+        ("payout_min_wholesale_vendor", "wholesale vendor"),
+    ):
+        if merged[minimum_key] <= merged["payout_transaction_fee"]:
+            raise ValueError(
+                f"The {label} minimum withdrawal is not above the withdrawal fee. "
+                "Every withdrawal at the minimum would be refused for not covering "
+                "its own cost."
+            )
+
+    for waiver_key, minimum_key, label in (
+        ("payout_fee_waiver_rider", "payout_min_rider", "rider"),
+        ("payout_fee_waiver_retail_vendor", "payout_min_retail_vendor", "retail vendor"),
+        ("payout_fee_waiver_wholesale_vendor", "payout_min_wholesale_vendor", "wholesale vendor"),
+    ):
+        if merged[waiver_key] < merged[minimum_key]:
+            raise ValueError(
+                f"The {label} fee waiver threshold is below their minimum withdrawal, "
+                "so the fee would never be charged at all. Raise the threshold or "
+                "set the fee to zero deliberately."
+            )
 
     return cleaned
 

@@ -156,9 +156,68 @@ Withdrawal eligibility used to come from a separate derived earnings sum while
 payouts debited nothing, so the same money could be withdrawn *and* spent as
 cash-order float.
 
+**Every withdrawal path calls `settlement_service.assert_withdrawable`**, and
+takes its minimum and fee from `settlement_service.withdrawal_terms`. There are
+two paths — `payout_service.request_payout` and
+`wallet_service.initiate_wallet_withdrawal` — and they disagreed on all three:
+the second compared against the raw balance, so a rider could withdraw the float
+backing their open cash orders and then deliver into arrears the platform cannot
+collect. It also carried its own minimum and waived the fee on the *balance held*
+rather than the amount withdrawn. `tests/test_withdrawal_unification.py` walks
+each withdrawal function and fails the build on a missing `assert_withdrawable`
+or a re-introduced literal.
+
 Move balances only through `wallet_service.apply_wallet_delta`, which mutates the
 balance and appends the signed `WalletTransaction` in one call. Money is `Decimal`,
-never `float`. See `docs/cash-settlement.md`.
+never `float`. A bare `wallet_balance +=` fails the build. See
+`docs/cash-settlement.md`.
+
+## 🍶 Deposits, debt, and the three bottle relationships
+
+Three separate obligations, three owners, and none of them may be re-derived:
+
+| Relationship | Owner |
+|---|---|
+| Rider holds a vendor's empties | `bottle_ledger_service` |
+| Rider's aggregate debt to a vendor | `admin_bottle_service` |
+| **Customer paid a deposit and holds a bottle** | `customer_bottle_service` |
+
+`Users.bottle_deposit_balance` and `Users.bottles_held` are two views of one
+fact and move only through `customer_bottle_service._apply` — the same discipline
+`_apply_movement` enforces on the rider side, and for the same reason. The
+deposit was previously folded into `vendor_net` and forgotten, so the platform
+could not say what it owed and had no way to give one back.
+
+**`Users.debt_balance` is settleable, not a block.** A cancellation penalty or an
+approved staircase charge is collected on the customer's next order as
+`quote.debt_settlement`, cleared by `create_order`, and restored by every
+cancellation path. Only a balance at or above `max_customer_debt_before_block`
+refuses checkout. It was previously incremented in two places and decremented
+nowhere while any positive value returned 402, so one late cancellation locked an
+account out of the platform permanently over KSH 50.
+
+## ↩️ Cancelling an order is seven things, not one
+
+`order_service.revert_order_side_effects` is the only implementation: stock, the
+customer's wallet credit, the settled debt, the bottle deposit, the welcome
+offer, the refund flag and `commission_lost`. **Every reversal path calls it** —
+customer cancel, vendor cancel, vendor reject, rider cancel, and both sweeps.
+
+Six call sites each remembering a different subset is how `commission_lost` came
+to be null on precisely the most common kind of cancellation, the vendor's own
+reject. `tests/test_remediation_structural.py` is parametrised over all six.
+
+## 📦 Products are withdrawn, never deleted
+
+`Order_Items.product_id` is a foreign key with no `ondelete`, so deleting a
+product that has ever sold is a foreign-key violation the vendor sees as a bare
+500 — and relaxing the constraint would be worse, because
+`bottle_ledger_service` reads `item.product.capacity` and an order item with no
+product silently contributes no bottle debt.
+
+`delete_product` sets `Products.deleted_at`. Every catalogue read carries
+`product_service.live_product()`; an AST test counts filters against
+`select(Product)` calls per function and fails the build on a shortfall.
 
 ## 🔔 Notifications
 

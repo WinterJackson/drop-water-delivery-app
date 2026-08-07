@@ -301,7 +301,7 @@ async def test_create_order_blocks_customers_with_outstanding_debt():
     from services.order_service import create_order
 
     vendor_id = uuid4()
-    user = _customer(debt_balance=300)
+    user = _customer(debt_balance=500)
     vendor = _vendor(vendor_id)
     items = [_cart_item(vendor_id)]
     session = _build_session(user, vendor, items)

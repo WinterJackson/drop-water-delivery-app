@@ -56,7 +56,17 @@ def _user(*, wallet=0, first_order=False, floor=0, elevator=False):
     user.has_used_welcome_offer = not first_order
     user.floor_level = floor
     user.has_elevator = elevator
+    user.device_id = None
     return user
+
+
+def _mock_session():
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.first.return_value = None
+    session.execute = AsyncMock(return_value=result)
+    return session
+
 
 
 # Retail is capped at 4 bottles, wholesale needs ≥100 kg, so the two branches use
@@ -79,9 +89,11 @@ async def test_stk_amount_equals_persisted_total(vendor_type, surge, first_order
     items = [_item(vendor.id, quantity=quantity, price="250.00")]
     user = _user(wallet=wallet, first_order=first_order)
 
-    with patch.object(order_service, "is_surge_active", return_value=surge):
+    with patch.object(order_service, "is_surge_active", return_value=surge), \
+         patch("services.pricing_service.welcome_offer_available", new_callable=AsyncMock) as mock_welcome:
+        mock_welcome.return_value = first_order
         quote = await compute_order_quote(
-            AsyncMock(), items=items, user=user, vendor=vendor,
+            _mock_session(), items=items, user=user, vendor=vendor,
             delivery_type=delivery_type, lat=-1.2804, lng=36.8165,
         )
 
@@ -106,12 +118,12 @@ async def test_surge_adds_exactly_the_surge_fee():
 
     with patch.object(order_service, "is_surge_active", return_value=False):
         off_peak = await compute_order_quote(
-            AsyncMock(), items=items, user=user, vendor=vendor,
+            _mock_session(), items=items, user=user, vendor=vendor,
             delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
         )
     with patch.object(order_service, "is_surge_active", return_value=True):
         peak = await compute_order_quote(
-            AsyncMock(), items=items, user=user, vendor=vendor,
+            _mock_session(), items=items, user=user, vendor=vendor,
             delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
         )
 
@@ -156,7 +168,7 @@ async def test_welcome_discount_is_30_percent_of_the_whole_deposit():
     user = _user(first_order=True)
 
     quote = await compute_order_quote(
-        AsyncMock(), items=items, user=user, vendor=vendor,
+        _mock_session(), items=items, user=user, vendor=vendor,
         delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
     )
 
@@ -173,11 +185,11 @@ async def test_deposit_charged_for_keep_my_bottle_even_on_repeat_orders():
     user = _user(first_order=False)
 
     keep = await compute_order_quote(
-        AsyncMock(), items=items, user=user, vendor=vendor,
+        _mock_session(), items=items, user=user, vendor=vendor,
         delivery_type="keep_my_bottle", lat=-1.2804, lng=36.8165,
     )
     swap = await compute_order_quote(
-        AsyncMock(), items=items, user=user, vendor=vendor,
+        _mock_session(), items=items, user=user, vendor=vendor,
         delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
     )
 
@@ -195,7 +207,7 @@ async def test_wallet_never_discounts_the_total_below_one_shilling():
     user = _user(wallet=100_000)
 
     quote = await compute_order_quote(
-        AsyncMock(), items=items, user=user, vendor=vendor,
+        _mock_session(), items=items, user=user, vendor=vendor,
         delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
     )
 
@@ -211,7 +223,7 @@ async def test_welcome_discount_applies_before_wallet_credit():
     user = _user(wallet=10_000, first_order=True)
 
     quote = await compute_order_quote(
-        AsyncMock(), items=items, user=user, vendor=vendor,
+        _mock_session(), items=items, user=user, vendor=vendor,
         delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
     )
 
@@ -226,7 +238,7 @@ async def test_empty_cart_is_rejected_by_the_pricer():
 
     with pytest.raises(HTTPException) as exc:
         await compute_order_quote(
-            AsyncMock(), items=[], user=_user(), vendor=_vendor("retail_refill"),
+            _mock_session(), items=[], user=_user(), vendor=_vendor("retail_refill"),
             delivery_type="quick_swap", lat=-1.28, lng=36.82,
         )
     assert exc.value.status_code == 400

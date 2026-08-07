@@ -274,6 +274,7 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
         # went, and repeated float rounding drifted the balance.
         from services.wallet_service import apply_wallet_delta
         from models.wallet_transaction_model import TransactionType
+        from services import platform_config_service as config
 
         short_id = str(order.id)[:8].upper()
         is_wholesale = bool(vendor and vendor.vendor_type and vendor.vendor_type.value == "wholesale_b2b")
@@ -382,10 +383,31 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
             if hasattr(customer, 'bottle_refill_count'):
                 customer.bottle_refill_count = (customer.bottle_refill_count or 0) + 1
             customer.last_order_date = func.now()
-            
+
             # --- Anti-Poaching Loyalty Cashback ---
-            # Lock the customer to the app with a KSh 10 automatic non-withdrawable cashback
-            customer.wallet_balance += 10.0
+            # Through `apply_wallet_delta`, like every other balance movement on
+            # the platform. This was a bare `customer.wallet_balance += 10.0`: a
+            # float added to a `Numeric` column, with no `WalletTransaction`
+            # behind it, so the customer's own Transactions screen could not
+            # explain where the money came from and summing their ledger no
+            # longer reproduced their balance — the exact invariant
+            # `apply_wallet_delta` exists to hold.
+            #
+            # The amount is a setting rather than a literal, so it can be tuned
+            # or switched off from the console like every other business figure.
+            await config.ensure_fresh(session)
+            cashback = config.get_decimal("loyalty_cashback_per_delivery")
+            if cashback > 0 and customer.clerk_id:
+                await apply_wallet_delta(
+                    session,
+                    owner=customer,
+                    clerk_id=customer.clerk_id,
+                    user_type="customer",
+                    amount=cashback,
+                    transaction_type=TransactionType.refund,
+                    description=f"Loyalty cashback for order {short_id}",
+                    reference_id=str(order.id),
+                )
     await session.commit()
 
     try:
@@ -1033,32 +1055,22 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
     else:
         raise HTTPException(status_code=400, detail=f"Cannot cancel order in state {order.order_status}")
 
-    order.cancellation_reason = f"{reason}: {details}" if details else reason
+    detailed_reason = f"{reason}: {details}" if details else reason
 
     if action_taken == "unassigned":
+        # The order lives on and will be re-offered, so nothing is reverted —
+        # the customer still wants it and the stock is still committed to them.
+        order.cancellation_reason = detailed_reason
         order.deliverer_id = None
         order.order_status = "unassigned"
         deliverer.is_available = True
     else:
         # action_taken == "cancelled"
+        from services.order_service import revert_order_side_effects
+
         order.order_status = "cancelled"
         deliverer.is_available = True
-        
-        # Restore stock
-        items_q = select(OrderItem).where(OrderItem.order_id == order.id)
-        result = await session.execute(items_q)
-        items = result.scalars().all()
-        for item in items:
-            await session.execute(
-                update(Product)
-                .where(Product.id == item.product_id)
-                .values(stock=Product.stock + item.quantity, is_available=True)
-            )
-
-        # Flag paid orders for refund
-        if order.payment_status == "paid":
-            order.payment_status = "refund_pending"
-            order.commission_lost = order.platform_total
+        await revert_order_side_effects(session, order, reason=detailed_reason)
 
     await session.commit()
 

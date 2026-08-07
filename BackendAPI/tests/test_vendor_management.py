@@ -35,13 +35,18 @@ async def test_cancel_order_success():
     session = AsyncMock()
     # get_vendor_by_clerk_id → vendor, session.get → order
     # We patch the helper so it returns our vendor mock.
+    async def mock_revert(*args, **kwargs):
+        mock_order.order_status = "cancelled"
+        mock_order.payment_status = "refund_pending"
+
     with patch(
         "services.vendor_management_service.get_vendor_by_clerk_id",
         new_callable=AsyncMock,
         return_value=mock_vendor,
     ), patch(
-        "services.vendor_management_service._restore_order_stock",
+        "services.order_service.revert_order_side_effects",
         new_callable=AsyncMock,
+        side_effect=mock_revert,
     ) as mock_restore, patch(
         "routes.websocket_routes.manager",
         MagicMock(broadcast_order_update=AsyncMock()),

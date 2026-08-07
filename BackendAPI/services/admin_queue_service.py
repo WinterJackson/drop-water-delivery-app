@@ -71,8 +71,18 @@ def _rate(part: int, whole: int) -> int | None:
 
 
 async def rider_kyc(db: AsyncSession) -> dict[str, Any]:
+    from services import platform_config_service as config
+
     now = datetime.now(timezone.utc)
     day_ago = now - timedelta(days=1)
+
+    # `rider_kyc_sla_hours` was an editable console field that nothing read. A
+    # rider cannot accept any delivery until they are reviewed, so a queue aging
+    # past the target is a supply problem, not a paperwork one — and the number
+    # is only useful if the screen actually measures against it.
+    await config.ensure_fresh(db)
+    sla_hours = config.get_int("rider_kyc_sla_hours")
+    sla_cutoff = now - timedelta(hours=sla_hours)
 
     waiting = await _count(db, Deliverer, Deliverer.kyc_status == KYCStatus.pending)
     approved = await _count(db, Deliverer, Deliverer.kyc_status == KYCStatus.approved)
@@ -84,6 +94,16 @@ async def rider_kyc(db: AsyncSession) -> dict[str, Any]:
         "oldest_wait_minutes": _minutes_since(
             await _oldest(db, Deliverer.updated_at, Deliverer.kyc_status == KYCStatus.pending),
             now,
+        ),
+        "sla_hours": sla_hours,
+        # Waiting longer than the target the owners set. Reported separately from
+        # `waiting`, because "eleven pending" and "eleven pending, nine of them
+        # overdue" call for different actions.
+        "overdue": await _count(
+            db,
+            Deliverer,
+            Deliverer.kyc_status == KYCStatus.pending,
+            Deliverer.updated_at < sla_cutoff,
         ),
         "decided_24h": await _count(
             db,

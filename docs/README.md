@@ -44,13 +44,13 @@ to be revisited.
 
 ### [business-logic.md](./business-logic.md)
 The commercial rules of the platform, read out of the code rather than out of a
-specification: the 34 configurable settings and their defaults, the pricing engine
+specification: the 46 configurable settings and their defaults, the pricing engine
 in the order it executes, the revenue split with worked examples for retail cash,
 retail M-Pesa, a first order and a wholesale order, the order state machine, the
 three dispatch tiers, the bottle ledger and its invariant, stock, cash float and
-payouts, and the nightly sweeps. Ends with fourteen findings — two of them money
-defects that are live today — ranked with recommendations. Read this before
-changing a rate, a threshold or a settlement path.
+payouts, and the nightly sweeps. Ends with fourteen findings — two of them live
+money defects — each now annotated with the fix that closed it and the test that
+holds it. Read this before changing a rate, a threshold or a settlement path.
 
 ### [admin-dashboard-architecture.md](./admin-dashboard-architecture.md)
 Why the console is built the way it is, decision by decision: the BFF transport

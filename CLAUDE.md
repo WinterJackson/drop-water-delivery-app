@@ -76,18 +76,26 @@ incident.
 - **KYC**: riders stay blocked in `VerificationWall` until `kyc_status == "approved"` is *positively confirmed*. The gate fails closed; an errored status query is not permission.
 - **Money is `Decimal`, never `float`**, from the database through the API to the string the client formats. On the frontend use `sumMoney()`, never `reduce((a,b) => a + Number(b))`.
 - **One pricing path.** `services/pricing_service.py::compute_order_quote` is the only place an order total is computed. Never re-derive one on a client or in a second service.
-- **Business values are rows**, not constants — 34 settings in `Platform_Settings`, edited from the console, live on the next quote.
+- **Business values are rows**, not constants — 46 settings in `Platform_Settings`, edited from the console, live on the next quote. A figure that belongs to the business and sits in the source is a defect; four of the audit's fourteen findings were exactly that.
 - **Two push paths only**: `queue_push` before a commit, `dispatch_background` after. A bare `asyncio.create_task(send_push_message(...))` fails the build.
 - **Never read `Vendor.staff_clerk_id` or `staff_push_token`.** Staff are `Vendor_Staff` rows with four capabilities.
 - **Every order-scoped endpoint, REST and WebSocket, calls `authorise_order_access`.** Authenticating proves who is calling, not that they have anything to do with that order.
 - **Never call a Google web service from a client.** The embedded keys are SDK-restricted and cannot; `routes/maps_routes.py` owns Directions, Places and Geocoding on the IP-restricted server key.
 - **Personal data**: lists render masked values for every role. Revealing an identity document is an audited action requiring `pii.view` and a stated reason, presigned for 5 minutes, and rendered with a plain `<img>` — `next/image` would cache somebody's national ID on a server.
 - **Moderated reviews are excluded from every public read** and from the target's rating, in the same transaction.
+- **Every withdrawal path calls `settlement_service.assert_withdrawable`.** A wallet balance is not what is spendable — float promised to open cash orders is settled at delivery. Two paths existed and only one checked.
+- **`revert_order_side_effects` is the only way to cancel an order.** It undoes seven things; six call sites each remembering a different subset is how `commission_lost` went missing on vendor rejects.
+- **Products are withdrawn (`deleted_at`), never deleted**, and every catalogue read carries `live_product()`. `Order_Items` references them and the bottle ledger reads their capacity.
+- **A customer's deposit is a liability the platform can return.** `customer_bottle_service` moves `bottle_deposit_balance` and `bottles_held` together, never one alone.
 - **Never coalesce a missing capability with `?? 0`** in the console. `undefined` means "not yours"; `0` means "nothing waiting". A badge that renders the first as the second leaks the size of a table the caller cannot see.
 
 ## Migrations
 
 The repository head, `e6b2c8d40f17`, is **gated on purpose**: it drops the legacy
 single-staff columns and refuses to run without `ALLOW_STAFF_COLUMN_DROP=true`.
-Routine deploys should target `a9f4b2c71d63`. The expand/contract sequence is in
+Routine deploys should target `b8e3d1a5c704`. The expand/contract sequence is in
 that migration's own docstring.
+
+A new revision goes **before** the gated drop, never after it — anything parented
+on `e6b2c8d40f17` could only ever run on a deploy that had already accepted the
+column drop.

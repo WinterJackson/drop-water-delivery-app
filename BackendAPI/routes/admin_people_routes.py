@@ -9,6 +9,7 @@ module: an operator trusted with riders is not thereby trusted with the
 customer table.
 """
 import logging
+from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from core.redis_client import redis_limiter as limiter
 from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_CUSTOMERS_READ,
+    PERM_FINANCE_ADJUST,
     PERM_VENDORS_APPROVE,
     PERM_CUSTOMERS_SUSPEND,
     PERM_PII_VIEW,
@@ -29,6 +31,7 @@ from models.admin_model import (
     PERM_VENDORS_READ,
     PERM_VENDORS_SUSPEND,
 )
+from models.user_model import User
 from services import admin_people_service as people, admin_performance_service
 from services import admin_service
 from services.notification_service import create_notification
@@ -332,3 +335,214 @@ async def vendor_performance(
     access: AdminAccess = Depends(require_admin(PERM_VENDORS_READ)),
 ):
     return await admin_performance_service.vendors(db, limit=limit)
+
+
+# ── A customer's balances ─────────────────────────────────────────────────
+#
+# Two obligations run in opposite directions and were both invisible until now:
+# what the customer owes the platform (`debt_balance`) and what the platform
+# owes the customer (`bottle_deposit_balance`). Neither had any way to be
+# settled from the console, so a KSH 50 penalty was a permanent block on an
+# account and a paid deposit could never be returned.
+
+
+class DebtWriteOff(BaseModel):
+    """Cancel some or all of what a customer owes."""
+
+    amount: Optional[Decimal] = Field(
+        None, description="How much to write off. Omit to clear the whole balance."
+    )
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
+class DepositReturn(BaseModel):
+    """Record bottles handed back and return the deposit to the customer's wallet."""
+
+    bottles: int = Field(..., ge=1, le=100)
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
+@router.get(
+    "/people/customers/{customer_id}/balances",
+    summary="What a customer owes, and what they are owed",
+)
+@limiter.limit("60/minute")
+async def customer_balances(
+    request: Request,
+    customer_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_CUSTOMERS_READ)),
+):
+    customer = await db.get(User, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    ceiling = await _debt_ceiling(db)
+    debt = Decimal(str(customer.debt_balance or 0))
+
+    return {
+        "customer_id": str(customer_id),
+        "wallet_balance": str(Decimal(str(customer.wallet_balance or 0))),
+        "debt_balance": str(debt),
+        "debt_ceiling": str(ceiling),
+        # Below the ceiling the debt is collected on their next order, so it is
+        # not actually stopping them. Saying which is the difference between
+        # "chase this" and "leave it alone".
+        "debt_blocks_ordering": debt >= ceiling,
+        "bottle_deposit_balance": str(Decimal(str(customer.bottle_deposit_balance or 0))),
+        "bottles_held": int(customer.bottles_held or 0),
+    }
+
+
+async def _debt_ceiling(db: AsyncSession) -> Decimal:
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(db)
+    return config.get_decimal("max_customer_debt_before_block")
+
+
+@router.post(
+    "/people/customers/{customer_id}/debt/write-off",
+    summary="Write off what a customer owes",
+)
+# Same limit as a manual wallet adjustment. There is no scripted use for this.
+@limiter.limit("10/minute")
+async def write_off_debt(
+    request: Request,
+    customer_id: UUID,
+    body: DebtWriteOff,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_ADJUST)),
+):
+    """Cancel a cancellation penalty or a disputed staircase charge.
+
+    Gated on `finance.adjust` rather than `customers.read` because it forgives a
+    real receivable — the same grant, held by no preset but super admin, that
+    moving a balance by hand requires.
+
+    A customer below the ceiling settles their balance automatically on their
+    next order, so this exists for the two cases that cannot: a charge that was
+    wrong, and a customer who has stopped ordering and is stuck at the ceiling.
+    """
+    customer = await db.get(User, customer_id, with_for_update=True)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    before = Decimal(str(customer.debt_balance or 0))
+    if before <= 0:
+        raise HTTPException(status_code=400, detail="This customer owes nothing.")
+
+    amount = before if body.amount is None else Decimal(str(body.amount)).quantize(Decimal("0.01"))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="A write-off of zero does nothing.")
+    if amount > before:
+        raise HTTPException(
+            status_code=400,
+            detail=f"They owe {before}, which is less than the {amount} you asked to write off.",
+        )
+
+    customer.debt_balance = before - amount
+
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="finance.debt_write_off",
+        target_type="customer",
+        target_id=customer_id,
+        before={"debt_balance": str(before)},
+        after={"debt_balance": str(customer.debt_balance), "written_off": str(amount)},
+        reason=body.reason,
+    )
+
+    # Tell them. A balance that silently disappears is indistinguishable from a
+    # bug to the person it happens to.
+    await create_notification(
+        session=db,
+        user_id=customer.id,
+        user_type="customer",
+        title="Balance cleared ✅",
+        message=(
+            f"KSH {amount} has been cleared from your account. You can order as normal."
+            if customer.debt_balance == 0
+            else f"KSH {amount} has been cleared from your account. KSH {customer.debt_balance} remains."
+        ),
+        message_type="system_alert",
+    )
+
+    await db.commit()
+
+    return {
+        "customer_id": str(customer_id),
+        "written_off": str(amount),
+        "debt_balance": str(customer.debt_balance),
+    }
+
+
+@router.post(
+    "/people/customers/{customer_id}/deposit/return",
+    summary="Return a bottle deposit",
+)
+@limiter.limit("30/minute")
+async def return_deposit(
+    request: Request,
+    customer_id: UUID,
+    body: DepositReturn,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_ADJUST)),
+):
+    """Give a customer their deposit back when they hand the bottles in.
+
+    Credits their wallet rather than disbursing cash: the money is already held
+    as a liability, a wallet credit is spendable immediately and withdrawable
+    through the normal payout path, and it leaves a `WalletTransaction` that
+    explains itself. A second disbursement path for the same obligation is how
+    money gets paid twice.
+
+    Refuses to return more bottles than the customer holds — the bottle ledger
+    learned that clamping makes a typo indistinguishable from a real return.
+    """
+    from services import customer_bottle_service
+
+    customer = await db.get(User, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    before_bottles = int(customer.bottles_held or 0)
+    before_balance = Decimal(str(customer.bottle_deposit_balance or 0))
+
+    result = await customer_bottle_service.refund_deposit(
+        db,
+        customer_id=customer_id,
+        bottles=body.bottles,
+        actor=access.email,
+        reason=body.reason,
+    )
+
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="finance.deposit_return",
+        target_type="customer",
+        target_id=customer_id,
+        before={
+            "bottles_held": str(before_bottles),
+            "bottle_deposit_balance": str(before_balance),
+        },
+        after=result,
+        reason=body.reason,
+    )
+
+    await create_notification(
+        session=db,
+        user_id=customer_id,
+        user_type="customer",
+        title="Deposit returned 🍶",
+        message=(
+            f"KSH {result['amount_refunded']} has been returned to your wallet for "
+            f"{body.bottles} bottle(s)."
+        ),
+        message_type="system_alert",
+    )
+
+    await db.commit()
+    return result

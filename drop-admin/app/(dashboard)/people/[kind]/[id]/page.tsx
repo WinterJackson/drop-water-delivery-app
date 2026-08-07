@@ -7,6 +7,7 @@ import { ApiError, get } from "@/lib/api/server";
 import { PERMISSIONS, can, type AdminMe, type Permission } from "@/lib/permissions";
 import { formatDateTime, formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
 import { AccountActions } from "./AccountActions";
+import { CustomerBalancesPanel } from "./CustomerBalancesPanel";
 
 const KINDS = {
   customers: { kind: "customer", label: "Customer", suspend: PERMISSIONS.customersSuspend },
@@ -209,6 +210,14 @@ export default async function PersonPage({
           walletBalance={person.wallet_balance ?? "0.00"}
         />
       </div>
+
+      {/* ── Customer-only: debt and deposit panels ────────────── */}
+      {config.kind === "customer" ? (
+        <CustomerBalancesPanel
+          id={person.id}
+          canAdjust={can(me, PERMISSIONS.financeAdjust)}
+        />
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {ledger ? (

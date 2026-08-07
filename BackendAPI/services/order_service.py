@@ -1,5 +1,6 @@
 import logging
 import math
+from datetime import timedelta
 from enum import Enum as PyEnum
 from sqlalchemy.ext.asyncio import AsyncSession
 from collections import defaultdict
@@ -7,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select, and_, update
 from sqlalchemy.orm import joinedload
 from fastapi import HTTPException
-from geoalchemy2.functions import ST_Distance
+from geoalchemy2.functions import ST_Distance, ST_DWithin
 from models.cart_model import CartItem
 from models.deliverer_model import Deliverer
 from models.product_model import Product
@@ -223,12 +224,21 @@ def calculate_revenue_splits(
     bottle_deposit: float = 0.0,
     rider_surcharges: float = 0.0,
     delivery_type: str = "quick_swap",
-    welcome_discount: float = 0.0
+    welcome_discount: float = 0.0,
+    debt_settlement: float = 0.0
 ) -> dict:
     """Calculate platform revenue splits for a single order.
     FIN-01 FIX: Uses Decimal for currency precision to prevent ledger drift.
     Returns { 'vendor_commission', 'service_fee', 'rider_commission', 'platform_total',
               'vendor_net', 'rider_net', 'surge_fee', 'delivery_markup' }
+
+    The three components sum to the order's gross by construction:
+
+        vendor_net + rider_net + platform_total == gross_before_discounts − welcome_discount
+
+    A test asserts that identity across every combination of vendor type,
+    delivery type and surcharge, because a split that does not add up is money
+    the platform either invents or loses without anybody noticing.
     """
     from decimal import Decimal, ROUND_HALF_UP
 
@@ -238,6 +248,7 @@ def calculate_revenue_splits(
     _bd = Decimal(str(bottle_deposit))
     _rs = Decimal(str(rider_surcharges))
     _wd = Decimal(str(welcome_discount))
+    _ds = Decimal(str(debt_settlement))
 
     TWO = Decimal("0.01")
 
@@ -273,17 +284,31 @@ def calculate_revenue_splits(
     surge_fee = _config.get_decimal("surge_fee") if is_surge_active() else Decimal("0.00")
 
     # ── Platform Total Revenue ──
-    # Platform absorbs the welcome discount as a customer acquisition cost
-    platform_total = (vendor_commission + service_fee + rider_commission + delivery_markup + surge_fee - _wd).quantize(TWO, rounding=ROUND_HALF_UP)
+    # Platform absorbs the welcome discount as a customer acquisition cost, and
+    # recovers any debt this order is settling — a cancellation penalty or an
+    # approved staircase charge the platform already fronted to whoever earned it.
+    platform_total = (
+        vendor_commission + service_fee + rider_commission + delivery_markup
+        + surge_fee - _wd + _ds
+    ).quantize(TWO, rounding=ROUND_HALF_UP)
 
     # ── Net Payouts ──
-    # Wholesale vendors get delivery fee back (they own the fleet)
+    # Wholesale vendors get the delivery fee back, because they own the fleet —
+    # and the payload and staircase surcharges with it, for the same reason. Those
+    # surcharges pay for carrying and climbing; on retail the gig rider does that
+    # work and is paid directly, on wholesale it is the vendor's own employee.
+    #
+    # They previously landed in `rider_net` on wholesale orders too, on a
+    # settlement path that never credits a wholesale rider — so the customer was
+    # charged for them and nobody was ever paid, while `platform_total`
+    # understated what the platform had actually retained. `rider_net` is now
+    # zero on wholesale, which is what the settlement path has always assumed.
     if vendor_type == "wholesale_b2b":
-        vendor_net = (_pt - vendor_commission + _df + _bd).quantize(TWO, rounding=ROUND_HALF_UP)
+        vendor_net = (_pt - vendor_commission + _df + _bd + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
+        rider_net = Decimal("0.00")
     else:
         vendor_net = (_pt - vendor_commission + _bd).quantize(TWO, rounding=ROUND_HALF_UP)
-
-    rider_net = (_df - rider_commission + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
+        rider_net = (_df - rider_commission + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
 
     return {
         "vendor_commission": float(vendor_commission),
@@ -295,6 +320,24 @@ def calculate_revenue_splits(
         "surge_fee": float(surge_fee),
         "delivery_markup": float(delivery_markup),
     }
+
+
+def rider_search_bounds(lat: float, lng: float, vendor_type: str):
+    """`(pickup_point, h3_cells, max_distance_m)` for a rider search.
+
+    The one definition of "near this pickup". Every dispatch tier uses it, so a
+    change to the radius or the ring cannot reach two of the three and leave the
+    highest-priority one looking somewhere else.
+    """
+    import h3
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import Point
+
+    max_distance_m = DispatchPolicy.get_max_distance_m(vendor_type, action="rider_search")
+    centre = h3.latlng_to_cell(lat, lng, 8)
+    ring = DispatchPolicy.get_h3_k_ring(vendor_type)
+    cells = [str(cell) for cell in h3.grid_disk(centre, ring)]
+    return from_shape(Point(lng, lat), srid=4326), cells, max_distance_m
 
 
 async def get_radar_deliverers(session: AsyncSession, lat: float, lng: float, vendor_id: UUID = None, vehicle_class: str = "motorbike", vendor_type: str = "retail_refill"):
@@ -393,7 +436,19 @@ async def get_closest_deliverer(session: AsyncSession, lat: float, lng: float, v
   if deliverer:
       return deliverer
 
-  # Step 2: Fallback — global scan (no H3 filter) within max allowed distance
+  # Step 2: Fallback — drop the H3 pre-filter, keep the radius.
+  #
+  # The H3 ring is an approximation of a disk, so a rider very near the boundary
+  # can sit in a cell the ring does not cover while still being inside the true
+  # radius. This second pass catches them, and is the only reason it exists.
+  #
+  # It is bounded by `ST_DWithin`, not by `ST_Distance <= …` as it was. That
+  # distinction is the whole point: `ST_DWithin` is index-assisted and can use
+  # the GiST index on `Deliverer.location`, whereas comparing a computed
+  # `ST_Distance` forces the distance to be evaluated for **every rider row on
+  # the platform** before anything can be discarded. On this dataset that is
+  # invisible; at ten thousand riders it is a sequential scan on every dispatch
+  # that finds nobody nearby — which is precisely when it runs.
   fallback_query = (
       select(Deliverer)
       .where(
@@ -401,7 +456,7 @@ async def get_closest_deliverer(session: AsyncSession, lat: float, lng: float, v
               Deliverer.is_available,
               Deliverer.vehicle_type == vehicle_enum,
               Deliverer.location.isnot(None),
-              ST_Distance(Deliverer.location, pickup_point) <= max_distance_m,
+              ST_DWithin(Deliverer.location, pickup_point, max_distance_m),
           )
       )
       .order_by(ST_Distance(Deliverer.location, pickup_point))
@@ -466,18 +521,38 @@ async def dispatch_order_to_riders(
                 logger.error(f"Dispatch Tier 1: Order {order_id} or vendor not found")
                 return
 
-            # Fetch up to 10 pre-approved riders for this vendor with matching vehicle type
+            # Up to 10 pre-approved riders for this vendor, matching vehicle type,
+            # who are actually near the pickup — nearest first.
+            #
+            # This query previously carried **no geographic predicate at all**.
+            # Registration is radius-bounded, so a rider's *operating base* is
+            # near the store, but `is_available` says nothing about where they
+            # are right now: a rider registered in Ngong and currently in Mombasa
+            # received the push. Tiers 2 and 3 both filter on distance; the one
+            # tier that did not was the first and strongest offer the platform
+            # sends. `rider_search_bounds` is the same helper they use.
+            pickup_point, nearby_hexes, max_distance_m = rider_search_bounds(
+                lat, lng, vendor_type
+            )
+
+            tier1_conditions = [
+                VendorRiderRegistry.vendor_id == vendor_id,
+                VendorRiderRegistry.status == "approved",
+                Deliverer.is_available,
+                Deliverer.vehicle_type == vehicle_enum,
+                Deliverer.h3_index_res8.in_(nearby_hexes),
+                Deliverer.location.isnot(None),
+            ]
+            if max_distance_m is not None:
+                tier1_conditions.append(
+                    ST_Distance(Deliverer.location, pickup_point) <= max_distance_m
+                )
+
             tier1_query = (
                 select(Deliverer, Deliverer.push_token, Deliverer.id.label("user_id"))
                 .join(VendorRiderRegistry, VendorRiderRegistry.rider_id == Deliverer.id)
-                .where(
-                    and_(
-                        VendorRiderRegistry.vendor_id == vendor_id,
-                        VendorRiderRegistry.status == "approved",
-                        Deliverer.is_available,
-                        Deliverer.vehicle_type == vehicle_enum,
-                    )
-                )
+                .where(and_(*tier1_conditions))
+                .order_by(ST_Distance(Deliverer.location, pickup_point))
                 .limit(10)
             )
             result = await session.execute(tier1_query)
@@ -545,13 +620,113 @@ async def dispatch_order_to_riders(
     except Exception as e:
         logger.error(f"Dispatch Tier 1 error for order {order_id}: {e}")
 
-    # ── WAIT 20 SECONDS ────────────────────────────────────────────────
-    await asyncio.sleep(DISPATCH_TIER1_TIMEOUT_SECONDS)
-
-    # ── TIER 2: Trip Radar Broadcast (only if still unassigned) ─────────
+    # ── ESCALATE TO TIER 2 AFTER THE TIMEOUT ───────────────────────────
     # If Wholesale B2B, DO NOT broadcast to Trip Radar (Gig-Economy bypassed)
     if vendor_type == "wholesale_b2b":
         logger.info(f"Dispatch Tier 2: Bypassing Trip Radar for Wholesale Order {order_id}")
+        return
+
+    # Hand the wait to ARQ rather than sleeping in this process.
+    #
+    # This function runs as a background task inside the API. A twenty-second
+    # `asyncio.sleep` here means a deploy, a Render restart or a scale-down
+    # during the window kills the escalation outright: Tier 2 never fires, and
+    # the order is only rescued by the three-minute re-offer sweep. The customer
+    # waits three minutes for something that should have taken twenty seconds.
+    #
+    # `_defer_by` puts the escalation in Redis, where a restart cannot lose it,
+    # and `_job_id` keyed on the order makes a duplicate enqueue a no-op — ARQ
+    # refuses a job whose id matches one already queued.
+    scheduled = await _schedule_trip_radar(
+        order_id=order_id,
+        vendor_id=vendor_id,
+        customer_id=customer_id,
+        lat=lat,
+        lng=lng,
+        delivery_fee=delivery_fee,
+        vehicle_class=vehicle_class,
+        vendor_type=vendor_type,
+        total_weight_kg=total_weight_kg,
+        total_quantity=total_quantity,
+        delivery_type=delivery_type,
+        notification_data=notification_data,
+    )
+    if scheduled:
+        return
+
+    # No queue reachable — a single-process dev machine, or Redis is down. Fall
+    # back to the in-process wait so dispatch still escalates locally.
+    logger.warning(
+        "Dispatch Tier 2 for order %s could not be queued; falling back to an "
+        "in-process wait. This will not survive a restart.",
+        order_id,
+    )
+    await asyncio.sleep(DISPATCH_TIER1_TIMEOUT_SECONDS)
+    await broadcast_trip_radar(
+        order_id=order_id,
+        lat=lat,
+        lng=lng,
+        delivery_fee=delivery_fee,
+        vehicle_class=vehicle_class,
+        vendor_type=vendor_type,
+        total_weight_kg=total_weight_kg,
+        total_quantity=total_quantity,
+        delivery_type=delivery_type,
+        notification_data=notification_data,
+    )
+
+
+async def _schedule_trip_radar(*, order_id, **kwargs) -> bool:
+    """Queue the Tier 2 broadcast for `DISPATCH_TIER1_TIMEOUT_SECONDS` from now.
+
+    Returns False when no queue is reachable, so the caller can fall back.
+    """
+    try:
+        from core.redis_client import get_arq_pool
+
+        pool = await get_arq_pool()
+        if pool is None:
+            return False
+
+        job = await pool.enqueue_job(
+            "dispatch_trip_radar_task",
+            str(order_id),
+            kwargs,
+            _job_id=f"trip_radar:{order_id}",
+            _defer_by=timedelta(seconds=DISPATCH_TIER1_TIMEOUT_SECONDS),
+        )
+        # `enqueue_job` returns None when a job with this id already exists.
+        if job is None:
+            logger.info("Trip Radar for order %s is already queued", order_id)
+        return True
+    except Exception as exc:
+        logger.error("Could not queue Trip Radar for order %s: %s", order_id, exc)
+        return False
+
+
+async def broadcast_trip_radar(
+    *,
+    order_id: UUID,
+    lat: float,
+    lng: float,
+    delivery_fee: float,
+    vehicle_class: str = "motorbike",
+    vendor_type: str = "retail_refill",
+    total_weight_kg: float = 0.0,
+    total_quantity: int = 0,
+    delivery_type: str = "quick_swap",
+    notification_data: dict = None,
+):
+    """Tier 2 — offer the trip to every eligible rider nearby, vendor-approved or not.
+
+    Split out of `dispatch_order_to_riders` so it can be reached from the ARQ
+    worker as well as in-process. Re-checks the order under its own session, so
+    an order claimed during the wait is never re-broadcast.
+    """
+    from dependencies.dependencies import get_db_session
+
+    if vendor_type == "wholesale_b2b":
+        logger.info("Trip Radar: wholesale order %s is not broadcast", order_id)
         return
 
     try:
@@ -789,9 +964,41 @@ async def create_order(
       wallet_discount=quote.wallet_discount,
       welcome_discount=quote.welcome_discount,
       product_subtotal=quote.product_subtotal,
+
+      # ── Deposits and debt ──
+      bottle_deposit=quote.bottle_deposit,
+      debt_settlement=quote.debt_settlement,
   )
   session.add(order)
   await session.flush()
+
+  # ── Settle any debt this order is collecting ───────────────────────────────
+  # The customer has just been charged it as a line item, so it stops being
+  # owed. Restored by the cancellation paths, which refund them the same amount.
+  if quote.debt_settlement > 0:
+      user.debt_balance = max(
+          Decimal("0.00"),
+          Decimal(str(user.debt_balance or 0)) - quote.debt_settlement,
+      )
+      logger.info(
+          "Cleared KSH %s of debt for user %s on order %s",
+          quote.debt_settlement, user_id, order.id,
+      )
+
+  # ── Record the deposit as a liability to the customer ──────────────────────
+  # The money itself is paid out to the vendor in `vendor_net`. This is the
+  # other side of that entry: what the platform owes back, and how many bottles
+  # it covers.
+  if quote.bottle_deposit > 0:
+      from services import customer_bottle_service
+
+      await customer_bottle_service.accrue_deposit(
+          session,
+          user=user,
+          amount=quote.bottle_deposit,
+          bottles=customer_bottle_service.bottles_in(pre_order_items),
+          order_id=order.id,
+      )
 
   # ── Consume the one-shot incentives, now that the order exists ─────────────
   if quote.is_welcome_offer:
@@ -1165,6 +1372,146 @@ async def fetch_order_tracking_logs(session: AsyncSession, order_id: UUID):
     result = await session.execute(query)
     return result.scalars().all()
 
+async def restore_order_stock(session: AsyncSession, order: Order) -> list:
+    """Atomically return every item on this order to its product's stock.
+
+    Relative `stock = stock + qty`, never read-then-write, so two reversal paths
+    racing on the same order cannot lose one. Clearing `low_stock_notified_at`
+    puts the product back above the line so the next crossing warns again.
+
+    Returns the order's items, because every caller needs them anyway.
+    """
+    items = (
+        await session.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+    ).scalars().all()
+
+    for item in items:
+        await session.execute(
+            update(Product)
+            .where(Product.id == item.product_id)
+            .values(
+                stock=Product.stock + item.quantity,
+                is_available=True,
+                low_stock_notified_at=None,
+            )
+        )
+    if items:
+        logger.info("Restored stock for %s item(s) from order %s", len(items), order.id)
+    return items
+
+
+async def revert_order_side_effects(
+    session: AsyncSession,
+    order: Order,
+    *,
+    reason: str,
+    customer: User | None = None,
+    return_wallet_credit: bool = True,
+    restore_welcome_offer: bool = True,
+):
+    """Undo everything an order consumed, in one place.
+
+    Cancelling an order is not one action, it is seven, and they were previously
+    spread across six call sites that each remembered a different subset. Stock
+    was restored everywhere; `commission_lost` was set in five of the six, so any
+    report summing it understated lost revenue by exactly the vendor-initiated
+    rejections — likely the most common kind. The debt settlement and the bottle
+    deposit are new, and adding them to six places would have repeated the same
+    mistake with two more fields.
+
+    Every reversal path calls this. What each one does *around* it — a
+    cancellation penalty, freeing a rider, choosing between `cancelled` and
+    `unassigned` — stays with the caller, because those genuinely differ.
+
+    Does not commit; the caller owns the transaction boundary.
+    """
+    from decimal import Decimal
+    from models.wallet_transaction_model import TransactionType
+    from services.wallet_service import apply_wallet_delta
+
+    was_paid = order.payment_status == "paid"
+
+    await restore_order_stock(session, order)
+
+    if customer is None and order.customer_id is not None:
+        customer = await session.get(User, order.customer_id)
+
+    if customer is not None:
+        # ── Wallet credit spent on this order ──
+        wallet_refund = Decimal(str(order.wallet_discount or 0))
+        if return_wallet_credit and wallet_refund > 0:
+            await apply_wallet_delta(
+                session,
+                owner=customer,
+                clerk_id=customer.clerk_id,
+                user_type="customer",
+                amount=wallet_refund,
+                transaction_type=TransactionType.refund,
+                description=(
+                    f"Wallet credit returned after cancelling order "
+                    f"{str(order.id)[:8].upper()}"
+                ),
+                reference_id=str(order.id),
+            )
+
+        # ── Debt this order was collecting ──
+        # The customer is being refunded the whole total, which included it, so
+        # the balance is still owed. Not restoring it would let a customer clear
+        # a penalty by placing an order and immediately cancelling it.
+        settled = Decimal(str(order.debt_settlement or 0))
+        if settled > 0:
+            customer.debt_balance = Decimal(str(customer.debt_balance or 0)) + settled
+            order.debt_settlement = Decimal("0.00")
+            logger.info(
+                "Restored KSH %s of debt to user %s after cancelling order %s",
+                settled, customer.id, order.id,
+            )
+
+        # ── Bottle deposit ──
+        # They never received the bottle, so the platform owes nothing back and
+        # they are holding nothing.
+        deposit = Decimal(str(order.bottle_deposit or 0))
+        if deposit > 0:
+            from services import customer_bottle_service
+
+            items = (
+                await session.execute(
+                    select(OrderItem)
+                    .options(joinedload(OrderItem.product))
+                    .where(OrderItem.order_id == order.id)
+                )
+            ).unique().scalars().all()
+            await customer_bottle_service.release_deposit(
+                session,
+                user=customer,
+                amount=deposit,
+                bottles=customer_bottle_service.bottles_in(items),
+                order_id=order.id,
+            )
+
+        # ── Welcome offer ──
+        # Only when the customer actually paid. Restoring it on a free
+        # `pending`/`unassigned` cancellation let the 30% first-order discount be
+        # farmed indefinitely.
+        if (
+            restore_welcome_offer
+            and was_paid
+            and (order.is_welcome_offer or Decimal(str(order.welcome_discount or 0)) > 0)
+        ):
+            customer.has_used_welcome_offer = False
+            logger.info("Reset welcome offer for user %s (paid order cancelled)", customer.id)
+
+    order.cancellation_reason = reason
+
+    if was_paid:
+        order.payment_status = "refund_pending"
+        # The platform revenue this cancellation gave up. Set on *every* reversal
+        # path, including the vendor's own reject, which previously left it null.
+        order.commission_lost = order.platform_total
+
+    return customer
+
+
 async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: UUID):
     """Customer cancels their own order before preparation."""
     from decimal import Decimal
@@ -1185,19 +1532,20 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             detail=f"Cannot cancel order with status '{order.order_status}'. Only pending, accepted, or unassigned orders can be cancelled."
         )
 
-    was_paid = order.payment_status == "paid"
-
-    # Lock the customer once, up front — the penalty, the wallet restoration and
-    # the welcome-offer reset all mutate this row.
+    # Lock the customer once, up front — the penalty, the wallet restoration,
+    # the deposit release and the welcome-offer reset all mutate this row.
     user_res = await session.execute(select(User).where(User.id == user_id).with_for_update())
     user = user_res.scalar_one_or_none()
 
     # A vendor who has already accepted is likely preparing the order, so a late
-    # cancellation carries a KSH 50 fee added to the customer's debt balance.
+    # cancellation carries a fee. It is added to the customer's debt balance,
+    # which their next order collects as a visible line item — the balance is no
+    # longer a permanent block on the account.
     if order.order_status == "accepted" and user:
-        penalty = Decimal("50.00")
-        user.debt_balance = Decimal(str(user.debt_balance or 0)) + penalty
-        logger.info("Cancellation penalty of KSH %s applied to user %s", penalty, user_id)
+        penalty = _config.get_decimal("late_cancellation_penalty")
+        if penalty > 0:
+            user.debt_balance = Decimal(str(user.debt_balance or 0)) + penalty
+            logger.info("Cancellation penalty of KSH %s applied to user %s", penalty, user_id)
 
     # Release rider availability if one was already assigned
     if order.deliverer_id:
@@ -1206,52 +1554,10 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             deliverer.is_available = True
 
     order.order_status = "cancelled"
-    order.cancellation_reason = "cancelled_by_customer"
 
-    # Restore stock
-    items_q = select(OrderItem).where(OrderItem.order_id == order.id)
-    result = await session.execute(items_q)
-    items = result.scalars().all()
-
-    for item in items:
-        await session.execute(
-            update(Product)
-            .where(Product.id == item.product_id)
-            .values(
-                stock=Product.stock + item.quantity,
-                is_available=True
-            )
-        )
-
-    if user:
-        wallet_refund = Decimal(str(order.wallet_discount or 0))
-        if wallet_refund > 0:
-            from services.wallet_service import apply_wallet_delta
-            from models.wallet_transaction_model import TransactionType
-            await apply_wallet_delta(
-                session,
-                owner=user,
-                clerk_id=user.clerk_id,
-                user_type="customer",
-                amount=wallet_refund,
-                transaction_type=TransactionType.refund,
-                description=f"Wallet credit returned after cancelling order {str(order.id)[:8].upper()}",
-                reference_id=str(order.id),
-            )
-            logger.info("Restored KSH %s to wallet for user %s", wallet_refund, user_id)
-
-        # Only give the welcome offer back if the customer actually paid for the
-        # order they are cancelling. Restoring it on a free `pending`/`unassigned`
-        # cancellation let the 30% first-order discount be farmed indefinitely.
-        if was_paid and (order.is_welcome_offer or Decimal(str(order.welcome_discount or 0)) > 0):
-            user.has_used_welcome_offer = False
-            logger.info("Reset welcome offer status for user %s (paid order cancelled)", user_id)
-
-    # Flag paid orders for refund and queue the reversal
-    if was_paid:
-        order.payment_status = "refund_pending"
-        # Track the platform revenue lost due to this cancellation
-        order.commission_lost = order.platform_total
+    await revert_order_side_effects(
+        session, order, reason="cancelled_by_customer", customer=user
+    )
 
     # Notify Vendor
     vendor = await session.get(Vendor, order.vendor_id)
@@ -1444,24 +1750,54 @@ async def resolve_address_mismatch(session: AsyncSession, user_id: UUID, order_i
         raise HTTPException(status_code=400, detail="Order is not in mismatch state")
 
     if action == "approve_charge":
-        # Customer accepts the KSh 30 staircase charge
-        charge = 30.0
-        order.staircase_surcharge = float(order.staircase_surcharge or 0) + charge
-        order.total_amount = float(order.total_amount or 0) + charge
-        
-        # Add to customer's debt balance since M-PESA already processed the original total
-        user = await session.get(User, user_id)
-        if user:
-            user.debt_balance = float(user.debt_balance or 0) + charge
-        
-        # Determine rider payout vs platform based on employment type
-        # For gig economy riders, they keep 100% of the surcharge
-        # For in-house, it goes to the vendor/platform
-        deliverer = await session.get(Deliverer, order.deliverer_id) if order.deliverer_id else None
-        if deliverer and deliverer.employment_model == "gig_economy":
-            order.rider_net = float(order.rider_net or 0) + charge
+        # The charge for the floors the rider was not told about.
+        #
+        # This was a hardcoded `charge = 30.0` — a float, assigned to `Numeric`
+        # columns, unrelated to `staircase_surcharge_per_floor` in the settings
+        # table, and flat regardless of how many floors were actually climbed. It
+        # is now the same formula the quote uses, so a customer who declares
+        # their floor honestly and one who is caught out pay the same rate.
+        from decimal import Decimal
+
+        await _config.ensure_fresh(session)
+
+        actual = int(order.actual_floor_level or 0)
+        free_floors = _config.get_int("staircase_free_floors")
+        per_floor = _config.get_decimal("staircase_surcharge_per_floor")
+        already = Decimal(str(order.staircase_surcharge or 0))
+
+        # Only the shortfall: they may already have been charged for some floors
+        # at checkout, and charging the full amount again would bill twice.
+        owed = max(Decimal("0.00"), Decimal(max(0, actual - free_floors)) * per_floor)
+        charge = (owed - already).quantize(Decimal("0.01"))
+
+        if charge <= 0:
+            logger.info(
+                "Mismatch on order %s carries no additional charge (floor %s already covered)",
+                order.id, actual,
+            )
+            charge = Decimal("0.00")
         else:
-            order.vendor_net = float(order.vendor_net or 0) + charge
+            order.staircase_surcharge = already + charge
+            order.total_amount = Decimal(str(order.total_amount or 0)) + charge
+
+            # M-Pesa already took the original total, so this goes onto the
+            # customer's balance and is collected on their next order.
+            user = await session.get(User, user_id)
+            if user:
+                user.debt_balance = Decimal(str(user.debt_balance or 0)) + charge
+
+            # A gig rider did the climbing and keeps all of it. For an in-house
+            # rider the vendor employs them, so the vendor is paid instead —
+            # the same rule the revenue split applies to every other surcharge.
+            deliverer = (
+                await session.get(Deliverer, order.deliverer_id)
+                if order.deliverer_id else None
+            )
+            if deliverer and deliverer.employment_model == "gig_economy":
+                order.rider_net = Decimal(str(order.rider_net or 0)) + charge
+            else:
+                order.vendor_net = Decimal(str(order.vendor_net or 0)) + charge
 
     elif action == "leave_ground":
         # No extra charge, rider leaves at ground floor

@@ -9,7 +9,12 @@ async def createUser( db: AsyncSession , data: BaseUser ):
     full_name = data.full_name,
     email = data.email,
     phone_number = data.phone_number,
-    profile_pic = data.profile_pic
+    profile_pic = data.profile_pic,
+    # Written here and nowhere else. `pricing_service.welcome_offer_available`
+    # refuses the first-order discount when another account on the same handset
+    # has already taken it; a client that could update this field could reset
+    # that check by sending a new value.
+    device_id = (data.device_id or None),
   )
   db.add(user_instance)
   await db.commit()

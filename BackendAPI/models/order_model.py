@@ -42,7 +42,9 @@ class Order(Base):
   order_status = Column(String, nullable=False, default="pending")
   payment_status = Column(String, nullable=False, default="pending")
   payment_method = Column(String, nullable=True)
-  delivery_fee = Column(Double, nullable=True, index=True)
+  # `Numeric`, not `Double`. This is summed into vendor and rider payouts, and a
+  # binary float cannot represent a fee like 68.30 exactly.
+  delivery_fee = Column(Numeric(10, 2), nullable=True, index=True)
   vehicle_class = Column(String(20), nullable=True, default="motorbike")  # V6: motorbike / tuktuk / truck
   delivery_time = Column(Integer, nullable=True)
   
@@ -68,6 +70,16 @@ class Order(Base):
   wallet_discount = Column(Numeric(10, 2), nullable=False, default=0.0)
   welcome_discount = Column(Numeric(10, 2), nullable=False, default=0.0)
   product_subtotal = Column(Numeric(10, 2), nullable=False, default=0.0)
+
+  # ── Deposits and debt ──────────────────────────────────────────────────
+  #: The refundable deposit charged on this order. Folded into `vendor_net`,
+  #: but recorded separately because it is a liability to the customer and the
+  #: platform previously had no way to answer "how much deposit have they paid?"
+  bottle_deposit = Column(Numeric(10, 2), nullable=False, server_default="0", default=0.0)
+  #: An unpaid balance from an earlier order collected on this one. Cleared from
+  #: `Users.debt_balance` when the order is created, and restored if it is
+  #: cancelled — the customer is refunded, so the debt comes back with it.
+  debt_settlement = Column(Numeric(10, 2), nullable=False, server_default="0", default=0.0)
   
   # ── Rider Specific Allowances ──────────────────────────────────────────
   staircase_surcharge = Column(Numeric(10, 2), nullable=False, default=0.0)
@@ -93,8 +105,10 @@ class OrderItem(Base):
   # vendor_id = Column(UUID(as_uuid=True), ForeignKey("Vendors.id"), index=True)
   product_id = Column(UUID(as_uuid=True), ForeignKey("Products.id"), index=True)
   quantity = Column(Integer, nullable=False, default=1)
-  price = Column(Double, nullable=False)
-  Subtotal = Column(Double, nullable=False)
+  # `Numeric`, not `Double`. `Subtotal` is what `_cart_payload` sums into
+  # `product_subtotal`, which is the base of every commission on the platform.
+  price = Column(Numeric(10, 2), nullable=False)
+  Subtotal = Column(Numeric(10, 2), nullable=False)
   
   # relationships
   order = relationship("Order", back_populates="order_item")

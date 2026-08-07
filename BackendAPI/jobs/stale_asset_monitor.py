@@ -10,26 +10,42 @@ from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
+#: A customer holding a deposit-bearing bottle this long without ordering has
+#: stopped using the platform, and the bottle is a real asset sitting in their
+#: kitchen. Long enough not to nag someone who is simply on holiday.
+STALE_AFTER_DAYS = 21
+
+
 async def run_stale_asset_monitor():
-    """
-    Cronjob to flag users who have unreturned empty bottles for over 21 days.
+    """Nudge customers who are still holding a bottle the platform paid for.
+
+    This job read `User.empty_bottles_held`, a column migration `3ba669eb21f3`
+    had already dropped. It therefore raised `AttributeError` on every run — not
+    "matched nothing", which is how it looked from the outside: it had never
+    sent a single message and never could. It now reads `bottles_held`, which
+    `customer_bottle_service` maintains in lockstep with the deposit balance.
     """
     logger.info("Running stale asset monitor...")
-    
+
     async with get_db_session() as session:
-        # Find users with empty bottles strictly > 0 and last_order_date > 21 days
         query = select(User).where(
             and_(
-                User.empty_bottles_held > 0,
+                User.bottles_held > 0,
                 User.last_order_date != None,
-                func.now() - User.last_order_date > text("INTERVAL '21 days'")
+                func.now() - User.last_order_date
+                > text("make_interval(days => :stale_days)").bindparams(
+                    stale_days=STALE_AFTER_DAYS
+                ),
             )
         )
         result = await session.execute(query)
         stale_users = result.scalars().all()
-        
+
         for user in stale_users:
-            logger.info(f"Flagging stale asset for user {user.id} ({user.full_name}) holding {user.empty_bottles_held} bottles.")
+            logger.info(
+                "Flagging stale asset for user %s (%s) holding %s bottle(s) on a KSH %s deposit.",
+                user.id, user.full_name, user.bottles_held, user.bottle_deposit_balance,
+            )
             title = "We Miss You! 🚰"
             body = f"Hi {user.full_name}, it's been a while! Ready for a refill? Or would you like us to pick up your empty bottles?"
             

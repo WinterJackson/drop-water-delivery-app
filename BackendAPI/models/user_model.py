@@ -45,7 +45,25 @@ class User(Base):
   bottle_purchased_at = Column(TIMESTAMP(timezone=True), nullable=True)
   bottle_refill_count = Column(Integer, nullable=False, default=0)
   last_order_date = Column(TIMESTAMP(timezone=True), nullable=True)
+  #: What the customer owes the platform: a late-cancellation penalty, or a
+  #: staircase charge they approved after M-Pesa had already taken the total.
+  #: Collected on their next order as a visible line item and cleared there; a
+  #: balance at or above `max_customer_debt_before_block` refuses checkout
+  #: instead. It is never the *only* way out — `finance.adjust` can write it off.
   debt_balance = Column(Numeric(10, 2), nullable=False, default=0)
+  #: Refundable bottle deposits this customer has paid and not had back. The
+  #: platform's liability to them, and the counterpart of the deposit folded
+  #: into `vendor_net` on every order that charged one.
+  bottle_deposit_balance = Column(Numeric(10, 2), nullable=False, server_default="0", default=0)
+  #: How many bottles that deposit covers. Moves only in lockstep with
+  #: `bottle_deposit_balance`, through `customer_bottle_service` — the count and
+  #: the money are two views of one fact and must never be written apart.
+  #:
+  #: An earlier `empty_bottles_held` column was dropped by migration
+  #: `3ba669eb21f3` while `jobs/stale_asset_monitor.py` was left reading it, so
+  #: that job raised `AttributeError` on every run rather than merely finding
+  #: nothing. The job now reads this column.
+  bottles_held = Column(Integer, nullable=False, server_default="0", default=0)
 
   # Welcome Offer (First-Time Customer Incentive)
   has_used_welcome_offer = Column(Boolean, nullable=False, default=False)

@@ -44,8 +44,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: An order accepted this long ago and still not dispatched is stuck, not busy.
+#: Shipped default. The live value is the `order_stale_after_minutes` row in
+#: `Platform_Settings`, read per request through `_stale_after_minutes` below —
+#: this constant was hardcoded beside an editable console field that was wired
+#: to nothing, so an owner changing it saw no effect anywhere.
 STALE_AFTER_MINUTES = 45
+
+
+async def _stale_after_minutes(db) -> int:
+    """How old an undispatched order must be before the board calls it stuck."""
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(db)
+    return config.get_int("order_stale_after_minutes")
 
 #: Statuses that mean "a human has to decide something".
 PAUSED_STATUSES = ("mismatch_pending", "pending_review")
@@ -94,7 +105,8 @@ async def list_orders(
     orders under four hundred healthy ones.
     """
     now = datetime.now(timezone.utc)
-    stale_before = now - timedelta(minutes=STALE_AFTER_MINUTES)
+    stale_after = await _stale_after_minutes(db)
+    stale_before = now - timedelta(minutes=stale_after)
 
     query = (
         select(Order, Vendor.business_name, Deliverer.name, User.full_name)
@@ -170,7 +182,8 @@ async def order_counts(
     access: AdminAccess = Depends(require_admin(PERM_ORDERS_READ)),
 ):
     now = datetime.now(timezone.utc)
-    stale_before = now - timedelta(minutes=STALE_AFTER_MINUTES)
+    stale_after = await _stale_after_minutes(db)
+    stale_before = now - timedelta(minutes=stale_after)
 
     async def count(*where):
         query = select(func.count(Order.id))
@@ -218,7 +231,7 @@ async def order_counts(
         # they are worth. Money is summed in the database as Decimal and
         # serialised as a string — never through float.
         "active_value": await money(Order.order_status.notin_(TERMINAL_STATUSES)),
-        "stale_threshold_minutes": STALE_AFTER_MINUTES,
+        "stale_threshold_minutes": stale_after,
         "delivered_24h": await count(
             Order.order_status == "delivered", Order.updated_at >= day_ago
         ),

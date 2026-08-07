@@ -27,6 +27,7 @@ from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.vendor_model import Vendor
@@ -70,6 +71,18 @@ def min_chargeable_total() -> Decimal:
     """An STK push for 0 is rejected by Safaricom, so discounts never consume
     the final shilling."""
     return config.get_decimal("min_chargeable_total")
+
+
+def max_debt_before_block() -> Decimal:
+    """The point at which an unpaid balance stops being a line item and starts
+    being a refusal.
+
+    Below it, `outstanding_debt` is added to the next order and cleared when that
+    order is created — the customer settles it by carrying on using the platform,
+    which is the only way they were ever going to. At or above it, the platform
+    stops extending credit.
+    """
+    return config.get_decimal("max_customer_debt_before_block")
 
 # Ordering used to reconcile the weight-derived and quantity-derived vehicle
 # classes. We always take the larger of the two: 100 kg of water does not fit on
@@ -139,6 +152,9 @@ class OrderQuote:
     payload_surcharge: Decimal
     staircase_surcharge: Decimal
     bottle_deposit: Decimal
+    #: An unpaid balance from an earlier order, collected on this one. Charged
+    #: like any other line and cleared by `create_order`.
+    debt_settlement: Decimal
     welcome_discount: Decimal
     wallet_discount: Decimal
 
@@ -168,6 +184,7 @@ class OrderQuote:
             + self.payload_surcharge
             + self.staircase_surcharge
             + self.bottle_deposit
+            + self.debt_settlement
         )
 
     def as_dict(self) -> dict:
@@ -189,6 +206,7 @@ class OrderQuote:
             "payload_surcharge": float(self.payload_surcharge),
             "staircase_surcharge": float(self.staircase_surcharge),
             "bottle_deposit": float(self.bottle_deposit),
+            "debt_settlement": float(self.debt_settlement),
             "welcome_discount": float(self.welcome_discount),
             "wallet_discount": float(self.wallet_discount),
             "total": float(self.total),
@@ -227,6 +245,55 @@ def _bottle_deposit(items: Iterable) -> Decimal:
         if per_bottle is not None:
             deposit += per_bottle * int(item.quantity or 0)
     return _money(deposit)
+
+
+async def welcome_offer_available(session: AsyncSession, user) -> bool:
+    """Whether this customer may still have the first-order discount.
+
+    Two conditions, not one:
+
+    * **The account has not used it.** `has_used_welcome_offer`, consumed under a
+      row lock by `create_order`.
+    * **No other account on the same handset has used it.** `Users.device_id`
+      was added for exactly this — the column carries the comment
+      "Anti-fraud: one offer per device" — and then nothing anywhere read or
+      wrote it. The offer was therefore gated per account, and since the
+      discount is 30% of a KSH 300 deposit taken entirely out of platform
+      margin, it could be farmed indefinitely with fresh sign-ups from one
+      phone.
+
+    A null `device_id` cannot be checked and is not treated as a failure: older
+    accounts predate the field, and refusing them a first order would be a worse
+    error than the one being closed.
+    """
+    if user is None or bool(getattr(user, "has_used_welcome_offer", True)):
+        return False
+
+    device_id = getattr(user, "device_id", None)
+    if not device_id:
+        return True
+
+    from models.user_model import User as _User
+
+    used_on_this_device = (
+        await session.execute(
+            select(_User.id)
+            .where(
+                _User.device_id == device_id,
+                _User.id != user.id,
+                _User.has_used_welcome_offer.is_(True),
+            )
+            .limit(1)
+        )
+    ).scalars().first()
+
+    if used_on_this_device is not None:
+        logger.info(
+            "Welcome offer refused for user %s: device %s already claimed it on account %s",
+            user.id, device_id, used_on_this_device,
+        )
+        return False
+    return True
 
 
 def vendor_type_of(vendor: Optional[Vendor]) -> str:
@@ -311,7 +378,7 @@ async def compute_order_quote(
     # ── Bottle deposit & welcome offer ──────────────────────────────────────
     # A deposit is due when the customer keeps the bottle, or on a first order
     # (they have no empty to swap). First orders get 30% off that deposit.
-    is_first_order = bool(user) and not bool(getattr(user, "has_used_welcome_offer", True))
+    is_first_order = await welcome_offer_available(session, user)
     bottle_deposit = ZERO
     welcome_discount = ZERO
     is_welcome_offer = False
@@ -350,6 +417,20 @@ async def compute_order_quote(
 
         delivery_markup = _money(delivery_fee * markup_rate)
 
+    # ── Outstanding debt ────────────────────────────────────────────────────
+    # A cancellation penalty or an approved staircase charge from an earlier
+    # order. It is collected here, as a visible line, and cleared by
+    # `create_order`. `debt_balance` used to be write-only: nothing anywhere
+    # decremented it and any positive value refused every subsequent quote, so a
+    # customer who cancelled one accepted order was locked out of the platform
+    # permanently over KSH 50. Above `max_debt_before_block` it still refuses —
+    # at that point the platform is extending credit, not collecting change.
+    debt_settlement = ZERO
+    if user is not None:
+        outstanding = _money(_d(getattr(user, "debt_balance", 0)))
+        if ZERO < outstanding < max_debt_before_block():
+            debt_settlement = outstanding
+
     gross = _money(
         product_subtotal
         + delivery_fee
@@ -359,6 +440,7 @@ async def compute_order_quote(
         + payload_surcharge
         + staircase_surcharge
         + bottle_deposit
+        + debt_settlement
     )
 
     # ── Discounts ───────────────────────────────────────────────────────────
@@ -394,6 +476,7 @@ async def compute_order_quote(
         rider_surcharges=float(payload_surcharge + staircase_surcharge),
         delivery_type=delivery_type,
         welcome_discount=float(welcome_discount),
+        debt_settlement=float(debt_settlement),
     )
 
     return OrderQuote(
@@ -415,6 +498,7 @@ async def compute_order_quote(
         payload_surcharge=payload_surcharge,
         staircase_surcharge=staircase_surcharge,
         bottle_deposit=bottle_deposit,
+        debt_settlement=debt_settlement,
         welcome_discount=welcome_discount,
         wallet_discount=wallet_discount,
         total=total,
@@ -451,15 +535,20 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None) -> None:
                 ),
             )
 
-    # 3. Outstanding bottle-deposit debt blocks new orders.
+    # 3. Outstanding debt. Below the ceiling it is collected on this order
+    #    (`quote.debt_settlement`) rather than refused; only a balance the
+    #    platform is no longer willing to carry blocks checkout, and the message
+    #    names the mechanism instead of leaving the customer with no way out.
     if user is not None:
-        debt = _d(getattr(user, "debt_balance", 0))
-        if debt > ZERO:
+        debt = _money(_d(getattr(user, "debt_balance", 0)))
+        ceiling = max_debt_before_block()
+        if debt >= ceiling:
             raise HTTPException(
                 status_code=402,
                 detail=(
-                    f"You have an outstanding bottle deposit debt of KSH {debt:.0f}. "
-                    "Please clear it before placing a new order."
+                    f"You have an outstanding balance of KSH {debt:.0f}, which is at "
+                    f"the KSH {ceiling:.0f} limit. Contact support to clear it — "
+                    "smaller balances are added to your next order automatically."
                 ),
             )
 

@@ -6,6 +6,7 @@ from models.vendor_model import Vendor
 from schemas.product_schemas import ProductFull
 from schemas.vendor_schemas import VendorOut
 from services.vendor_service import discoverable_vendor
+from services.product_service import live_product
 
 from sqlalchemy.orm import joinedload
 from geoalchemy2 import Geography
@@ -19,7 +20,7 @@ async def search_service(session: AsyncSession, query: str | None, limit: int = 
         select(Product)
         .options(joinedload(Product.vendor))
         .join(Vendor, Product.vendor_id == Vendor.id)
-        .where(discoverable_vendor())
+        .where(discoverable_vendor(), live_product())
     )
 
     order_by_clauses = []
