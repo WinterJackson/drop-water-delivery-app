@@ -116,6 +116,29 @@ device use your computer's LAN address — `localhost` reaches the handset.
 
 ---
 
+## 🔑 Signing in to test it
+
+Three accounts, because this app behaves differently for each. Password
+`Drop2026!!`, verification code `424242` for all of them.
+
+| Email | Signs in as |
+|---|---|
+| `vendor-retail+clerk_test@example.com` | **Owner** of *Ngong Springs Test Store* — retail, 3 products, full access |
+| `vendor-wholesale+clerk_test@example.com` | **Owner** of *Kiplagat Bulk Waters* — wholesale, negotiated delivery rate, 100 kg minimum order |
+| `vendor-staff+clerk_test@example.com` | **Staff** of the retail store — 3 of 4 capabilities |
+
+Sign in as the staff account to see the capability layer working rather than
+described: Esther holds `manage_orders`, `manage_products` and `manage_bottles`,
+but **not** `view_finances`, so the wallet balance is not hers to see. That is
+the default — granting it is a decision the owner makes, not something inherited
+from the schema.
+
+The two owner accounts are worth comparing directly. Retail and wholesale differ
+in commission, service fee, delivery pricing, dispatch and settlement, so a
+single vendor account leaves most of the platform unexercised.
+
+The full roster is in the [root README](../README.md#-test-accounts).
+
 ## 📂 Structure
 
 ```

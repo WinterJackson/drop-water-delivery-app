@@ -84,6 +84,23 @@ your laptop.
 
 ---
 
+## 🔑 Signing in to test it
+
+| | |
+|---|---|
+| Email | `customer+clerk_test@example.com` |
+| Password | `Drop2026!!` |
+| Verification code | `424242` |
+
+Set up as Amina Wanjiru in Ngong Town, with a KSH 500 wallet balance and the
+**welcome offer unused** — so the first order you place exercises the busiest
+path in pricing: a bottle deposit, 30% off it, then wallet credit against the
+remainder, in that order.
+
+Both test stores sit within the 2 km retail radius of this address, so discovery
+returns something. The full roster, including the wholesale store and the five
+admin roles, is in the [root README](../README.md#-test-accounts).
+
 ## 📂 Structure
 
 ```

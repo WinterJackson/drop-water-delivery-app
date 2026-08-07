@@ -258,11 +258,122 @@ your machine's LAN address — `localhost` reaches the handset, not your laptop.
 
 ---
 
+## 🔑 Test accounts
+
+Eight identities against the **development** Clerk instance
+(`safe-marmot-72.clerk.accounts.dev`). One password for all of them:
+
+```
+Drop2026!!
+```
+
+Every address carries Clerk's `+clerk_test` subaddress. That is not decoration —
+it is what makes an address a *test identity*: Clerk sends it no email at all and
+accepts the fixed verification code **`424242`**, every time. A plain invented
+domain gets a real email sent to a mailbox that cannot exist, so the account
+never verifies. Both behaviours are **development-instance only**; neither does
+anything on a `pk_live_` instance.
+
+> The password is published deliberately. These accounts exist on an instance
+> that mints no production tokens, and the five app identities hold no capability
+> an ordinary customer does not. Treat the roster as fixture data, not as a
+> credential.
+
+### Admin console — five roles
+
+Sign in at the console. Each row binds to its Clerk account on first sign-in;
+there is nothing to run.
+
+| Address | Role | Capabilities | Use it to see |
+|---|---|---|---|
+| `super-admin+clerk_test@example.com` | `super_admin` | 26 | Everything, including wallet adjustment and debt write-off |
+| `operations+clerk_test@example.com` | `operations` | 16 | Orders, dispatch, the live map, delivery replay |
+| `finance+clerk_test@example.com` | `finance` | 9 | Payouts, settlement, refunds — **no** `geo.view`, so no replay |
+| `support+clerk_test@example.com` | `support` | 9 | Tickets and delivery replay (support holds `geo.view` on purpose) |
+| `analyst+clerk_test@example.com` | `analyst` | 2 | Aggregate reporting only — the narrowest preset |
+
+The capability differences are the point. Open the same screen as `finance` and
+as `support` and the controls differ; that is the authorisation layer working,
+not a rendering bug.
+
+Regenerate the rows at any time:
+
+```bash
+cd BackendAPI && source venv/bin/activate
+python scripts/admin_access.py grant-roles --domain example.com --clerk-test
+python scripts/admin_access.py list
+```
+
+### The three apps — five identities
+
+| Address | App | Set up as |
+|---|---|---|
+| `customer+clerk_test@example.com` | Customer | Amina Wanjiru · Ngong Town · KSH 500 wallet · **welcome offer unused** |
+| `rider+clerk_test@example.com` | Rider | Brian Otieno · motorbike · gig · **KYC approved** · KSH 5,000 float · approved on both test stores |
+| `vendor-retail+clerk_test@example.com` | Vendor | Cynthia Njeri · *Ngong Springs Test Store* · retail · 3 products |
+| `vendor-wholesale+clerk_test@example.com` | Vendor | Dennis Kiplagat · *Kiplagat Bulk Waters* · wholesale · negotiated delivery rate · 2 products |
+| `vendor-staff+clerk_test@example.com` | Vendor | Esther Mwikali · staff of the retail store · 3 of 4 capabilities (**no** `view_finances`) |
+
+Each is provisioned so it is usable the moment you sign in, rather than dropping
+you into onboarding:
+
+- **The rider is `kyc_status = "approved"`.** `VerificationWall` fails closed, so
+  any other value means every screen behind it is unreachable.
+- **The rider carries float.** Accepting a cash order requires
+  `vendor_net + platform_total` — around KSH 420 on a typical retail order — so a
+  rider with an empty wallet is refused with a 402 at the first thing they try.
+- **The rider sits in Ngong, beside the stores.** Retail dispatch searches 2 km;
+  a rider anywhere else is never offered work, which looks exactly like dispatch
+  being broken.
+- **Both vendors carry a catalogue** and an `h3_index_res8`. Every discovery
+  query pre-filters on that cell before measuring anything, so a store without
+  one is invisible at any distance.
+- **The customer has not used the welcome offer**, so their first order exercises
+  the busiest branch in pricing: bottle deposit, 30% welcome discount, and wallet
+  credit, in that order.
+- **The rider is pre-approved on both stores**, so Tier 1 of dispatch fires. With
+  no `VendorRiderRegistry` row every order waits the full twenty seconds and then
+  arrives by Trip Radar, and the tiering never appears.
+
+Provision, inspect or remove them:
+
+```bash
+cd BackendAPI && source venv/bin/activate
+python scripts/test_accounts.py provision     # idempotent — safe to re-run
+python scripts/test_accounts.py list          # shows Clerk ↔ row binding
+python scripts/test_accounts.py prune --apply # deletes both sides
+```
+
+Unlike the admin script, this one **does** call Clerk's Backend API. It has to:
+an `Admin_Users` row binds by email, but `Users`, `Deliverers` and `Vendors` bind
+by `clerk_id`, which only Clerk can mint. See the script's own docstring for why
+that trade is acceptable here and not there.
+
+### Setting it up on a fresh Clerk instance
+
+Only needed once, or after switching instances. See
+[docs/admin-console-deployment.md](./docs/admin-console-deployment.md) §4 for the
+full walkthrough.
+
+1. **Clerk → Configure → Email, phone, username** — enable **Email address** as
+   an identifier and turn **Password** on. Without password enabled, Clerk's
+   Create-user form offers no password field and the API call is rejected.
+2. **Clerk → API keys** — copy `CLERK_SECRET_KEY` into `BackendAPI/.env`, Render
+   and Vercel. Then verify it points at the *same* instance as `CLERK_ISSUER`:
+   ```bash
+   python scripts/check_clerk_secret.py
+   ```
+   A key from another Clerk application fails silently — tokens still verify, but
+   every lookup searches the wrong directory.
+3. Run the two provisioning commands above.
+
+---
+
 ## ✅ Checks before you push
 
 ```bash
 cd BackendAPI && source venv/bin/activate
-pytest -q --ignore=tests/test_multi_store_integration.py   # 617 passed, 1 skipped
+pytest -q --ignore=tests/test_multi_store_integration.py   # 704 passed, 1 skipped
 
 cd ../drop-admin && npx tsc --noEmit && npx next build
 

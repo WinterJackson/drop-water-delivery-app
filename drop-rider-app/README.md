@@ -117,6 +117,28 @@ device use your computer's LAN address — `localhost` reaches the handset.
 
 ---
 
+## 🔑 Signing in to test it
+
+| | |
+|---|---|
+| Email | `rider+clerk_test@example.com` |
+| Password | `Drop2026!!` |
+| Verification code | `424242` |
+
+Brian Otieno — motorbike, gig economy, parked in Ngong Town. Three things about
+this account are deliberate, and each one is a wall you would otherwise hit:
+
+- **`kyc_status` is `approved`.** The gate above fails closed, so any other value
+  leaves every screen behind it unreachable.
+- **KSH 5,000 float.** Accepting a cash order requires
+  `vendor_net + platform_total` — roughly KSH 420 on a typical retail order — so
+  an empty wallet is a 402 at the first thing you try.
+- **Approved on both test stores.** Tier 1 dispatch only offers an order to
+  riders in `VendorRiderRegistry`. Without those rows every order waits the full
+  twenty seconds and arrives by Trip Radar instead, and the tiering never appears.
+
+The full roster is in the [root README](../README.md#-test-accounts).
+
 ## 📂 Structure
 
 ```

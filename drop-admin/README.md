@@ -180,6 +180,31 @@ and exports `useGoogleMaps()` plus the two theme styles.
 
 ---
 
+## 🔑 Signing in to test it
+
+Five accounts, one per role preset. Password `Drop2026!!`, verification code
+`424242` for all of them.
+
+| Email | Role | Capabilities |
+|---|---|---|
+| `super-admin+clerk_test@example.com` | `super_admin` | 26 — everything, including wallet adjustment and debt write-off |
+| `operations+clerk_test@example.com` | `operations` | 16 — orders, dispatch, the live map, delivery replay |
+| `finance+clerk_test@example.com` | `finance` | 9 — payouts, settlement, refunds |
+| `support+clerk_test@example.com` | `support` | 9 — tickets, **and** delivery replay |
+| `analyst+clerk_test@example.com` | `analyst` | 2 — aggregate reporting only |
+
+Walk the same screen as two different roles; the controls differ, and that is the
+authorisation layer working rather than a rendering bug. The pair worth trying
+first is `finance` and `support` on an order: support holds `geo.view` and can
+open the delivery replay, finance does not — because "my order never arrived"
+is a support ticket, and nobody in finance has any business reading a rider's
+movement history. That split is
+[ADR-0004](../docs/decisions/0004-delivery-replay-gated-on-geo-view.md).
+
+Each row binds to its Clerk account on first sign-in, so there is nothing to run
+after creating the users. The five app identities — customer, rider, two vendors
+and a staff member — are in the [root README](../README.md#-test-accounts).
+
 ## 🏃 Running it
 
 ```bash
