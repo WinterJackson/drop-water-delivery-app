@@ -1,5 +1,4 @@
 import { KeyboardTypeOptions } from 'react-native';
-import { Order } from './models';
 
 export interface InputFieldProps {
   label: string;
@@ -23,19 +22,4 @@ export interface ToggleItemProps {
   description?: string;
   value: boolean;
   onToggle: (value: boolean) => void;
-}
-
-export interface MiniVendorCardProps {
-  FullMap: boolean;
-  data: {
-    id: string;
-    title: string;
-    owners_name: string;
-    rating: number | null;
-    image: string | null;
-  };
-}
-
-export interface MiniOrderCardProps {
-  data?: Order;
 }

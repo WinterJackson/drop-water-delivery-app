@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
-import { View, Text, Image } from 'react-native';
+import { View, Image } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,13 +36,13 @@ export default function BentoCategories() {
             <View className="z-10">
               {lastOrder && lastOrder.vendor ? (
                 <>
-                  <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Reorder</Text>
+                  <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Reorder</Text>
                   <Text className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`} numberOfLines={1}>From {lastOrder.vendor.business_name}</Text>
                 </>
               ) : (
                 <>
-                  <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Refill &</Text>
-                  <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Wholesale</Text>
+                  <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Refill &</Text>
+                  <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Wholesale</Text>
                   <Text className={`text-xs mt-1 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>20L & Bulk Orders</Text>
                 </>
               )}
@@ -69,7 +70,7 @@ export default function BentoCategories() {
               style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
             >
               <View className="z-10 flex-1 pr-2">
-                <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Nearby Vendors</Text>
+                <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Nearby Vendors</Text>
                 <Text className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Directory</Text>
               </View>
               <Ionicons name="storefront-outline" size={32} color={BRAND.primary} className="z-10" />
@@ -83,7 +84,7 @@ export default function BentoCategories() {
               style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
             >
               <View className="z-10 flex-1 pr-2">
-                <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Deals & Offers</Text>
+                <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Deals & Offers</Text>
                 <Text className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Discounts</Text>
               </View>
               <Ionicons name="pricetag-outline" size={32} color={BRAND.primary} className="z-10" />

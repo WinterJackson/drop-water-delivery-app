@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useContext } from 'react';
-import { ActivityIndicator, View, Text, StatusBar, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
+import { ActivityIndicator, View, StatusBar, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BRAND } from '../../constants/brandColors';
@@ -9,18 +10,20 @@ import { useEarningsHistoryPaginated, RiderOrder } from '../../hooks/queries/use
 import { RiderEarningsHistorySkeleton } from '../../components/skeletons/ContextualSkeletons';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useRouter } from 'expo-router';
+import { formatMoneyShort, isZeroMoney } from "@/utils/money";
 
-const formatCurrency = (amount: number) => `KSH ${Math.round(amount || 0).toLocaleString()}`;
+// Money is a decimal string end to end; `formatMoneyShort` rounds in cents.
+const formatCurrency = (amount: string | null | undefined) => formatMoneyShort(amount);
 
 const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boolean }) => {
     const [expanded, setExpanded] = useState(false);
 
     // Calculate totals based on backend values, fallback to 0 if undefined
-    const baseFee = order.delivery_fee || 0;
-    const payloadBonus = order.payload_surcharge || 0;
-    const staircaseBonus = order.staircase_surcharge || 0;
-    const commission = order.rider_commission || 0;
-    const netPayout = order.rider_net || 0;
+    const baseFee = order.delivery_fee ?? "0";
+    const payloadBonus = order.payload_surcharge ?? "0";
+    const staircaseBonus = order.staircase_surcharge ?? "0";
+    const commission = order.rider_commission ?? "0";
+    const netPayout = order.rider_net ?? "0";
     const vendorName = order.vendor?.business_name || "Drop Vendor";
     
     let dateFormatted = "N/A";
@@ -45,7 +48,7 @@ const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boo
                         <Ionicons name="checkmark-done" size={24} color={BRAND.primary} />
                     </View>
                     <View className="flex-1">
-                        <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+                        <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
                             {vendorName}
                         </Text>
                         <View className="flex-row items-center mt-1">
@@ -59,7 +62,7 @@ const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boo
                 </View>
 
                 <View className="items-end">
-                    <Text className={`font-bold text-lg text-green-500`}>
+                    <Text className={`font-sans-bold text-lg text-green-500`}>
                         {formatCurrency(netPayout)}
                     </Text>
                     <Ionicons 
@@ -73,31 +76,31 @@ const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boo
 
             {expanded && (
                 <View className={`px-4 pb-4 pt-2 border-t ${darkTheme ? "border-white/10" : "border-gray-100"}`}>
-                    <Text className={`text-xs font-bold uppercase tracking-wider mb-3 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Earnings Breakdown</Text>
+                    <Text className={`text-xs font-sans-bold uppercase tracking-wider mb-3 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Earnings Breakdown</Text>
                     
                     <View className="flex-row justify-between mb-2">
                         <Text className={`${darkTheme ? "text-gray-300" : "text-gray-600"}`}>Base Delivery Fare</Text>
                         <Text className={`${darkTheme ? "text-white" : "text-gray-900"}`}>{formatCurrency(baseFee)}</Text>
                     </View>
 
-                    {payloadBonus > 0 && (
+                    {!isZeroMoney(payloadBonus) && (
                         <View className="flex-row justify-between mb-2">
                             <View className="flex-row items-center">
                                 <Text className={`${darkTheme ? "text-gray-300" : "text-gray-600"}`}>Payload Bonus</Text>
                                 <View className="ml-2 bg-orange-500 px-1.5 py-0.5 rounded">
-                                    <Text className="text-white text-[10px] font-bold">HEAVY</Text>
+                                    <Text className="text-white text-[10px] font-sans-bold">HEAVY</Text>
                                 </View>
                             </View>
                             <Text className="text-green-500">+{formatCurrency(payloadBonus)}</Text>
                         </View>
                     )}
 
-                    {staircaseBonus > 0 && (
+                    {!isZeroMoney(staircaseBonus) && (
                         <View className="flex-row justify-between mb-2">
                             <View className="flex-row items-center">
                                 <Text className={`${darkTheme ? "text-gray-300" : "text-gray-600"}`}>Staircase Bonus</Text>
                                 <View className="ml-2 bg-blue-500 px-1.5 py-0.5 rounded">
-                                    <Text className="text-white text-[10px] font-bold">ELEVATION</Text>
+                                    <Text className="text-white text-[10px] font-sans-bold">ELEVATION</Text>
                                 </View>
                             </View>
                             <Text className="text-green-500">+{formatCurrency(staircaseBonus)}</Text>
@@ -110,15 +113,14 @@ const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boo
                     </View>
 
                     <View className={`flex-row justify-between pt-3 border-t ${darkTheme ? "border-white/10" : "border-gray-200"}`}>
-                        <Text className={`font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Total Net Payout</Text>
-                        <Text className={`font-bold text-lg text-green-500`}>{formatCurrency(netPayout)}</Text>
+                        <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Total Net Payout</Text>
+                        <Text className={`font-sans-bold text-lg text-green-500`}>{formatCurrency(netPayout)}</Text>
                     </View>
                 </View>
             )}
         </View>
     );
 };
-
 
 export default function EarningsHistory() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -192,7 +194,7 @@ export default function EarningsHistory() {
                     <TouchableOpacity onPress={() => router.back()} className="mr-4">
                         <BackButtonMinimal />
                     </TouchableOpacity>
-                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         Earnings Breakdown
                     </Text>
                 </View>
@@ -218,7 +220,7 @@ export default function EarningsHistory() {
                 }
                 renderItem={({ item }: { item: any }) => <AccordionItem order={item} darkTheme={darkTheme} />}
                 renderSectionHeader={({ section: { title } }: { section: any }) => (
-                    <Text className={`text-sm font-bold uppercase tracking-wider mb-3 mt-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                    <Text className={`text-sm font-sans-bold uppercase tracking-wider mb-3 mt-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                         {title}
                     </Text>
                 )}

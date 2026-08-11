@@ -21,7 +21,7 @@ earlier document disagree, the code is what is written here.
 > exists that would otherwise look arbitrary.
 
 Findings are collected, ranked and cross-referenced in
-[§18](#18-findings-and-recommendations).
+[§19](#19-findings-and-recommendations).
 
 ---
 
@@ -44,7 +44,8 @@ Findings are collected, ranked and cross-referenced in
 15. [Wallets, cash float and payouts](#15-wallets-cash-float-and-payouts)
 16. [Cancellations and refunds](#16-cancellations-and-refunds)
 17. [The daily and nightly rhythm](#17-the-daily-and-nightly-rhythm)
-18. [Findings and recommendations](#18-findings-and-recommendations)
+18. [What a customer costs, and whether they pay it back](#18-what-a-customer-costs-and-whether-they-pay-it-back)
+19. [Findings and recommendations](#19-findings-and-recommendations)
 
 ---
 
@@ -100,7 +101,7 @@ Staff are never wallet owners: `payout_service._get_provider_details` resolves o
 
 ## 2. Business values are rows, not constants
 
-`services/platform_config_service.py` defines **46 settings** in seven groups (34 at the time of the audit; the twelve added by the remediation are listed in [§18](#forty-six-settings-not-thirty-four)).
+`services/platform_config_service.py` defines **48 settings** in seven groups (34 at the time of the audit; the twelve added by the remediation are listed in [§18](#forty-six-settings-not-thirty-four), and two more — `platinum_min_deliveries` and `platinum_window_days` — were added when the rider-app pass found the Platinum *reward* configurable while the *requirement* was a literal in the nightly job).
 They live in the `Platform_Settings` table, are edited from the admin console, and
 apply to **the next quote** — no deploy, no restart. The class attributes in
 `DispatchPolicy` and the literals in `pricing_service` are *shipped defaults*, kept
@@ -203,6 +204,17 @@ a comment explaining why: how many 20-litre bottles fit on a motorbike is a fact
 about motorbikes, and a console field allowing 40 would produce orders no rider can
 physically accept.
 
+### What a *vendor* may not set
+
+A store sets its own trading state, its minimum order and whether it takes cash
+(§4). It does **not** set its delivery fee or its delivery radius, and both are
+absent from `StorefrontTermsRequest` deliberately rather than by oversight. The
+rider is paid out of the delivery fee, so a store undercutting to win orders would
+be spending the rider's money; and the retail radius protects water temperature
+and rider time, not merely query cost. Both live on the console —
+`retail_delivery_base_fee`, `retail_delivery_per_km`, `short_hop_delivery_fee`,
+`retail_max_distance_km`.
+
 ---
 
 ## 3. Money and precision
@@ -274,7 +286,7 @@ AND ST_DWithin(Vendor.location, point, max_m)  # the actual radius
 ```
 
 The H3 ring alone is a bounding box, not a radius — at k=5 it reaches roughly
-2.5–3 km, so on its own it returned retail vendors beyond the 2 km limit. The
+2.5–3 km, so on its own it returned retail vendors beyond the configured retail limit. The
 customer could browse them, fill a cart, and discover the problem only as a 400 at
 checkout. The `k_ring` is now **derived from the configured radius**, so raising
 `retail_max_distance_km` in the console widens the search too.
@@ -293,6 +305,63 @@ checkout. The `k_ring` is now **derived from the configured radius**, so raising
 The last one matters: a bookmark or a shared product link must not bypass what the
 listings enforce, or suspending a store only hides it from people who were not
 already looking for it.
+
+### Is the store actually trading?
+
+Discovery decides whether a store is *listed*. Whether it is **taking orders** is
+a separate question with five answers, and `services/vendor_availability.py` is
+the only thing that answers it.
+
+| State | Set by | Ends |
+|---|---|---|
+| `suspended` | administrator (`is_active`) | when an administrator lifts it |
+| `paused` | the store, `manage_orders` | by itself, at `paused_until` |
+| `offline` | the store's owner (`is_online`) | when they switch it back |
+| `closed_hours` | `shift_start`/`shift_end` | at opening time |
+| `open` | — | — |
+
+Evaluated in that order, because a suspended store is not "closed until 07:00" and
+the customer should be told the most useful thing rather than the first thing that
+matched.
+
+Three things about this were broken rather than missing. `is_online` existed and
+the vendor app shipped a swipe control wired to it — and **nothing on the ordering
+path ever read it**, so a vendor could swipe their store closed, watch the toggle
+turn grey, and keep receiving orders. `shift_start`/`shift_end` had been on every
+store since the first migration, rendered on the console, enforced nowhere. And a
+store had no way at all to decline cash or to set a minimum order.
+
+- **A closed store is marked, not hidden.** `vendor_availability.annotate` stamps
+  `is_accepting_orders` / `store_state` / `store_reason` onto every row the seven
+  discovery reads return. Filtering them out would tell a customer that the shop
+  they always use had left the platform, and would cost a store that paused for
+  twenty minutes its place in everybody's list rather than twenty minutes of
+  orders.
+- **The reason is the server's sentence**, composed once. It carries the store's
+  own note and its reopening time in EAT; the apps render it verbatim.
+- **Enforced twice**: `assert_store_accepting` at checkout, and again inside
+  `create_order` under its row lock — a store can pause between the quote the
+  customer is reading and the tap that charges them, and everything after that
+  point is a refund.
+- **A pause expires; `is_online` does not.** The indefinite switch is the one
+  people forget: tapped during a rush, and the shop is dark until somebody
+  notices the next morning. `resume-paused-stores` clears expired pauses every
+  five minutes and tells the store — but the state is already correct without it,
+  because the expiry is compared against the clock rather than a flag.
+
+The store's own **minimum order** is checked inside `validate_quote` (§6) against
+`product_subtotal`, not the total: a minimum counting the delivery fee would move
+with the customer's address, so the same basket would clear it from one street and
+fail from the next. Its **cash decision** is read through `cod_policy`, which is
+the only module on the platform that decides whether an order may be paid in cash.
+
+Every one of these is bounded by a `storefront` settings row —
+`vendor_max_min_order_value`, `vendor_max_pause_hours`, `vendor_may_decline_cash`,
+`vendor_hours_enforced`. Self-service with no ceiling is not self-service: a store
+setting a KSH 50,000 minimum has delisted itself while still appearing open and
+still ranking in search, which reads to the customer as the platform being broken
+rather than the shop being shut. Delivery fees and the delivery radius remain
+platform-set — see *What is deliberately not configurable*.
 
 ---
 
@@ -1371,8 +1440,11 @@ public URL. The cadences:
 | `process_pending_refunds` | every **2 min** | M-Pesa reversals for `refund_pending` |
 | `reassign_unassigned_orders` | every **3 min** | Tier-3 re-offer of paid, unclaimed orders older than 3 min |
 | `auto_cancel_pending_orders` | every **5 min** | cancels `pending`/`unassigned` older than **15 min**, restores stock, unlocks the cart |
+| `resume_paused_stores` | every **5 min** | clears expired store pauses and tells the vendor they are open again (§4) |
 | `check_push_receipts` | every **10 min** | reconciles Expo push receipts |
+| `release_unclaimed_cash` | every **10 min** | frees float locked to undelivered cash orders and returns them to the pool |
 | `stale_asset_monitor` | **03:00** daily | nudges customers holding bottles 21+ days — see Finding F-10 |
+| `deposit_maintenance` | **03:30** daily | collection expiry, one-sided settlement, dormancy conversion, then the three-way reconciliation — **one** slug, because the reconciliation must read a book the sweeps have already brought up to date |
 | `evaluate_platinum_riders` | **00:00** daily | promotes/demotes on trailing-7-day volume |
 
 Every sweep that mutates uses `FOR UPDATE SKIP LOCKED`, **commits per item**, and
@@ -1414,7 +1486,72 @@ sent **only for what actually committed**.
 
 ---
 
-## 18. Findings and recommendations
+## 18. What a customer costs, and whether they pay it back
+
+`services/admin_growth_service.py`, on the console at `/analytics/growth`.
+
+The retention grid in §4's sibling report answers *do customers come back*. This
+answers the question a business acts on — **did the ones who came back pay back
+what it cost to get them** — from figures the platform has written on every
+order since the first one and had never once added up.
+
+### The two halves of CAC
+
+| | Where it comes from | Can the platform see it? |
+|---|---|---|
+| **Measured** | `Order.welcome_discount`, the share of a first bottle deposit the platform absorbs | Exactly. It is on every order. |
+| **Entered** | `Acquisition_Spend` — posters, a branded boda, ads, referrals, an agent's weekend | Never. Somebody has to type it in. |
+
+They are returned as `measured`, `entered` and `blended` **separately**, with
+`has_entered_spend` beside them. A CAC built from the measured half alone is
+precise, confident, and typically wrong by an order of magnitude *in the
+direction that makes acquisition look cheap* — and the console would render it
+authoritatively, because every figure in it is real. Somebody would then spend
+against it.
+
+`Acquisition_Spend` is keyed on (month, channel) and **upserted**: "the invoice
+came in and it was 12,000 not 10,000" is the ordinary case, and a second row for
+it would double the month. Writes need `settings.manage`, not `analytics.read` —
+a figure that moves every CAC on the console is a decision about the business,
+not a report — and both writes are audited, deletions recording what was
+removed.
+
+### Spend that acquired nobody
+
+Summing entered spend per cohort is the obvious implementation, and it silently
+discards every shilling spent in a month with no acquisitions — because a month
+with no acquisitions has no cohort. That is the single most important month on
+the screen: it is the definition of acquisition not working.
+
+`unattributed_spend` reports it separately and it is still counted in the
+blended CAC. The arithmetic that hides it is the arithmetic that flatters.
+
+### The rules the numbers obey
+
+- **A cohort is a customer's first *delivered* order.** An account that never
+  received water was not acquired, and a signup cohort makes every retention
+  figure look worse than the business is.
+- **The `MIN()` runs over all history**, then the window filters its result. A
+  first-delivery date computed *inside* the window would re-acquire a two-year
+  customer into this month's cohort — inventing new customers out of loyal ones,
+  and flattering both growth and CAC.
+- **Contribution is `platform_net`** — the platform's cut after the M-Pesa or
+  cash-handling tariff — frozen on the order at creation (§7), so moving a
+  commission today cannot restate what a cohort earned last March.
+- **Payback is the first month offset where cumulative contribution per acquired
+  customer reaches CAC.** `None` means not yet, which is a fact about a young
+  cohort rather than a failure, and the console renders it as `—` rather than
+  colouring the row.
+- **Median payback counts only cohorts that have paid back.** Averaging in the
+  young ones reports a payback period faster than any cohort on the platform has
+  ever achieved — arithmetically defensible and false.
+- **Nothing is projected.** `realised_per_customer` is named as realised. An LTV
+  extrapolated from four months of data is a guess wearing a number's clothes,
+  and it is the number people raise budgets against.
+
+---
+
+## 19. Findings and recommendations
 
 Fourteen findings, all **remediated**. The table records what each one cost, what
 changed, and the test that stops it coming back — a fix with no test is a fix

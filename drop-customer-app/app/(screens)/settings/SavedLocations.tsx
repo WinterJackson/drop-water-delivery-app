@@ -2,7 +2,8 @@ import { errorMessage } from "@/API/errors";
 import React, { useContext } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView } from "react-native";
+import { View, ScrollView } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -101,7 +102,7 @@ export default function SavedLocations() {
                 <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Saved Locations
                 </Text>
             </View>
@@ -111,12 +112,12 @@ export default function SavedLocations() {
                 {/* Current Active Location */}
                 <View className={`p-4 mb-4 rounded-2xl border ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
                     <View className="flex-row justify-between items-start mb-1">
-                        <Text className={`text-sm font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>CURRENT DELIVERY ADDRESS</Text>
+                        <Text className={`text-sm font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>CURRENT DELIVERY ADDRESS</Text>
                         <View className="px-2 py-1 rounded-md ml-2 bg-accentbg/10">
-                            <Text className="text-accentbg font-bold text-xs">ACTIVE</Text>
+                            <Text className="text-accentbg font-sans-bold text-xs">ACTIVE</Text>
                         </View>
                     </View>
-                    <Text className={`text-base font-medium leading-6 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                    <Text className={`text-base font-sans-medium leading-6 ${darkTheme ? "text-white" : "text-gray-900"}`}>
                         {User?.location_address || "No location set. Tap '+' to add one."}
                     </Text>
                 </View>
@@ -130,14 +131,14 @@ export default function SavedLocations() {
                 ) : savedLocations.length === 0 ? (
                     <View className="items-center pt-10 gap-3">
                         <Text className="text-3xl">📍</Text>
-                        <Text className={`text-base font-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>No saved locations yet</Text>
+                        <Text className={`text-base font-sans-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>No saved locations yet</Text>
                         <Text className={`text-sm text-center max-w-[250px] ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                             Save your frequently used addresses for faster checkout.
                         </Text>
                     </View>
                 ) : (
                     <View className="gap-3">
-                        <Text className={`text-xs font-semibold uppercase tracking-wider mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                        <Text className={`text-xs font-sans-semibold uppercase tracking-wider mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                             Your Addresses ({savedLocations.length})
                         </Text>
                         {savedLocations.map((loc: import("@/types/models").SavedLocation) => (
@@ -151,9 +152,9 @@ export default function SavedLocations() {
                                     </View>
                                     <View className="flex-1">
                                         {loc.label && (
-                                            <Text className={`text-xs font-bold uppercase ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{loc.label}</Text>
+                                            <Text className={`text-xs font-sans-bold uppercase ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{loc.label}</Text>
                                         )}
-                                        <Text numberOfLines={2} className={`text-sm font-medium ${darkTheme ? "text-white" : "text-gray-900"}`}>{loc.address}</Text>
+                                        <Text numberOfLines={2} className={`text-sm font-sans-medium ${darkTheme ? "text-white" : "text-gray-900"}`}>{loc.address}</Text>
                                         <Text className={`text-xs mt-0.5 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>Used {loc.use_count} time{loc.use_count !== 1 ? "s" : ""}</Text>
                                     </View>
                                     <PressableScale
@@ -161,7 +162,7 @@ export default function SavedLocations() {
                                         className="ml-2 p-2"
                                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                     >
-                                        <Text className="text-red-400 text-xs font-semibold">Remove</Text>
+                                        <Text className="text-red-400 text-xs font-sans-semibold">Remove</Text>
                                     </PressableScale>
                                 </View>
                             </PressableScale>
@@ -176,7 +177,7 @@ export default function SavedLocations() {
                 className="absolute bottom-28 right-5"
             >
                 <View className="w-14 h-14 rounded-full bg-accentbg items-center justify-center shadow-xl shadow-black/30">
-                    <Text className="text-white text-2xl font-bold">+</Text>
+                    <Text className="text-white text-2xl font-sans-bold">+</Text>
                 </View>
             </PressableScale>
         </SafeAreaView>

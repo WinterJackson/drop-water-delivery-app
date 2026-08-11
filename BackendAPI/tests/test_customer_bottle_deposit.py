@@ -219,12 +219,27 @@ async def test_the_refund_writes_a_ledger_row():
         actor="ops@drop.co.ke", reason="handed in at Ngong depot",
     )
 
+    # Selected by type, not by position: a return now also records a
+    # `BottleReturnRequest` so the nightly reconciliation has something to
+    # subtract, and "the last thing added" stopped meaning "the ledger row".
+    from models.wallet_transaction_model import WalletTransaction
+
     added = [call.args[0] for call in session.add.call_args_list]
-    assert added, "no WalletTransaction was written"
-    entry = added[-1]
+    entries = [obj for obj in added if isinstance(obj, WalletTransaction)]
+    assert entries, "no WalletTransaction was written"
+    entry = entries[-1]
     assert entry.amount == Decimal("300.00")
     assert "deposit returned" in entry.description.lower()
     assert "Ngong depot" in entry.description
+
+    # And the record the reconciliation subtracts, marked with where it came from.
+    from models.bottle_return_model import BottleReturnRequest, BottleReturnStatus
+
+    records = [obj for obj in added if isinstance(obj, BottleReturnRequest)]
+    assert len(records) == 1, "the console return left nothing for the reconciliation"
+    assert records[0].origin == "console"
+    assert records[0].status == BottleReturnStatus.SETTLED.value
+    assert records[0].amount_refunded == Decimal("300.00")
 
 
 # ── The structural guarantee ──────────────────────────────────────────────

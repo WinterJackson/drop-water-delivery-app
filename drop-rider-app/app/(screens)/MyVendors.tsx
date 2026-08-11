@@ -1,7 +1,8 @@
 import { ApiError, errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState } from "react";
-import { View, Text, StatusBar, FlatList, RefreshControl, Image, TouchableOpacity, ActivityIndicator, TextInput, Linking } from "react-native";
+import { View, StatusBar, FlatList, RefreshControl, Image, TouchableOpacity, ActivityIndicator, Linking } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useRouter } from "expo-router";
@@ -97,7 +98,7 @@ export default function MyVendors() {
     return (
       <View className={`flex-row items-center px-3 py-1 rounded-full ${bgColor}`}>
         <Ionicons name={iconName} size={14} color={darkTheme ? (status === 'approved' ? '#4ade80' : status === 'rejected' ? '#f87171' : '#facc15') : (status === 'approved' ? '#15803d' : status === 'rejected' ? '#b91c1c' : '#a16207')} />
-        <Text className={`text-xs font-semibold ml-1 ${textColor}`}>
+        <Text className={`text-xs font-sans-semibold ml-1 ${textColor}`}>
           {statusText}
         </Text>
       </View>
@@ -121,7 +122,7 @@ export default function MyVendors() {
           </View>
           
           <View className="flex-1 ml-4">
-            <Text className={`text-base font-bold mb-1 ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+            <Text className={`text-base font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
               {item.business_name}
             </Text>
             <View className="flex-row items-center mb-2">
@@ -147,7 +148,7 @@ export default function MyVendors() {
             ) : (
               <>
                 <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                <Text className="text-red-500 font-semibold ml-2">Withdraw Application</Text>
+                <Text className="text-red-500 font-sans-semibold ml-2">Withdraw Application</Text>
               </>
             )}
           </TouchableOpacity>
@@ -165,7 +166,7 @@ export default function MyVendors() {
             className={`mt-4 py-3 rounded-xl flex-row justify-center items-center ${darkTheme ? "bg-gray-800" : "bg-white"}`}
           >
             <Ionicons name="call-outline" size={16} color={BRAND.primary} />
-            <Text className={`font-semibold ml-2 ${darkTheme ? "text-white" : "text-black"}`}>Contact Vendor</Text>
+            <Text className={`font-sans-semibold ml-2 ${darkTheme ? "text-white" : "text-black"}`}>Contact Vendor</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -190,7 +191,7 @@ export default function MyVendors() {
           <TouchableOpacity onPress={() => router.back()} className="mr-4">
               <BackButtonMinimal />
           </TouchableOpacity>
-          <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+          <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
               My Vendors
           </Text>
       </View>
@@ -206,7 +207,7 @@ export default function MyVendors() {
                   onChangeText={setSearchQuery}
                   placeholder="Search your vendors..."
                   placeholderTextColor={darkTheme ? "#9ca3af" : "#6b7280"}
-                  className={`flex-1 font-semibold ml-2 ${darkTheme ? "text-white" : "text-black"}`}
+                  className={`flex-1 font-sans-semibold ml-2 ${darkTheme ? "text-white" : "text-black"}`}
               />
           </View>
         </View>
@@ -220,7 +221,7 @@ export default function MyVendors() {
           <View className={`w-24 h-24 rounded-full items-center justify-center mb-6 ${darkTheme ? "bg-gray-900" : "bg-white"}`}>
             <Ionicons name="briefcase-outline" size={48} color={BRAND.gray400} />
           </View>
-          <Text className={`text-xl font-bold mb-2 text-center ${darkTheme ? "text-white" : "text-gray-900"}`}>
+          <Text className={`text-xl font-sans-bold mb-2 text-center ${darkTheme ? "text-white" : "text-gray-900"}`}>
             No Vendors Yet
           </Text>
           <Text className={`text-center mb-8 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -231,7 +232,7 @@ export default function MyVendors() {
             className="px-8 py-4 rounded-xl"
             style={{ backgroundColor: BRAND.primary }}
           >
-            <Text className="text-white font-bold text-base">Discover Vendors</Text>
+            <Text className="text-white font-sans-bold text-base">Discover Vendors</Text>
           </TouchableOpacity>
         </View>
       ) : (

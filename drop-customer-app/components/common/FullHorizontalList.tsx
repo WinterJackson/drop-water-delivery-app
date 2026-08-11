@@ -5,18 +5,19 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useContext } from "react";
 import {
-	useWindowDimensions,
-	Text,
-	TouchableWithoutFeedback,
-	View,
-	StyleSheet,
-	FlatList
+    useWindowDimensions,
+    TouchableWithoutFeedback,
+    View,
+    StyleSheet,
+    FlatList,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 
 import { Skeleton, SkeletonText, SkeletonButton } from "../ui/Skeleton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useUserDetails } from "@/hooks/queries/useUser";
 import { estimateDeliveryTime } from "@/utils/distance";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 
 type Props = {
 	data: any[];
@@ -91,7 +92,7 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 	return (
 		<View className=" py-1">
 			<View className="px-7 py-3">
-				<Text className={`font-semibold text-xl ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+				<Text className={`font-sans-semibold text-xl ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
 			</View>
 			<View style={{ height: 200, width: "100%" }}>
 				<FlatList
@@ -133,6 +134,12 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 															.trim() + "..."
 														: item.business_name
 												}</Text>
+											{/* A delivery estimate for a shop that is shut is a
+											    promise the platform cannot keep. Same component,
+											    same server field, as the store page. */}
+											{item.is_accepting_orders === false ? (
+												<StoreClosedNotice store={item} compact />
+											) : (
 											<View className="flex-row items-center gap-2">
 												<Image
 													source={require("../../assets/icons/bike-black.png")}
@@ -150,6 +157,7 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 															: "text-gray-600"
 													}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
 											</View>
+											)}
 										</View>
 										{/* ORDER NOW BUTTON */}
 										<PressableScale

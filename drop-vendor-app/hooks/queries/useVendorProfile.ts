@@ -13,7 +13,6 @@ export interface VendorProfile {
     location_address?: string;
     lat?: number;
     lng?: number;
-    delivery_radius?: number;
     is_online?: boolean;
     profile_pic?: string;
     phone_number?: string;
@@ -29,11 +28,11 @@ export interface VendorProfile {
      * display only while the server enforced nothing at all.
      */
     permissions?: string[];
-    wallet_balance?: number;
+    wallet_balance?: string;
     owners_name?: string;
     email?: string;
     business_license?: string;
-    deposit_fee?: number;
+    deposit_fee?: string;
     shift_start?: string;
     shift_end?: string;
     preferred_payment_method?: string[];
@@ -62,8 +61,12 @@ export function useVendorProfile() {
 }
 
 /**
- * Update any field of the active store (delivery_radius, is_online, …).
- * Optimistically updates the local cache and reverts on error.
+ * Update any field of the active store (is_online, shift hours, payout
+ * destination, …). Optimistically updates the local cache and reverts on error.
+ *
+ * Not the service radius: that is a platform setting, like the delivery fee,
+ * and the server no longer accepts it here. `useStorefront().limits` reports
+ * the real one.
  *
  * Owner-only on the server (`get_owned_store`). A staff member gets a 403 whose
  * `detail.type` is `owner_only`; `errorMessage(err)` renders the sentence the

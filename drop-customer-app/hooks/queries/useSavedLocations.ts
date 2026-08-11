@@ -1,4 +1,4 @@
-import { ApiRoutes, ROUTES } from '@/API/routes/ApiRoutes';
+import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -85,7 +85,7 @@ export function useRevokeLocation() {
     const api = useApiRequest();
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: () => api.post(ApiRoutes.RevokeUserLocation.path),
+        mutationFn: () => api.post(ROUTES.REVOKE_LOCATION),
         onMutate: async () => {
             // Cancel any outgoing user detail refetches
             await queryClient.cancelQueries({ queryKey: ['user', 'details'] });

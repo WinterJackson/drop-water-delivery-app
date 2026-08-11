@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.user_service import get_user
 from services.cart_services import add_to_cart_service, fetch_cart, fetch_detailed_cart, change_cart_item_quantity_service, delete_cart_item_service, delete_cart_service
 from services.dispatch_policy import DispatchPolicy
+from utils.money import money_str
 from schemas.common_schemas import RequestBodyIdAndQuantity, RequestBodyId
 from schemas.cart_schemas import CartDetailed
 from services.payment_service import initiate_stk_push, check_payment
@@ -129,9 +130,12 @@ class QuoteRequest(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
     delivery_type: str = "quick_swap"
+    #: Quoted, not charged. The cart shows both prices so the customer can see
+    #: what paying by M-Pesa saves them before they choose.
+    payment_method: str = "mpesa"
 
 
-async def _load_priced_cart(db: AsyncSession, user_id, lat: float, lng: float, delivery_type: str):
+async def _load_priced_cart(db: AsyncSession, user_id, lat: float, lng: float, delivery_type: str, payment_method: str = "mpesa"):
     """Fetch the cart, resolve its vendor, and price it.
 
     Shared by `/quote` and `/mpesa_payment` so the number the customer sees in the
@@ -164,6 +168,10 @@ async def _load_priced_cart(db: AsyncSession, user_id, lat: float, lng: float, d
         delivery_type=delivery_type,
         lat=lat,
         lng=lng,
+        # The method changes the price: paying by M-Pesa earns a discount, and
+        # a cash order costs the platform handling instead of a Safaricom
+        # tariff. Quoting without it would show one number and charge another.
+        payment_method=payment_method,
     )
     return cart, db_user, vendor, quote
 
@@ -189,7 +197,7 @@ async def quote_cart(
         raise HTTPException(status_code=403, detail="Customer profile not found.")
 
     cart, db_user, vendor, quote = await _load_priced_cart(
-        db, db_user.id, body.lat, body.lng, body.delivery_type
+        db, db_user.id, body.lat, body.lng, body.delivery_type, body.payment_method
     )
 
     # Surface rule violations as advisory warnings rather than hard failures, so
@@ -197,7 +205,7 @@ async def quote_cart(
     # error page before the customer has even pressed Checkout.
     warnings: list[str] = []
     try:
-        validate_quote(quote, cart.cart_item, user=db_user)
+        validate_quote(quote, cart.cart_item, user=db_user, vendor=vendor)
         checkout_ready = True
     except HTTPException as exc:
         checkout_ready = False
@@ -207,15 +215,46 @@ async def quote_cart(
     payload = quote.as_dict()
     payload["checkout_ready"] = checkout_ready
     payload["warnings"] = warnings
+    # Both through the accessors: these two figures are what the cart shows the
+    # customer as the rule, and a shipped default shown beside a configured
+    # enforcement is a cart that explains a refusal with the wrong number.
     payload["moq_kg"] = (
-        float(DispatchPolicy.WHOLESALE_MOQ_KG) if quote.vendor_type == "wholesale_b2b" else None
+        DispatchPolicy.wholesale_moq_kg() if quote.vendor_type == "wholesale_b2b" else None
     )
     payload["max_units"] = 4 if quote.vendor_type == "retail_refill" else None
-    payload["max_distance_km"] = (
-        float(DispatchPolicy.RETAIL_MAX_DISTANCE_KM)
-        if quote.vendor_type == "retail_refill"
-        else float(DispatchPolicy.WHOLESALE_MAX_DISTANCE_KM)
-    )
+    payload["max_distance_km"] = DispatchPolicy.max_distance_km(quote.vendor_type)
+
+    # Whether cash is offered on *this* basket, decided by the same function
+    # checkout will use. Answered here so the cart can grey the option out with
+    # the reason attached, rather than letting somebody pick it, fill in a phone
+    # number and be refused — the refusal is identical either way, and the only
+    # difference is whether the customer wasted the trip.
+    from services import cod_policy
+
+    try:
+        await cod_policy.assert_customer_may_pay_cash(
+            db, user=db_user, total=quote.total, distance_km=quote.distance_km,
+            vendor=vendor,
+        )
+        payload["cash"] = {"available": True, "reason": None}
+    except HTTPException as exc:
+        payload["cash"] = {
+            "available": False,
+            # The server's own sentence, rendered verbatim. The app must never
+            # compose its own: these rules are settings rows and the wording
+            # moves with them.
+            "reason": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+        }
+
+    # Whether the *store* is taking this order, for the same reason. The
+    # minimum-order shortfall arrives through `warnings` above, from
+    # `validate_quote`, so the cart's existing "you need 38 kg more" treatment
+    # covers "add KSH 120 more" without a second mechanism; this block is what
+    # lets the screen render a closed shop as closed instead of as a failure.
+    from services import vendor_availability
+
+    payload["store"] = (await vendor_availability.store_state(db, vendor)).as_dict()
+
     return payload
 
 
@@ -247,7 +286,8 @@ async def payment_request(request: Request, order: OrderRequest, db: AsyncSessio
     authenticated_user_id = db_user.id
 
     cart, db_user, vendor, quote = await _load_priced_cart(
-        db, authenticated_user_id, order.lat, order.lng, order.delivery_type
+        db, authenticated_user_id, order.lat, order.lng, order.delivery_type,
+        order.payment_method,
     )
 
     if getattr(cart, "is_locked", False):
@@ -260,7 +300,30 @@ async def payment_request(request: Request, order: OrderRequest, db: AsyncSessio
         raise HTTPException(status_code=400, detail="Cart mismatch. Please refresh your cart and try again.")
 
     # Every gate, before any money moves.
-    validate_quote(quote, cart.cart_item, user=db_user)
+    validate_quote(quote, cart.cart_item, user=db_user, vendor=vendor)
+
+    # Is the shop actually open? A store can pause between the quote the
+    # customer is looking at and the tap that charges them, and the failure
+    # this prevents is the expensive one: a paid order sitting in a closed
+    # store until it auto-cancels, with a refund to process and a customer who
+    # has been waiting for water.
+    from services import vendor_availability
+
+    await vendor_availability.assert_store_accepting(db, vendor)
+
+    # Cash has its own gates, and they are about *who is asking* rather than
+    # what is in the basket — so they sit here rather than in `validate_quote`,
+    # which never sees the payment method. Refused before an order exists, so
+    # there is nothing to unwind: a first-time account plus a fake address plus
+    # cash costs the rider a wasted trip and the vendor a prepared order, and
+    # it is free to attempt.
+    if order.payment_method == "cash":
+        from services import cod_policy
+
+        await cod_policy.assert_customer_may_pay_cash(
+            db, user=db_user, total=quote.total, distance_km=quote.distance_km,
+            vendor=vendor,
+        )
 
     # Lock the cart so it cannot be mutated during the STK Push window.
     cart.is_locked = True
@@ -292,7 +355,7 @@ async def payment_request(request: Request, order: OrderRequest, db: AsyncSessio
                 "payment_method": "cash",
                 "CheckoutRequestID": None,
                 "order_id": str(created.id),
-                "amount": float(quote.total),
+                "amount": money_str(quote.total),
             }
 
         # ── M-PESA STK Push ────────────────────────────────────────────────
@@ -327,7 +390,7 @@ async def payment_request(request: Request, order: OrderRequest, db: AsyncSessio
             "payment_method": "mpesa",
             "CheckoutRequestID": checkout_request_id,
             "order_id": str(created.id),
-            "amount": float(quote.total),
+            "amount": money_str(quote.total),
         }
 
     except Exception as e:
@@ -376,14 +439,44 @@ class RequestCheckoutRequestID(BaseModel):
 @router.post("/confirm_payment")
 @limiter.limit("20/minute")
 async def payment_confirmation(request: Request, body: RequestCheckoutRequestID, db: AsyncSession = Depends(get_db), user = Depends(get_current_customer)):
+  """Poll Safaricom for the outcome of *the caller's own* checkout.
+
+  The checkout id names an order, so this is an order-scoped action and has to
+  be authorised as one. It took any `CheckoutRequestID` from any signed-in
+  customer: the ids are unguessable, so nothing could be forged, but a leaked or
+  logged id let one account drive another's payment transition and clear its own
+  cart off the back of it. Authenticating proves who is calling, not that they
+  have anything to do with that payment.
+  """
+  from sqlalchemy import select as sa_select
+
+  from models.order_model import Order
+
   CheckoutRequestID = body.CheckoutRequestID
+
+  user_obj = await get_user(session=db, clerk_id=user["sub"])
+  if not user_obj:
+      raise HTTPException(status_code=403, detail="Customer profile not found.")
+
+  owns_it = (
+      await db.execute(
+          sa_select(Order.id)
+          .where(
+              Order.checkout_request_ID == CheckoutRequestID,
+              Order.customer_id == user_obj.id,
+          )
+          .limit(1)
+      )
+  ).scalars().first()
+  if owns_it is None:
+      # 404 rather than 403: confirming the id exists is not ours to do.
+      raise HTTPException(status_code=404, detail="No payment found for this checkout.")
+
   response = await check_payment(checkout_request_id=CheckoutRequestID, session=db)
-  
+
   # BUG-04 FIX: Purge cart after successful manual payment confirmation
   if response.get("code") == "0":
       try:
-          clerk_id = user["sub"]
-          user_obj = await get_user(session=db, clerk_id=clerk_id)
           cart = await fetch_cart(user_id=user_obj.id, session=db)
           if cart:
               await delete_cart_service(cart_id=str(cart.id), db=db)
@@ -426,7 +519,6 @@ async def fetch_active_order(
     order = await get_active_order(session=db, user_id=user_obj.id)
     return order
 
-import os
 
 @router.post("/mpesa/callback")
 async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), secret: str | None = Query(default=None)):
@@ -506,7 +598,7 @@ async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), s
                 if customer and customer.email:
                     order_details = {
                         "id": str(order.id)[:8].upper(),
-                        "total": order.total_amount,
+                        "total_amount": money_str(order.total_amount),
                         "date": order.created_at.strftime("%b %d, %Y") if order.created_at else "Today"
                     }
                     send_order_confirmation(

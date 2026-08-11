@@ -7,7 +7,6 @@ from models.vendor_rider_model import VendorRiderRegistry
 from models.deliverer_model import Deliverer
 from sqlalchemy import select, and_
 from pydantic import BaseModel
-import asyncio
 import logging
 from services.notification_service import create_notification
 from services.expo_push_service import send_push_message, dispatch_background

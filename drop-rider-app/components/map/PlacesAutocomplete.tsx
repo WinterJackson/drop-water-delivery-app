@@ -6,17 +6,16 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-	ActivityIndicator,
-	FlatList,
-	Keyboard,
-	Pressable,
-	StyleSheet,
-	Text,
-	TextInput,
-	View,
-	type TextStyle,
-	type ViewStyle,
+    ActivityIndicator,
+    FlatList,
+    Keyboard,
+    Pressable,
+    StyleSheet,
+    View,
+    type TextStyle,
+    type ViewStyle,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { useAuth } from "@clerk/clerk-expo";
 import { apiFetch } from "@/API/apiFetch";
@@ -265,7 +264,7 @@ export default function PlacesAutocomplete({
 		borderRadius: 14,
 		paddingHorizontal: 16,
 		fontSize: 15,
-		fontWeight: "600",
+		fontFamily: 'Karla_600SemiBold',
 		backgroundColor: defaultDark ? "#1a1a1a" : "#fff",
 		color: defaultDark ? "#fff" : "#000",
 		borderWidth: 1,
@@ -295,7 +294,7 @@ export default function PlacesAutocomplete({
 	const descriptionStyle: TextStyle = {
 		color: defaultDark ? "#ffffff" : "#000000",
 		fontSize: 15,
-		fontWeight: "500",
+		fontFamily: 'Karla_500Medium',
 		...customStyles.description,
 	};
 	const separatorStyle: ViewStyle = {

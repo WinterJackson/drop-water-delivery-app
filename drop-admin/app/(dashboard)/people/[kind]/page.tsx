@@ -6,6 +6,8 @@ import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primi
 import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
 import type { PeopleStats, QueueStats } from "@/lib/queue-stats";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 /** Plural in the URL, singular in the API — `/people/riders` → `kind=rider`. */
 const KINDS = {
@@ -30,6 +32,13 @@ type Person = {
   vendor_type?: string | null;
   verification_status?: string | null;
   is_online?: boolean;
+  /**
+   * Vendors only. Whether the store is taking orders right now, and which of
+   * the five reasons it is not. Server-derived — `is_online` alone answers one
+   * of them, which is how a paused store read as trading.
+   */
+  is_accepting_orders?: boolean;
+  store_state?: string;
   rating?: number | null;
   wallet_balance?: string;
   debt_balance?: string;
@@ -39,6 +48,27 @@ type Person = {
 export async function generateMetadata({ params }: { params: Promise<{ kind: string }> }) {
   const { kind } = await params;
   return { title: KINDS[kind as Slug]?.title ?? "People" };
+}
+
+/**
+ * Suspended · not trading · active — in that order.
+ *
+ * This page renders the same list twice, as a table above `md` and as cards
+ * below it, and the two must not disagree: a store shown "Active" on a phone
+ * and "paused" on a laptop is the same defect as the customer app's list
+ * disagreeing with the store page. One component, used by both.
+ *
+ * A store that is not trading is not a suspended one. Rendering "Active" for
+ * both is how a roster of stores answered "who is actually open" with "all of
+ * them"; the state names which of the five reasons it is, and the detail page
+ * explains it.
+ */
+function StatusBadge({ person, kind }: { person: Person; kind: string }) {
+  if (person.is_suspended) return <Badge tone="danger">Suspended</Badge>;
+  if (kind === "vendor" && person.is_accepting_orders === false) {
+    return <Badge tone="warning">{person.store_state ?? "closed"}</Badge>;
+  }
+  return <Badge tone="success">Active</Badge>;
 }
 
 export default async function PeopleListPage({
@@ -51,6 +81,12 @@ export default async function PeopleListPage({
   const { kind: slug } = await params;
   const config = KINDS[slug as Slug];
   if (!config) notFound();
+
+  // One route, three rosters, three different capabilities — `customers.read`
+  // does not imply `riders.read`. The permission comes from the nav entry for
+  // the concrete path, so the gate and the sidebar read the same declaration.
+  const access = await pageAccess(`/people/${slug}`);
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
 
   const { q = "", status = "" } = await searchParams;
 
@@ -143,11 +179,7 @@ export default async function PeopleListPage({
                       </Link>
                       <p className="text-xs text-muted">joined {timeAgo(person.created_at)}</p>
                     </div>
-                    {person.is_suspended ? (
-                      <Badge tone="danger">Suspended</Badge>
-                    ) : (
-                      <Badge tone="success">Active</Badge>
-                    )}
+                    <StatusBadge person={person} kind={config.kind} />
                   </div>
 
                   {/* Masked by the server for every role. */}
@@ -239,11 +271,7 @@ export default async function PeopleListPage({
                       ) : null}
                     </td>
                     <td className="px-4 py-3">
-                      {person.is_suspended ? (
-                        <Badge tone="danger">Suspended</Badge>
-                      ) : (
-                        <Badge tone="success">Active</Badge>
-                      )}
+                      <StatusBadge person={person} kind={config.kind} />
                     </td>
                   </tr>
                 ))}

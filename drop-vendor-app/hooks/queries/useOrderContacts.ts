@@ -1,8 +1,7 @@
 import { ApiError, retryTransientOnly } from '@/API/errors';
+import VendorApiRoutes from '@/API/routes/VendorApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
 import { useQuery } from '@tanstack/react-query';
-
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface ContactInfo {
@@ -29,7 +28,9 @@ export function useOrderContacts(orderId: string | null, orderStatus: string | n
         queryKey: ['orderContacts', orderId],
         queryFn: async () => {
             try {
-                return await get<OrderContactsResponse>(`${BASE_URL}/api/contacts/${orderId}`);
+                return await get<OrderContactsResponse>(
+                    VendorApiRoutes.GetOrderContacts(orderId!).path,
+                );
             } catch (error) {
                 // The backend withholds contacts outside the active window, and
                 // outside it there is nothing to show — an empty list, not an

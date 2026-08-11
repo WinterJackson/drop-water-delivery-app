@@ -52,111 +52,71 @@ def _send(to: str, subject: str, html: str) -> None:
 
 
 def send_welcome_email(to: str, name: str, app_type: str = "customer") -> None:
+    """Fire-and-forget welcome email sent during registration.
+
+    The body comes from `email_templates`, like every other email this platform
+    sends. These four functions used to inline their own HTML while a complete,
+    better-built set of templates sat unused beside them — two implementations
+    of one thing, and the one in use was the one that never escaped the name.
     """
-    Fire-and-forget welcome email sent during user/vendor/rider registration.
-    """
-    role_labels = {
+    subjects = {
         "customer": "Welcome to Drop! 💧",
         "vendor": "Welcome to Drop Vendor Portal! 🏪",
         "rider": "Welcome to Drop Rider Network! 🛵",
     }
-    subject = role_labels.get(app_type, "Welcome to Drop!")
+    builders = {
+        "customer": email_templates.welcome_customer,
+        "rider": email_templates.welcome_rider,
+    }
+    if app_type == "vendor":
+        # The vendor template names the business as well as the owner; the
+        # caller has only the owner's name here, so it stands for both.
+        html = email_templates.welcome_vendor(name, name)
+    else:
+        html = builders.get(app_type, email_templates.welcome_customer)(name)
 
-    html = f"""
-    <div style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; background: #f9fafb; border-radius: 12px;">
-        <h1 style="color: #1e3a5f; margin-bottom: 8px;">Karibu, {name}! 🎉</h1>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            Your <strong>{app_type}</strong> account on <strong>Drop</strong> is all set.
-            You can now enjoy fast, reliable water delivery across Kenya.
-        </p>
-        <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
-            If you have any questions, just reply to this email — we're here to help.
-        </p>
-        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">© Drop Water Delivery</p>
-    </div>
-    """
-    _send(to, subject, html)
+    _send(to, subjects.get(app_type, "Welcome to Drop!"), html)
 
 
 def send_vendor_approved(to: str, name: str) -> None:
-    """
-    Sent to a vendor after their account is auto-approved during onboarding.
-    """
-    subject = "Your Drop Vendor Account is Approved ✅"
-    html = f"""
-    <div style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; background: #f0fdf4; border-radius: 12px;">
-        <h1 style="color: #166534;">You're Approved, {name}! 🎉</h1>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            Great news — your vendor store is now <strong>live</strong> on Drop.
-            Customers in your area can start ordering from you immediately.
-        </p>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            Open the <strong>Drop Vendor App</strong> to manage your products, track orders, and grow your business.
-        </p>
-        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">© Drop Water Delivery</p>
-    </div>
-    """
-    _send(to, subject, html)
+    """Sent to a vendor after their account is approved during onboarding."""
+    _send(
+        to,
+        "Your Drop Vendor Account is Approved ✅",
+        email_templates.vendor_approved(name),
+    )
 
 
 def send_rider_approved(to: str, name: str) -> None:
-    """
-    Sent to a rider after a vendor approves them for dedicated employment.
-    """
-    subject = "You've Been Approved as a Drop Rider! 🛵"
-    html = f"""
-    <div style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; background: #eff6ff; border-radius: 12px;">
-        <h1 style="color: #1e40af;">Congrats, {name}! 🎉</h1>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            You have been <strong>approved</strong> as an active rider on the Drop platform.
-            You can now go online and start accepting delivery requests.
-        </p>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            Open the <strong>Drop Rider App</strong>, toggle your availability to <strong>Online</strong>,
-            and your first trip will appear on the Trip Radar shortly.
-        </p>
-        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">© Drop Water Delivery</p>
-    </div>
-    """
-    _send(to, subject, html)
+    """Sent to a rider after a vendor approves them for dedicated employment."""
+    _send(
+        to,
+        "You've Been Approved as a Drop Rider! 🛵",
+        email_templates.rider_approved(name),
+    )
 
 
 def send_order_confirmation(to: str, name: str, order_details: dict) -> None:
-    """
-    Sent to a customer after successful M-Pesa payment confirmation.
+    """Sent to a customer after successful M-Pesa payment confirmation.
+
+    `total_amount` is rendered exactly as the caller passes it — a decimal
+    string off the order. Formatting it here would be a second opinion about a
+    figure the customer has already been charged.
     """
     order_id = order_details.get("id", "N/A")
-    total = order_details.get("total", "0.00")
-    date = order_details.get("date", "Today")
-
-    subject = f"Order #{order_id} Confirmed — Drop 💧"
-    html = f"""
-    <div style="font-family: 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; background: #f0fdf4; border-radius: 12px;">
-        <h1 style="color: #166534;">Order Confirmed! ✅</h1>
-        <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-            Hi <strong>{name}</strong>, your order has been paid and is being prepared.
-        </p>
-        <table style="width: 100%; margin: 20px 0; border-collapse: collapse;">
-            <tr style="border-bottom: 1px solid #d1d5db;">
-                <td style="padding: 8px 0; color: #6b7280;">Order ID</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #111827;">#{order_id}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #d1d5db;">
-                <td style="padding: 8px 0; color: #6b7280;">Date</td>
-                <td style="padding: 8px 0; text-align: right; color: #111827;">{date}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px 0; color: #6b7280;">Total Paid</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: bold; font-size: 18px; color: #166534;">KSH {total}</td>
-            </tr>
-        </table>
-        <p style="color: #374151; font-size: 14px; line-height: 1.6;">
-            You'll receive a notification once a rider picks up your order. Track it live in the Drop app.
-        </p>
-        <p style="color: #9ca3af; font-size: 12px; margin-top: 32px;">© Drop Water Delivery</p>
-    </div>
-    """
-    _send(to, subject, html)
+    _send(
+        to,
+        f"Order #{order_id} Confirmed — Drop 💧",
+        email_templates.order_confirmation(
+            name,
+            {
+                "id": order_id,
+                "total_amount": order_details.get(
+                    "total_amount", order_details.get("total", "0.00")
+                ),
+            },
+        ),
+    )
 
 
 def send_broadcast_email(to: str, name: str, subject: str, body: str) -> None:

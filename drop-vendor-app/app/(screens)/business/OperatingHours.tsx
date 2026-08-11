@@ -1,7 +1,8 @@
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
+import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
@@ -141,7 +142,7 @@ export default function OperatingHours() {
                         <PressableScale onPress={() => router.back()} className="mr-4">
                             <BackButtonMinimal />
                         </PressableScale>
-                        <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Operating Hours
                         </Text>
                     </View>
@@ -153,7 +154,7 @@ export default function OperatingHours() {
                     </Text>
 
                     <View className="mb-6">
-                        <Text className={`font-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        <Text className={`font-sans-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             Shift Start Time
                         </Text>
                         <View className={`flex-row items-center px-4 h-[55px] rounded-2xl border-2 ${focusStart ? "border-accentbg bg-accentbg/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
@@ -165,7 +166,7 @@ export default function OperatingHours() {
                                 onBlur={() => setFocusStart(false)}
                                 placeholder="e.g. 08:00 AM"
                                 placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
-                                className={`flex-1 ml-3 text-lg font-medium tracking-wider ${darkTheme ? "text-white" : "text-black"}`}
+                                className={`flex-1 ml-3 text-lg font-sans-medium tracking-wider ${darkTheme ? "text-white" : "text-black"}`}
                                 keyboardType="default"
                                 maxLength={8}
                             />
@@ -173,7 +174,7 @@ export default function OperatingHours() {
                     </View>
 
                     <View className="mb-8">
-                        <Text className={`font-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        <Text className={`font-sans-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             Shift End Time
                         </Text>
                         <View className={`flex-row items-center px-4 h-[55px] rounded-2xl border-2 ${focusEnd ? "border-accentbg bg-accentbg/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
@@ -185,7 +186,7 @@ export default function OperatingHours() {
                                 onBlur={() => setFocusEnd(false)}
                                 placeholder="e.g. 05:00 PM"
                                 placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
-                                className={`flex-1 ml-3 text-lg font-medium tracking-wider ${darkTheme ? "text-white" : "text-black"}`}
+                                className={`flex-1 ml-3 text-lg font-sans-medium tracking-wider ${darkTheme ? "text-white" : "text-black"}`}
                                 keyboardType="default"
                                 maxLength={8}
                             />
@@ -197,7 +198,7 @@ export default function OperatingHours() {
                             {isSaving ? (
                                 <ActivityIndicator color={BRAND.white} />
                             ) : (
-                                <Text className="text-white text-lg font-bold">Save Operating Hours</Text>
+                                <Text className="text-white text-lg font-sans-bold">Save Operating Hours</Text>
                             )}
                         </View>
                     </PressableScale>

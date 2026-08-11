@@ -5,7 +5,8 @@ import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 
 export interface WalletTransaction {
   id: string;
-  amount: number;
+  /** Decimal string — the ledger's own figure. */
+  amount: string;
   transaction_type: string;
   description?: string | null;
   status?: string | null;
@@ -72,9 +73,25 @@ export const useWalletWithdraw = () => {
  * the shortfall.
  */
 export interface RiderWalletSummary {
-    wallet_balance: number;
-    committed_cash_float: number;
-    available_for_withdrawal: number;
+    /** Decimal strings. Render with `formatMoney`; compare with `compareMoney`. */
+    wallet_balance: string;
+    committed_cash_float: string;
+    available_for_withdrawal: string;
+    /**
+     * The rules this withdrawal will be judged by, from `Platform_Settings`.
+     *
+     * All three were literals in `Cashout.tsx` — a minimum of 500, a fee of 15
+     * and a waiver at 1,000 — so editing any of them on the console changed what
+     * a rider was charged and not what they were told. Business values are rows.
+     *
+     * `fee_waiver_threshold` is compared against the **amount withdrawn**, never
+     * the balance held; see `settlement_service.fee_for`.
+     */
+    withdrawal?: {
+      minimum: string;
+      fee: string;
+      fee_waiver_threshold: string;
+    };
     /** Negative balance: the rider owes the platform and cannot take cash orders. */
     is_in_arrears: boolean;
 }
@@ -86,4 +103,50 @@ export function useWalletSummary() {
         queryFn: () => get<RiderWalletSummary>(RiderApiRoutes.WalletSummary.path),
         staleTime: 1000 * 30,
     });
+}
+
+// ── Cash on delivery ─────────────────────────────────────────────────────
+//
+// Six factors decide whether a rider may carry somebody else's money, and the
+// float check never asked any of them. A rider who cannot take cash orders was
+// simply shown orders they could not accept, with the refusal arriving only
+// after they tapped — so the requirement and the progress toward it come back
+// together, and none of these figures is ever a literal in this app.
+
+export interface CashRequirement {
+  have: number;
+  need: number;
+}
+
+export interface CashEligibility {
+  cash_enabled_on_platform: boolean;
+  eligible: boolean;
+  tier: "blocked" | "standard" | "platinum";
+  reasons: string[];
+  /** Decimal string — the ceiling on a single cash order at this tier. */
+  max_order_value: string;
+  requirements: {
+    deliveries: CashRequirement;
+    completion_rate: CashRequirement;
+    rating: CashRequirement;
+    account_age_days: CashRequirement;
+  };
+  limits: {
+    carrying_now: number;
+    max_concurrent: number;
+    /** Decimal strings — money taken today against today's ceiling. */
+    taken_today: string;
+    daily_cap: string;
+  };
+}
+
+export function useCashEligibility() {
+  const { get } = useApiRequest();
+  return useQuery<CashEligibility, Error>({
+    queryKey: ["rider", "cash-eligibility"],
+    queryFn: () => get<CashEligibility>(RiderApiRoutes.CashEligibility.path),
+    // Moves when a delivery completes or a cash order is accepted, both of
+    // which invalidate this key explicitly.
+    staleTime: 1000 * 60,
+  });
 }

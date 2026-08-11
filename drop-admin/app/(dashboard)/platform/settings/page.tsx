@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { Badge, Card, CardHeader, ErrorState } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Settings" };
 
@@ -24,6 +26,13 @@ type Settings = {
  * how somebody comes to believe a value they can change is one they cannot.
  */
 export default async function SettingsPage() {
+  // Gated on the capability `nav-config` declares for `/platform/settings` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/platform/settings");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   let data: Settings;
   try {
     data = await get<Settings>("/api/admin/settings");

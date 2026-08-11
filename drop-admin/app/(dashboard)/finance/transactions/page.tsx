@@ -5,6 +5,8 @@ import { BarList } from "@/components/charts/Panels";
 import { Badge, Card, CardHeader, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDateTime, formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Transactions" };
 
@@ -66,6 +68,13 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<{ tab?: string; q?: string; type?: string; days?: string }>;
 }) {
+  // Gated on the capability `nav-config` declares for `/finance/transactions` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/finance/transactions");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   const params = await searchParams;
   const tab = TABS.find((t) => t.key === params.tab)?.key ?? "ledger";
   const q = params.q ?? "";

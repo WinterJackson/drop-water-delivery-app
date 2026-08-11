@@ -15,9 +15,9 @@ import {
     Modal,
     ScrollView,
     StatusBar,
-    Text,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 // import Modal from "react-native-modal";
 import Button from "@/components/ui/Button";
 import icons from "@/constants/icons/icons";
@@ -73,8 +73,6 @@ export default function SignUp() {
 			return false;
 		}
 	};
-
-
 
 	const onSignUpPress = async () => {
 		setLoading(true);
@@ -326,7 +324,7 @@ export default function SignUp() {
 												<Ionicons name="sync" size={32} color={"white"} />
 											</View>
 										) : (
-											<Text className={`text-white text-xl font-semibold`}>
+											<Text className={`text-white text-xl font-sans-semibold`}>
 												Sign Up
 											</Text>
 										)}
@@ -404,7 +402,7 @@ export default function SignUp() {
 							</View>
 
 							<View className="w-full items-center gap-2">
-								<Text className="font-bold text-2xl ">
+								<Text className="font-heading-semibold text-2xl ">
 									Verify Your Email Address
 								</Text>
 								<Text>{
@@ -413,7 +411,7 @@ export default function SignUp() {
 							</View>
 
 							<View className="w-full items-center flex-row gap-1 justify-center">
-								{/* <Text className="font-bold text-2xl ">Verify Your Email Address</Text> */}
+								{/* <Text className="font-sans-bold text-2xl ">Verify Your Email Address</Text> */}
 								<Text>{"Didn't get the code?"}</Text>
 								<PressableScale
 									activeOpacity={0.7}
@@ -488,7 +486,7 @@ export default function SignUp() {
 							</View>
 
 							<View className="w-full items-center gap-2">
-								<Text className="font-bold text-2xl ">
+								<Text className="font-heading-semibold text-2xl ">
 									Verified
 								</Text>
 								<Text className="text-gray-500 ">

@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect, useCallback } from "react";
-import { View, Text, ScrollView, RefreshControl, TextInput, Modal, StatusBar } from "react-native";
+import { View, ScrollView, RefreshControl, Modal, StatusBar } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,8 +14,11 @@ import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
 import { useWalletTransactions, useWalletWithdraw, useWalletTopUp } from "@/hooks/queries/useWallet";
 import { useUserDetails } from "@/hooks/queries/useUser";
+import { useBottleDeposit } from "@/hooks/queries/useBottleDeposit";
+import { BottleCollectionCard } from "@/components/common/BottleCollection";
 import { Toast } from "@/lib/toast";
 import { errorMessage } from "@/API/errors";
+import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
 
 /** Mirrors the server-side minimums so the UI rejects before the round trip. */
 const MIN_TOP_UP_KSH = 10;
@@ -23,8 +27,14 @@ const MIN_WITHDRAWAL_KSH = 500;
 interface WalletData {
   bottle_purchased_at: string | null;
   bottle_refill_count: number;
-  wallet_balance: number;
+  /** Decimal strings, exactly as the profile serves them. */
+  wallet_balance: string;
   phone_number: string;
+  /** Bottles this customer is holding, and the deposit held against them. */
+  bottles_held: number;
+  bottle_deposit_balance: string;
+  /** Carried from an earlier order; charged on the next one, not payable here. */
+  debt_balance: string;
 }
 
 export default function BottleWallet() {
@@ -34,12 +44,19 @@ export default function BottleWallet() {
   // Wallet figures come from the shared user query rather than a bespoke fetch,
   // so a top-up or an order that spends credit updates this screen automatically.
   const { data: user, isLoading: loading, refetch: refetchUser } = useUserDetails();
+  // The deposit position *and* what can be done about it. `useUserDetails`
+  // carries the two figures; this carries the collection state and the part of
+  // the balance that cannot be withdrawn, neither of which lives on the profile.
+  const { data: deposit, refetch: refetchDeposit } = useBottleDeposit();
   const wallet: WalletData | null = user
     ? {
         bottle_purchased_at: user.bottle_purchased_at ?? null,
         bottle_refill_count: user.bottle_refill_count ?? 0,
-        wallet_balance: user.wallet_balance ?? 0,
+        wallet_balance: user.wallet_balance ?? "0",
         phone_number: user.phone_number ?? "",
+        bottles_held: user.bottles_held ?? 0,
+        bottle_deposit_balance: user.bottle_deposit_balance ?? "0",
+        debt_balance: user.debt_balance ?? "0",
       }
     : null;
   const [refreshing, setRefreshing] = useState(false);
@@ -58,9 +75,9 @@ export default function BottleWallet() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetchUser(), refetchTx()]);
+    await Promise.all([refetchUser(), refetchTx(), refetchDeposit()]);
     setRefreshing(false);
-  }, [refetchUser, refetchTx]);
+  }, [refetchUser, refetchTx, refetchDeposit]);
 
   /**
    * Phone must reach the backend as 2547XXXXXXXX / 2541XXXXXXXX; accept the
@@ -150,7 +167,7 @@ export default function BottleWallet() {
           <PressableScale onPress={() => router.back()} className="mr-4">
             <BackButtonMinimal />
           </PressableScale>
-          <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>Digital Wallet & Bottles</Text>
+          <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Digital Wallet & Bottles</Text>
         </View>
       </View>
 
@@ -162,16 +179,16 @@ export default function BottleWallet() {
         {/* Wallet Balance Card */}
         <View className="rounded-[24px] overflow-hidden mb-6" style={{ backgroundColor: BRAND.primary }}>
           <View className="px-6 pt-8 pb-10 items-center">
-            <Text className="text-white/80 font-medium text-base mb-2">Available Balance</Text>
+            <Text className="text-white/80 font-sans-medium text-base mb-2">Available Balance</Text>
             {loading ? (
               <Skeleton width={180} height={48} borderRadius={8} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
             ) : (
-              <Text className="text-white font-bold text-5xl tracking-tight">KSH {(wallet?.wallet_balance || 0).toLocaleString()}</Text>
+              <Text className="text-white font-sans-bold text-5xl tracking-tight">{formatMoneyShort(wallet?.wallet_balance)}</Text>
             )}
             
             <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">
               <Ionicons name="shield-checkmark" size={16} color="white" />
-              <Text className="text-white font-medium ml-2">Zero-Fraud Protection Active</Text>
+              <Text className="text-white font-sans-medium ml-2">Zero-Fraud Protection Active</Text>
             </View>
           </View>
         </View>
@@ -189,7 +206,7 @@ export default function BottleWallet() {
             <View className={`w-12 h-12 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-slate-800" : "bg-slate-100"}`}>
               <Ionicons name="arrow-down-outline" size={24} color={BRAND.primary} />
             </View>
-            <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Withdraw</Text>
+            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Withdraw</Text>
           </PressableScale>
 
           <PressableScale 
@@ -203,7 +220,7 @@ export default function BottleWallet() {
             <View className={`w-12 h-12 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-slate-800" : "bg-slate-100"}`}>
               <Ionicons name="wallet-outline" size={24} color={BRAND.primary} />
             </View>
-            <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Top Up</Text>
+            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Top Up</Text>
           </PressableScale>
         </View>
 
@@ -214,26 +231,95 @@ export default function BottleWallet() {
         >
           <View className="flex-row items-center mb-3">
             <Ionicons name="information-circle" size={22} color={BRAND.primary} />
-            <Text className={`font-bold text-base ml-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>Workflow & Float Guide</Text>
+            <Text className={`font-sans-bold text-base ml-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>Workflow & Float Guide</Text>
           </View>
           <Text className={`leading-relaxed mb-3 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            <Text className="font-bold">Seamless Payments:</Text> Top up your wallet to easily pay for water refills without entering your M-Pesa PIN for every order.
+            <Text className="font-sans-bold">Seamless Payments:</Text> Top up your wallet to easily pay for water refills without entering your M-Pesa PIN for every order.
           </Text>
           <Text className={`leading-relaxed ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            <Text className="font-bold">Refunds & Rewards:</Text> Any cancelled orders, refunds, or loyalty bonuses are directly credited to this float balance.
+            <Text className="font-sans-bold">Refunds & Rewards:</Text> Any cancelled orders, refunds, or loyalty bonuses are directly credited to this float balance.
           </Text>
         </View>
 
         {/* Bottle Tracking Section */}
-        <Text className={`font-bold text-lg mb-4 mt-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>My Bottles & Loyalty</Text>
-        
+        <Text className={`font-sans-bold text-lg mb-4 mt-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>My Bottles & Loyalty</Text>
+
+        {/* The actual bottle position.
+            This screen is called "Bottle Wallet" and showed a cash balance,
+            "days since your first bottle" and "plastic waste saved" — never the
+            two facts that matter: how many bottles you are holding, and how much
+            of your money the platform is holding against them. The deposit is a
+            liability the platform returns (`customer_bottle_service`), so it is
+            the customer's money and was invisible to the only person with a
+            claim on it. */}
+        <View
+          className={`p-5 rounded-3xl border mb-4 ${darkTheme ? "bg-surface-container border-transparent" : "bg-white border-gray-100"}`}
+          style={darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+        >
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-4">
+              <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                Bottles you&apos;re holding
+              </Text>
+              <Text className={`text-3xl font-sans-extrabold mt-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                {wallet?.bottles_held ?? 0}
+              </Text>
+            </View>
+            <View className={`w-px self-stretch ${darkTheme ? "bg-slate-800" : "bg-slate-100"}`} />
+            <View className="flex-1 pl-4">
+              <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                Refundable deposit
+              </Text>
+              <Text className="text-3xl font-sans-extrabold mt-1" style={{ color: BRAND.primary }}>
+                {formatMoneyShort(wallet?.bottle_deposit_balance)}
+              </Text>
+            </View>
+          </View>
+          <Text className={`text-xs mt-3 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
+            {(wallet?.bottles_held ?? 0) > 0
+              ? "Book a collection below and the deposit comes back to your wallet."
+              : "Deposits appear here when you keep a bottle instead of swapping it."}
+          </Text>
+        </View>
+
+        {/* The promise above used to have nothing behind it: the only way a
+            deposit came back was an administrator opening the console under a
+            permission no preset but super admin holds. */}
+        {deposit ? (
+          <BottleCollectionCard
+            bottlesHeld={deposit.bottles_held}
+            bottleLimit={deposit.bottle_limit}
+            notWithdrawable={deposit.wallet_not_withdrawable}
+            openRequest={deposit.open_request}
+          />
+        ) : null}
+
+        {/* Money owed, stated rather than discovered as a bigger total later. */}
+        {!isZeroMoney(wallet?.debt_balance) && (
+          <View className={`p-5 rounded-3xl border mb-4 ${darkTheme ? "bg-amber-500/10 border-amber-500/30" : "bg-amber-50 border-amber-200"}`}>
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1 pr-3">
+                <Text className={`font-sans-bold ${darkTheme ? "text-amber-400" : "text-amber-800"}`}>
+                  Previous balance owed
+                </Text>
+                <Text className={`text-xs mt-1 ${darkTheme ? "text-amber-400/80" : "text-amber-700/80"}`}>
+                  Added to your next order and cleared by it — nothing to pay separately.
+                </Text>
+              </View>
+              <Text className={`text-2xl font-sans-extrabold ${darkTheme ? "text-amber-400" : "text-amber-800"}`}>
+                {formatMoney(wallet?.debt_balance)}
+              </Text>
+            </View>
+          </View>
+        )}
+
         <View className="flex-row gap-3 mb-8">
           <View 
             className={`flex-1 p-5 rounded-3xl border ${darkTheme ? "bg-surface-container border-transparent" : "bg-white border-gray-100"}`}
             style={darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
           >
             <Text style={{ fontSize: 28 }}>📅</Text>
-            <Text className={`text-xl font-black mt-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+            <Text className={`text-xl font-sans-extrabold mt-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
               {daysSincePurchase !== null ? `${daysSincePurchase} Days` : "No bottle"}
             </Text>
             <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -245,7 +331,7 @@ export default function BottleWallet() {
             style={darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
           >
             <Text style={{ fontSize: 28 }}>🌱</Text>
-            <Text className={`text-xl font-black mt-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+            <Text className={`text-xl font-sans-extrabold mt-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
               {wallet?.bottle_refill_count ? (wallet.bottle_refill_count * 0.5).toFixed(1) : 0} kg
             </Text>
             <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -255,7 +341,7 @@ export default function BottleWallet() {
         </View>
 
         {/* Transaction Ledger */}
-        <Text className={`font-bold text-lg mb-4 ${darkTheme ? "text-white" : "text-slate-900"}`}>Recent Transactions</Text>
+        <Text className={`font-sans-bold text-lg mb-4 ${darkTheme ? "text-white" : "text-slate-900"}`}>Recent Transactions</Text>
         
         {isLoadingTx || loading ? (
           <View className="space-y-4 mb-8">
@@ -266,7 +352,7 @@ export default function BottleWallet() {
         ) : !transactions || transactions.length === 0 ? (
           <View className={`items-center justify-center p-8 rounded-3xl mb-8 ${darkTheme ? "bg-surface-container" : "bg-slate-50"}`}>
             <Ionicons name="receipt-outline" size={48} color={darkTheme ? "#475569" : "#cbd5e1"} />
-            <Text className={`mt-4 font-bold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No transactions yet</Text>
+            <Text className={`mt-4 font-sans-bold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No transactions yet</Text>
           </View>
         ) : (
           <View className="mb-10 space-y-3">
@@ -274,7 +360,7 @@ export default function BottleWallet() {
               // Direction comes from the signed amount. The old check compared
               // against "payment", which is not a value the backend emits — the
               // enum is `order_payment` — so wallet spends rendered as credits.
-              const txAmount = Number(tx.amount) || 0;
+              const txAmount = tx.amount ?? "0";
               const isDeduction = txAmount < 0;
               return (
                 <View 
@@ -290,7 +376,7 @@ export default function BottleWallet() {
                       />
                     </View>
                     <View>
-                      <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                      <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
                         {tx.transaction_type.replace(/_/g, " ").toUpperCase()}
                       </Text>
                       <Text className={`text-xs mt-1 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
@@ -299,11 +385,11 @@ export default function BottleWallet() {
                     </View>
                   </View>
                   <View className="items-end">
-                    <Text className={`font-bold ${isDeduction ? "text-red-500" : "text-green-500"}`}>
-                      {isDeduction ? "-" : "+"}KSH {Math.abs(txAmount).toLocaleString()}
+                    <Text className={`font-sans-bold ${isDeduction ? "text-red-500" : "text-green-500"}`}>
+                      {isDeduction ? "-" : "+"}{formatMoney(String(txAmount).replace("-", ""))}
                     </Text>
                     <View className={`px-2 py-0.5 mt-1 rounded text-[10px] ${tx.status === 'completed' ? 'bg-green-500/10' : tx.status === 'failed' ? 'bg-red-500/10' : 'bg-yellow-500/10'}`}>
-                      <Text className={`text-[10px] uppercase font-bold ${tx.status === 'completed' ? 'text-green-600' : tx.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>{tx.status}</Text>
+                      <Text className={`text-[10px] uppercase font-sans-bold ${tx.status === 'completed' ? 'text-green-600' : tx.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>{tx.status}</Text>
                     </View>
                   </View>
                 </View>
@@ -315,7 +401,7 @@ export default function BottleWallet() {
                 onPress={() => router.push("/(screens)/Transactions" as any)}
                 className={`w-full py-4 rounded-2xl items-center mt-2 border ${darkTheme ? "bg-slate-800 border-transparent" : "bg-white border-slate-200"}`}
               >
-                <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>View All Transactions</Text>
+                <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>View All Transactions</Text>
               </PressableScale>
             )}
           </View>
@@ -332,8 +418,8 @@ export default function BottleWallet() {
         <View className="flex-1 justify-end bg-black/50">
           <View className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Top Up Wallet</Text>
-              <PressableScale onPress={() => setIsTopUpModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Top Up Wallet</Text>
+              <PressableScale accessibilityLabel="Close the top-up form" onPress={() => setIsTopUpModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
                 <Ionicons name="close" size={20} color={darkTheme ? "#fff" : "#0f172a"} />
               </PressableScale>
             </View>
@@ -343,25 +429,25 @@ export default function BottleWallet() {
             </Text>
 
             <View className="mb-4">
-              <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>AMOUNT (KSH)</Text>
+              <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>AMOUNT (KSH)</Text>
               <TextInput
                 value={topUpAmount}
                 onChangeText={setTopUpAmount}
                 keyboardType="numeric"
                 placeholder="e.g. 500"
                 placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                className={`p-4 rounded-xl border font-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                className={`p-4 rounded-xl border font-sans-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
               />
             </View>
             <View className="mb-6">
-              <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>M-PESA NUMBER</Text>
+              <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>M-PESA NUMBER</Text>
               <TextInput
                 value={phoneNumber}
                 onChangeText={setPhoneNumber}
                 keyboardType="phone-pad"
                 placeholder="2547..."
                 placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                className={`p-4 rounded-xl border font-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                className={`p-4 rounded-xl border font-sans-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
               />
             </View>
 
@@ -374,7 +460,7 @@ export default function BottleWallet() {
               {isProcessingTopUp ? (
                 <Skeleton width={80} height={20} borderRadius={4} style={{ alignSelf: 'center' }} />
               ) : (
-                <Text className="text-white font-bold text-lg">Send STK Push</Text>
+                <Text className="text-white font-sans-bold text-lg">Send STK Push</Text>
               )}
             </PressableScale>
             <SafeAreaView edges={["bottom"]} />
@@ -392,8 +478,8 @@ export default function BottleWallet() {
         <View className="flex-1 justify-end bg-black/50">
           <View className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Withdraw Funds</Text>
-              <PressableScale onPress={() => setIsWithdrawModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Withdraw Funds</Text>
+              <PressableScale accessibilityLabel="Close the withdrawal form" onPress={() => setIsWithdrawModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
                 <Ionicons name="close" size={20} color={darkTheme ? "#fff" : "#0f172a"} />
               </PressableScale>
             </View>
@@ -403,25 +489,25 @@ export default function BottleWallet() {
             </Text>
 
             <View className="mb-4">
-              <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>AMOUNT (KSH)</Text>
+              <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>AMOUNT (KSH)</Text>
               <TextInput
                 value={withdrawAmount}
                 onChangeText={setWithdrawAmount}
                 keyboardType="numeric"
                 placeholder="e.g. 500"
                 placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                className={`p-4 rounded-xl border font-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                className={`p-4 rounded-xl border font-sans-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
               />
             </View>
             <View className="mb-6">
-              <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>M-PESA NUMBER</Text>
+              <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>M-PESA NUMBER</Text>
               <TextInput
                 value={phoneNumber}
                 onChangeText={setPhoneNumber}
                 keyboardType="phone-pad"
                 placeholder="2547..."
                 placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                className={`p-4 rounded-xl border font-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                className={`p-4 rounded-xl border font-sans-bold text-lg ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
               />
             </View>
 
@@ -434,7 +520,7 @@ export default function BottleWallet() {
               {withdrawMutation.isPending ? (
                 <Skeleton width={80} height={20} borderRadius={4} style={{ alignSelf: 'center' }} />
               ) : (
-                <Text className="text-white font-bold text-lg">Withdraw to M-Pesa</Text>
+                <Text className="text-white font-sans-bold text-lg">Withdraw to M-Pesa</Text>
               )}
             </PressableScale>
             <SafeAreaView edges={["bottom"]} />

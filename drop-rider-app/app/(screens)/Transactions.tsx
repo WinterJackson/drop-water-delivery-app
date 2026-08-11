@@ -2,9 +2,9 @@ import React, { useCallback, useContext, useState, memo } from "react";
 import {
     RefreshControl,
     StatusBar,
-    Text,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import SearchBar from "@/components/common/Search";
 import { ScrollView } from "react-native-gesture-handler";
 import { useWalletTransactionsPaginated } from "@/hooks/queries/useWallet";
+import { formatMoney } from "@/utils/money";
 
 const TRANSACTION_COLORS: Record<string, string> = {
   top_up: "bg-blue-500/20 text-blue-600",
@@ -51,7 +52,8 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
   // goes both ways for a rider — it debits them settling a cash order out of
   // float and credits them their delivery earnings — so a type allow-list
   // rendered float deductions as income.
-  const amount = Number(item.amount) || 0;
+  // The ledger figure, never parsed. `isPositive` reads the transaction type.
+  const amount = item.amount ?? "0";
   const isPositive = amount >= 0;
   const colorClass = TRANSACTION_COLORS[item.transaction_type] || "bg-slate-500/20 text-slate-600";
   const [bgColor] = colorClass.split(" ");
@@ -69,7 +71,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
             <Ionicons name={iconName as any} size={20} color={iconColor} style={darkTheme ? { opacity: 0.8 } : {}} />
           </View>
           <View>
-            <Text className={`font-bold text-base capitalize ${darkTheme ? "text-white" : "text-slate-900"}`}>
+            <Text className={`font-sans-bold text-base capitalize ${darkTheme ? "text-white" : "text-slate-900"}`}>
               {item.transaction_type.replace(/_/g, " ")}
             </Text>
             <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
@@ -77,8 +79,8 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
             </Text>
           </View>
         </View>
-        <Text className={`font-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
-          {isPositive ? "+" : "-"}KSH {Math.abs(amount).toLocaleString()}
+        <Text className={`font-sans-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
+          {isPositive ? "+" : "-"}{formatMoney(amount.replace("-", ""))}
         </Text>
       </View>
       
@@ -100,7 +102,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
                 Receipt: {item.mpesa_receipt_number}
               </Text>
             )}
-            <Text className={`text-xs font-bold capitalize ${item.status === 'completed' ? 'text-green-500' : item.status === 'failed' ? 'text-red-500' : 'text-amber-500'}`}>
+            <Text className={`text-xs font-sans-bold capitalize ${item.status === 'completed' ? 'text-green-500' : item.status === 'failed' ? 'text-red-500' : 'text-amber-500'}`}>
                 {item.status}
             </Text>
           </View>
@@ -194,7 +196,7 @@ export default function Transactions() {
                   className={`px-4 py-2 rounded-full border ${typeFilter === f.id ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
                   style={typeFilter !== f.id ? { ...(darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : {}}
                 >
-                  <Text className={`font-semibold text-sm ${typeFilter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                  <Text className={`font-sans-semibold text-sm ${typeFilter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                     {f.label}
                   </Text>
                 </PressableScale>
@@ -208,7 +210,7 @@ export default function Transactions() {
         {!txLoading && filteredTransactions.length === 0 ? (
           <View className={`flex-1 items-center justify-center p-8 rounded-3xl mb-8 mt-4 ${darkTheme ? "bg-surface-container border border-white/5" : "bg-slate-50 border border-slate-100"}`}>
             <Ionicons name="receipt-outline" size={48} color={darkTheme ? "#475569" : "#cbd5e1"} />
-            <Text className={`mt-4 font-bold text-center ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No transactions found</Text>
+            <Text className={`mt-4 font-sans-bold text-center ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No transactions found</Text>
             {searchQuery.length > 0 && (
                 <Text className={`mt-2 text-sm text-center ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
                     Try adjusting your search query or filters.

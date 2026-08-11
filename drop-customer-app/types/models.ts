@@ -10,9 +10,24 @@ export interface BasicUser {
   location_address: string | null;
   bottle_purchased_at: string | null;
   bottle_refill_count: number;
-  wallet_balance: number;
-  /** Outstanding bottle-deposit debt. Any amount above zero blocks checkout. */
-  debt_balance?: number;
+  wallet_balance: string;
+  /**
+   * An unpaid balance carried from an earlier order — most often a staircase
+   * surcharge agreed after an M-Pesa order had already been paid.
+   *
+   * **Not** "any amount above zero blocks checkout", which is what this said
+   * and what the platform used to do. It is now charged on the next order as
+   * `debt_settlement` and cleared when that order is created; only at
+   * `max_customer_debt_before_block` does the platform stop extending credit.
+   * The old behaviour locked a customer out permanently over KSH 30.
+   */
+  debt_balance?: string;
+  /**
+   * What the platform owes against bottles this customer is holding, and how
+   * many. `customer_bottle_service` moves the two together, never one alone.
+   */
+  bottle_deposit_balance?: string;
+  bottles_held?: number;
   /** False until the first-order 30% deposit discount has been consumed. */
   has_used_welcome_offer?: boolean;
   floor_level: number;
@@ -39,8 +54,8 @@ export interface CartProduct {
   vendor_id: string;
   name: string;
   image_url: string;
-  price: number;
-  discount: number;
+  price: string;
+  discount: string;
   capacity: number;
   weight_kg: number;
   stock: number;
@@ -67,7 +82,7 @@ export interface CartItem {
   vendor_id: string;
   product_id: string;
   quantity: number;
-  price: number;
+  price: string;
   product: CartProduct | null;
 }
 
@@ -82,9 +97,9 @@ export interface DetailedCart {
   id: string;
   customer_id: string;
   items_count: number;
-  total_amount: number;
+  total_amount: string;
   cart_item: CartItem[];
-  service_fee: number;
+  service_fee: string;
   welcome_discount_amount: number;
   vendor_type: string | null;
   total_quantity: number;
@@ -106,18 +121,35 @@ export interface Vendor {
   location_address: string | null;
   lat: number | null;
   lng: number | null;
-  delivery_radius: number | null;
   shift_start: string;
   shift_end: string;
   verification_status: string;
   rating: number | null;
   preferred_payment_method: string[] | null;
+
+  // ── Is this store taking orders? ────────────────────────────────────────
+  //
+  // Stamped on by the server (`vendor_availability.annotate`) on every
+  // customer-facing read. Optional on this type only because older cached
+  // responses will not carry them; treat absent as open, never as closed.
+  //
+  // Do **not** derive this from `shift_start`/`shift_end` here. Those are two
+  // of five reasons a store may not be trading, and reconstructing the answer
+  // in the app is how the list ends up disagreeing with the store page.
+  is_accepting_orders?: boolean;
+  /** open | paused | offline | closed_hours | suspended */
+  store_state?: string;
+  /** The server's own sentence, including the store's own note. Render verbatim. */
+  store_reason?: string | null;
+  reopens_at?: string | null;
+  accepts_cash?: boolean;
+  min_order_value?: string | null;
 }
 
 export interface Product {
   id: string;
   name: string;
-  price: number;
+  price: string;
   description: string | null;
   image: string | null;
   stock_quantity: number;
@@ -134,17 +166,17 @@ export interface OrderItem {
   product_id: string;
   product_name: string;
   quantity: number;
-  unit_price: number;
-  total_price: number;
+  unit_price: string;
+  total_price: string;
   image: string | null;
 }
 
 export interface Order {
   id: string;
   order_status: string;
-  total_amount: number;
-  delivery_fee: number;
-  service_fee: number;
+  total_amount: string;
+  delivery_fee: string;
+  service_fee: string;
   order_item: OrderItem[];
   vendor: Vendor;
   customer_id: string;
@@ -217,7 +249,7 @@ export interface Coordinates {
 
 export interface PaymentRecord {
   id: string;
-  amount: number;
+  amount: string;
   method: string;
   status: string;
   created_at: string;

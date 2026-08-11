@@ -135,13 +135,3 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 300) -> bool:
         logger.warning(f"Redis SET error for key '{key}': {e}")
     return False
 
-async def cache_delete(key: str) -> bool:
-    r = get_redis()
-    if not r:
-        return False
-    try:
-        await r.delete(key)
-        return True
-    except Exception as e:
-        logger.warning(f"Redis DELETE error for key '{key}': {e}")
-    return False

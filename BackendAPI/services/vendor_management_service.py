@@ -3,7 +3,6 @@ import h3
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, update
 from sqlalchemy.orm import joinedload
 from uuid import UUID
 from models.vendor_model import Vendor
@@ -14,7 +13,9 @@ from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification, push_allowed
+from sqlalchemy import func, and_, update
 import asyncio
+from services.order_service import apply_status_transition
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +119,14 @@ async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    # `delivery_radius` is not here on purpose: the radius is a platform
+    # setting, like the delivery fee, and for the same reason — see
+    # `VendorProfileUpdateRequest`. A field absent from the request model but
+    # present here would still be writable by anything calling this service
+    # directly.
     updatable_fields = [
         "business_name", "owners_name", "phone_number", "profile_pic",
-        "business_license", "location_address", "delivery_radius",
+        "business_license", "location_address",
         "shift_start", "shift_end", "preferred_payment_method", "vendor_type",
         "is_online", "deposit_fee"
     ]
@@ -312,7 +318,6 @@ async def get_vendor_products(
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    from sqlalchemy import and_, or_
     from services.product_service import live_product
 
     # A withdrawn product is gone from the vendor's own catalogue too. It is kept
@@ -406,7 +411,7 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
                 )
             raise HTTPException(status_code=402, detail=detail)
 
-    order.order_status = new_status
+    apply_status_transition(order, new_status)
 
     # Restore stock, return the customer's wallet credit, put back any debt this
     # order was collecting, release the bottle deposit and record the lost
@@ -572,7 +577,7 @@ async def cancel_order(session: AsyncSession, clerk_id: str, order_id: UUID, ven
             detail=f"Cannot cancel order with status '{order.order_status}'. Only pending, accepted, or unassigned orders can be cancelled."
         )
 
-    order.order_status = "cancelled"
+    apply_status_transition(order, "cancelled")
 
     from services.order_service import revert_order_side_effects
 
@@ -646,7 +651,10 @@ async def assign_order_rider(session: AsyncSession, clerk_id: str, order_id: UUI
 
         # Proceed to assign rider to order
         order.deliverer_id = rider.id
-        order.order_status = "accepted" if order.order_status == "pending" else order.order_status
+        # Assigning a rider to an order the vendor has not yet accepted implies
+        # acceptance; one already further along keeps the status it has.
+        if order.order_status == "pending":
+            apply_status_transition(order, "accepted")
 
         await session.commit()
 

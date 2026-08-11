@@ -1,8 +1,10 @@
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
-from typing import Literal, Optional, Any
 from pydantic import field_validator
 from utils.s3_utils import generate_presigned_url
+from decimal import Decimal
+from utils.money import MoneyField
+from typing import Literal, Optional, Any
 
 class CreateDeliverer(BaseModel):
     clerk_id: str
@@ -43,7 +45,18 @@ class DelivererProfileResponse(BaseModel):
     rating: float | None = None
     acceptance_rate: float | None = None
     employer_vendor_id: UUID | None = None
-    wallet_balance: float | None = 0.0
+    wallet_balance: MoneyField = Decimal("0")
+    #: How far from their base a rider is offered work, in km — the same figure
+    #: `rider_search_bounds` searches with, so the circle on `OperationBase`
+    #: matches what dispatch actually does.
+    #:
+    #: Served rather than drawn from a literal because it is a business value,
+    #: and this screen had it twice as a hardcoded `2`: once as the polygon it
+    #: renders and once in the sentence "you will receive requests from vendors
+    #: within a 2KM radius". Moving `retail_max_distance_km` on the console
+    #: would have left a rider looking at a map, and reading a promise, that
+    #: were both a kilometre short of the truth.
+    operation_radius_km: float | None = None
     @field_validator('profile_pic', 'driver_license', mode='after')
     @classmethod
     def secure_urls(cls, v: str | None) -> str | None:

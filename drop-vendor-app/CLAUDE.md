@@ -10,6 +10,23 @@ Key Business Workflows:
    - `accepted`: Vendor prepares the order.
    - `ready`: Order is ready for pickup. This state is critical because it tells the Backend to finalize rider dispatch.
 3. **Empty Bottle Management**: The "Receive Bottles" workflow allows the vendor to verify empty bottles returned by riders. If a rider claims to return 4 bottles but only brings 3, the vendor initiates a dispute (`bottle_rejection`).
+   - `BottleReconciliation.tsx` answers *who owes me what now* — a running
+     balance per rider, read from the ledger rather than the registry so a rider
+     who took a radar order without ever registering is still counted.
+   - `BottleLedger.tsx` answers *when did that happen, against which order, and
+     did I already take those back*. It is the evidence behind the balances, and
+     it is what a vendor disputing a rider's count points at. The endpoint
+     (`GET /api/vendor/bottle-ledger`) shipped with nothing in either app calling
+     it, so the platform's largest non-cash asset had a live balance and no
+     history. Rider **names** are resolved in the route, not in
+     `get_ledger_history`, which the rider app also calls.
+
+4. **Accepting a cash order costs float.** `update_order_status` refuses with a
+   402 naming the exact shortfall when `wallet_balance − committed_cash_float`
+   is under the order's `platform_total`. The order detail now shows that
+   comparison *before* the tap, from the same two figures the refusal uses —
+   discovering it by failing in front of a waiting customer is not a workflow.
+   The numbers need `view_finances`; without it the rule is stated without them.
 4. **Financials (Reconciliation)**: When an order is delivered successfully, the platform automatically takes its commission (5% retail, 2.5% wholesale) + service fees and deposits the rest into the Vendor's virtual Wallet. The vendor uses the `RequestPayout` API to move funds to their M-Pesa account via B2C.
 
 ## 🏗️ Technical Stack
@@ -29,6 +46,30 @@ Key Business Workflows:
 - Consistent use of BRAND colors (found in `constants/brandColors.ts`).
 - Standardized padding and margins: Use `p-4`, `m-2`, etc.
 - Dark mode compatibility is required for all text and background elements. 
+
+#### Typography
+
+`Text` and `TextInput` come from `@/components/ui/Text`, never from
+`react-native`. React Native has no cascade — an element that names no family
+renders in the OS font — so the wrapper attaches `font-sans` whenever the class
+string names none. It decides at render time because a class string is often
+built elsewhere (`<Text className={labelStyle}>`), where no static rewrite could
+reach it.
+
+- **Never `font-bold`.** A bare weight utility sets `fontWeight` and no family,
+  so the OS thickens its own font: right-looking in review, different on every
+  handset. Use `font-sans-bold` / `-semibold` / `-medium` / `-extrabold`, which
+  name Karla's real files. Same for `fontWeight` in a `StyleSheet` — name the
+  face (`fontFamily: 'Karla_700Bold'`).
+- **Fredoka is for headings and stops at 600.** `font-heading`,
+  `font-heading-medium`, `font-heading-semibold` — a screen, sheet or modal
+  title, or an entity's name. There is no `font-heading-bold`.
+- **Figures stay in Karla.** A balance, total or count is not a heading.
+- `font-mono` for references and identifiers.
+
+Every face must be registered in `app/_layout.tsx`; naming an unregistered one
+falls back to the system font in silence. `BackendAPI/tests/test_typography.py`
+fails the build on all of the above.
 
 ### 3. Order Data Refreshing
 - Use WebSockets (`/ws/orders/vendor/{vendor_id}`) to listen for status changes.
@@ -63,12 +104,63 @@ Key Business Workflows:
   product's permanent image.
 - `expo-image-manipulator` compresses to WebP at width 800 before upload.
 
+### 4a. The service radius is reported, not set
+`MyMap.tsx` shipped a stepper writing `Vendor.delivery_radius`, and **nothing on
+the dispatch path has ever read that column** — how far an order travels is
+`retail_max_distance_km` / `wholesale_max_distance_km` on the console. So the
+control changed no deliveries, which is why placing a test order after moving it
+looked correct.
+
+It was not harmless. Two screens rendered the column: this map drew its circle
+from it, and the *customer's* product page derived the delivery estimate from
+it — from the radius rather than the distance, so every customer of the store
+saw the time to the edge of the catchment. A shop setting 15 km quoted
+"45 min – 1.5 hrs" to the flat upstairs. The only thing a vendor could achieve
+with the control was making their own store look slower to everyone browsing it.
+
+The real figure arrives as `useStorefront().limits.delivery_radius_km`, beside
+the pause presets and the order-minimum ceiling, for the same reason they do:
+a number the server owns, stated once. It is **2.5 km for retail refill and
+15 km for wholesale**, the same for every store.
+
+`Vendor.delivery_radius` no longer exists — dropped in `c7d2e94a6f18` — and
+`BackendAPI/tests/test_vendor_cannot_set_the_radius.py` fails the build if the
+API starts accepting it, if the model or schemas declare it again, or if any app
+states a radius of its own.
+
 ### 5a. Low stock
 `Product.low_stock_threshold` is per product — a shop selling 200 refills a day
 and one selling a dispenser a month cannot share a number — and 0 disables the
 warning. `low_stock_notified_at` latches the notification so the vendor is told
 once per crossing, not once per unit sold below the line; restocking clears it.
 The dashboard returns `low_stock_products`.
+
+
+### Money is a decimal string
+
+Every monetary field the backend sends is a **decimal string**, not a number —
+`"1234.50"`. The columns behind them are Postgres `NUMERIC` and Python
+`Decimal`, and `BackendAPI/utils/money.py` serialises them that way for one
+reason: parsing them into a JS number to add or format them puts back exactly
+the binary floating-point error the backend goes out of its way to avoid.
+
+`utils/money.ts` is the only place digits are touched:
+
+- `formatMoney(v)` → `"KSH 1,234.50"`; `formatMoneyShort(v)` → `"KSH 1,235"`.
+- `sumMoney([...])`, `subtractMoney(a, b)`, `multiplyMoney(v, count)` — all in
+  integer cents via `BigInt`.
+- `compareMoney(a, b)`, `isZeroMoney(v)`, `isNegativeMoney(v)` — never
+  `Number(a) > Number(b)`, and never `{fee > 0 && …}` on a money field.
+- `moneyRatio(part, whole)` is the **only** sanctioned conversion to a number,
+  and only for a progress bar's width or a "near the cap" threshold — output
+  that is a pixel count, not a figure anybody reads.
+
+`BackendAPI/tests/test_money_serialisation.py` fails the build if a money field
+goes back to a float on the server side.
+
+**Never re-derive the order total.** `order.total_amount` is the frozen figure.
+The order detail summed the lines above it, omitting the deposit and any settled
+balance, so the store's screen disagreed with the customer's about one order.
 
 ### 6. Access Control
 - The server decides. `get_vendor_owner` / `get_owned_store` gate every route
@@ -99,7 +191,45 @@ reprice the products.
   would 403 on every open of the wallet screen.
 - `role === "staff"` is still correct for the four owner-only *screens*
   (OwnerProfile, StoreProfile, PayoutSettings, OperatingHours, ManageStaff):
-  those are not capabilities, they are things only an owner may ever do.
+  those are not capabilities, they are things only an owner may ever do. It is
+  also correct for *navigation to* them — `Profile.tsx` and `QuickActions.tsx`
+  hide the links, because hiding a link to a screen that would bounce you is the
+  same decision as the screen bouncing you.
+
+**Gate where the button is, not where the mutation is declared.**
+`Orders.tsx` held `useCan(PERMISSIONS.manageOrders)` while `OrderDetail/[id].tsx`
+— the screen the six order buttons actually live on — checked nothing, so a
+staff member with only `manage_bottles` was offered Accept, Reject, Start Prep,
+Mark as Ready, Cancel and Assign Fleet, and every one 403'd at the tap.
+
+- A screen whose **whole purpose** is one gated action refuses at the door with
+  `<CapabilityGate permission={…}>`. The product forms are the case it exists
+  for: filling in a name, a price, a stock count and an image and only *then*
+  being told you were never allowed to is the worst version of this.
+- A screen with a **mix** of permitted and gated controls keeps rendering and
+  gates the individual buttons. The order detail is readable by anyone who can
+  see the order; only its writes are gated.
+- `CapabilityGate` fails **open** while the profile loads. That is the opposite
+  of the rider's `VerificationWall`, on purpose: the KYC gate protects the
+  platform from an unverified rider, so an errored status is not permission,
+  whereas this one only decides whether to show a form the server refuses
+  anyway. Refusing on absent data would lock out an owner on a slow connection
+  and protect nothing.
+- `BackendAPI/tests/test_vendor_capability_ui.py` fails the build if a mutating
+  block loses its check.
+
+### 6e. Payouts do not exist as an endpoint
+Only the M-Pesa B2C **callback** router is mounted under `/api/payouts`;
+`main.py` says so. Cashouts go through `WalletWithdraw`
+(`POST /api/wallet/withdraw`) and their history is the wallet ledger, which
+carries `status`, `mpesa_receipt_number` and `failure_reason`. `RequestPayout`
+and `GetPayouts` were declared in `VendorApiRoutes.ts`, unused, pointing at
+routes that would 404 — do not add them back.
+
+`failure_reason` is rendered on a failed row. "Insufficient balance in the
+utility account" and "that number is not registered for M-Pesa" need very
+different responses from the vendor, and a red "failed" with the balance
+silently restored told them neither.
 
 ### 6a. Every backend call goes through the API client
 - React code uses `useApiRequest()` from `API/useApiClient.ts`. Code outside
@@ -171,5 +301,21 @@ is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
 device receiving the previous account's notifications. It must pass
 `?app_type=vendor` — the endpoint defaults to `customer` and, without it, cleared
 a `User` row that does not exist for this clerk id while the vendor's token
-stayed registered. Also clear the remembered store (`useActiveStore.clear()`), or
-the next account on the device sends an `X-Store-Id` it does not own.
+stayed registered. That query string is declared with the path in
+`VendorApiRoutes.DeletePushToken`, not written at the call site.
+
+**The remembered store is cleared in `useSessionCleanup`, not only in the
+handler.** `activeStoreId` is persisted separately from the query cache, so
+`queryClient.clear()` never touched it — and the handler that did clear it is
+the path nobody takes. On the 401 route the id survived, and the next account to
+sign in on that till sent an `X-Store-Id` it does not own, which the backend
+answers `404` for on every scoped request. A successful sign-in followed by
+universal 404s reads as the platform being down, not as stale state.
+
+### 6f. The route table includes the paths the app starts with
+`profile-status`, both push-token calls and `contacts/{id}` were built inline
+off `process.env.EXPO_PUBLIC_BACKEND_BASE_URL`, so the one path the app cannot
+start without was the one path never checked against the server. An
+interpolated base URL is not configuration, it is a path built outside the
+table; `test_no_screen_builds_a_backend_path_inline` now matches a `}` before
+`/api/` as well as a quote, which is what found the other two.

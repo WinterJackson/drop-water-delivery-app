@@ -20,6 +20,8 @@ import { ApiError, get } from "@/lib/api/server";
 import type { NavCounts } from "@/lib/nav-counts";
 import type { AdminMe } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Dashboard" };
 
@@ -45,6 +47,13 @@ type Pulse = {
 const WINDOW_DAYS = 30;
 
 export default async function OverviewPage() {
+  // Gated on the capability `nav-config` declares for `/` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   let data: Overview;
   try {
     data = await get<Overview>("/api/admin/overview");

@@ -35,11 +35,40 @@ class Vendor(Base):
   lat = Column(Float, nullable=True , index=True)
   lng = Column(Float, nullable=True , index=True)
   location = Column(Geography(geometry_type="POINT", srid=4326))
-  delivery_radius = Column(Float, nullable=True, index=True)
   shift_start = Column(Time, default=time(7,0), nullable=False, index=True)
   shift_end = Column(Time, default=time(19,0), nullable=False, index=True)
   verification_status = Column(String, default="pending")
   is_online = Column(Boolean, default=True, index=True)
+
+  # ── Storefront controls, set by the vendor ────────────────────────────
+  #
+  # Three decisions that belong to whoever is standing in the shop, and that
+  # the platform had no way to hear. `services/vendor_availability.py` is the
+  # only thing that reads them; nothing else may re-derive "is this store
+  # taking orders right now".
+  #
+  #: Whether this store will take a cash order. A store with no float, or one
+  #: that has just been robbed, must be able to say no — and until this column
+  #: existed it could not. **Not** `preferred_payment_method`: despite the
+  #: name, that array is the vendor's *payout* destination (`MPESA_TILL`, a
+  #: paybill, a bank account), written by `business/PayoutSettings.tsx`. The
+  #: two have nothing to do with each other and conflating them would have
+  #: pointed a customer's payment method at the vendor's bank details.
+  accepts_cash = Column(Boolean, nullable=False, server_default="true", index=True)
+  #: The smallest basket this store will prepare, before delivery and fees. A
+  #: single KSH 60 bottle costs the store the same handling as a full crate.
+  #: 0 means no minimum. Capped by `vendor_max_min_order_value` so a store
+  #: cannot delist itself with a number while still appearing open.
+  min_order_value = Column(Numeric(10, 2), nullable=False, server_default="0")
+  #: A pause that ends by itself. `is_online` is the indefinite "we are shut"
+  #: switch and it is the one people forget: a vendor taps it during a rush,
+  #: the rush ends, and the store is dark until somebody notices the next
+  #: morning. A pause carries its own expiry and the store reopens without
+  #: anyone remembering to.
+  paused_until = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+  #: Shown to the customer. "Closed" with no reason reads as broken; "Back at
+  #: 14:30 — restocking" reads as a shop.
+  pause_reason = Column(String, nullable=True)
 
   # ── Account state, set by an administrator ─────────────────────────────
   #: A store had no way to be switched off. `verification_status` records how

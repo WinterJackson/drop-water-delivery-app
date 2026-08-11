@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, AccessibilityInfo } from 'react-native';
+import { View, StyleSheet, AccessibilityInfo } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -116,7 +117,7 @@ export function DropyScene({ mood, title, subtitle, ctaLabel, onCtaPress }: Drop
         />
       </Animated.View>
       
-      <Text className={`text-xl font-bold text-center mb-2 ${darkTheme ? 'text-white' : 'text-slate-900'}`} accessibilityRole="header">
+      <Text className={`text-xl font-sans-bold text-center mb-2 ${darkTheme ? 'text-white' : 'text-slate-900'}`} accessibilityRole="header">
         {title}
       </Text>
       
@@ -134,7 +135,7 @@ export function DropyScene({ mood, title, subtitle, ctaLabel, onCtaPress }: Drop
           accessibilityLabel={ctaLabel}
           style={{ minHeight: 44, justifyContent: 'center', backgroundColor: BRAND.primary }}
         >
-          <Text className="text-white font-bold text-center">{ctaLabel}</Text>
+          <Text className="text-white font-sans-bold text-center">{ctaLabel}</Text>
         </PressableScale>
       )}
     </View>

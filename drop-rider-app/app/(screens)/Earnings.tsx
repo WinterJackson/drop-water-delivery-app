@@ -4,12 +4,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useContext } from "react";
 import {
     RefreshControl,
-    ScrollView, StatusBar,
-    Text,
+    ScrollView,
+    StatusBar,
     View,
     TouchableOpacity,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CashEligibilityCard } from "@/components/dashboard/CashEligibilityCard";
 import { RiderEarningsSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { Skeleton } from "@/components/ui/Skeleton";
 import PressableScale from "@/components/ui/PressableScale";
@@ -17,6 +19,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { useRiderEarnings, useRiderProfile } from "@/hooks/queries/useRiderData";
 import { useRouter } from "expo-router";
+import { formatMoneyShort } from "@/utils/money";
 
 export default function Earnings() {
   const { currentTheme } = useContext(UIThemeContext);
@@ -33,7 +36,7 @@ export default function Earnings() {
   const StatRow = ({ label, value }: { label: string; value: string | number }) => (
     <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
       <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{label}</Text>
-      <Text className={`text-base font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>{value}</Text>
+      <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>{value}</Text>
     </View>
   );
 
@@ -53,7 +56,7 @@ export default function Earnings() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Earnings
               </Text>
           </View>
@@ -69,18 +72,24 @@ export default function Earnings() {
               Failed to load your earnings. Please try again.
             </Text>
             <PressableScale onPress={() => refetch()} className="px-6 py-3 rounded-xl" style={{ backgroundColor: BRAND.primary }}>
-              <Text className="text-white font-bold">Retry</Text>
+              <Text className="text-white font-sans-bold">Retry</Text>
             </PressableScale>
           </View>
         ) : (
           <>
             {/* Big Earnings Card */}
             <View className="rounded-2xl p-6 items-center mb-6 shadow-sm" style={{ backgroundColor: BRAND.primary }}>
-              <Text className="text-white/70 text-sm font-semibold uppercase">Total Earnings</Text>
-              <Text className="text-white text-5xl font-bold mt-2">
-                KSH {earnings?.total_earnings?.toLocaleString() || "0"}
+              <Text className="text-white/70 text-sm font-sans-semibold uppercase">Total Earnings</Text>
+              <Text className="text-white text-5xl font-sans-bold mt-2">
+                {formatMoneyShort(earnings?.total_earnings)}
               </Text>
             </View>
+
+            {/* Whether cash orders are open to this rider, and what stands in
+                the way. On Earnings rather than Trip Radar: a rider asks "why
+                can I not take those" when looking at what they made, not while
+                an order is on screen for twenty seconds. */}
+            <CashEligibilityCard />
 
             {/* Detailed Breakdown Button */}
             <PressableScale
@@ -96,7 +105,7 @@ export default function Earnings() {
                         <Ionicons name="receipt-outline" size={20} color={BRAND.primary} />
                     </View>
                     <View>
-                        <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>See Detailed Breakdown</Text>
+                        <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>See Detailed Breakdown</Text>
                         <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>View individual delivery ledgers</Text>
                     </View>
                 </View>
@@ -110,15 +119,13 @@ export default function Earnings() {
               {/* Highlighted Bonuses */}
               <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
                 <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Bonus Earned</Text>
-                <Text style={{ color: TOAST.success }} className={`text-base font-bold`}>+ KSH {earnings?.total_staircase_bonus?.toLocaleString() || "0"}</Text>
+                <Text style={{ color: TOAST.success }} className={`text-base font-sans-bold`}>+ {formatMoneyShort(earnings?.total_staircase_bonus)}</Text>
               </View>
               
               <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
                 <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Payload Bonus Earned</Text>
-                <Text style={{ color: TOAST.success }} className={`text-base font-bold`}>+ KSH {earnings?.total_payload_bonus?.toLocaleString() || "0"}</Text>
+                <Text style={{ color: TOAST.success }} className={`text-base font-sans-bold`}>+ {formatMoneyShort(earnings?.total_payload_bonus)}</Text>
               </View>
-
-
 
               <StatRow label="Availability" value={profile?.is_available ? "Receiving Deliveries" : "Offline"} />
             </View>

@@ -7,77 +7,25 @@ const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "";
  * path resolves against the live FastAPI route table, so a typo here fails CI
  * instead of shipping as a 404 on a user action. Five such 404s were found in the
  * Phase 1 audit — including "Cancel Order", which could never have worked.
+ *
+ * The same test also fails the build on an entry nothing calls. There used to be
+ * a second table here, `ApiRoutes`, kept "for screens not yet migrated": by the
+ * end it declared 41 endpoints of which exactly two were reached, four screens
+ * imported it without using it, and every live endpoint had two declarations
+ * free to disagree. A contract test that only checks paths resolve cannot see
+ * that — both copies of a route resolve.
  */
 
-// Legacy export kept for screens not yet migrated to the typed ROUTES table.
-export const ApiRoutes = {
-    // Auth & Profile
-    CreateNewUser: { path: `${BASE_URL}/api/auth/create_user`, method: "POST" },
-    GetUserDetails: { path: `${BASE_URL}/api/auth/get_user_details`, method: "GET" },
-    UpdateProfilePic: { path: `${BASE_URL}/api/auth/update_profile_pic`, method: "POST" },
-    UpdateUserLocation: { path: `${BASE_URL}/api/auth/update_user_location`, method: "POST" },
-    RevokeUserLocation: { path: `${BASE_URL}/api/auth/revoke_user_location`, method: "POST" },
-    UpdateUser: { path: `${BASE_URL}/api/auth/update_user`, method: "PUT" },
-    DeleteAccount: { path: `${BASE_URL}/api/auth/delete_account`, method: "DELETE" },
-
-    // Vendors
-    AllVendors: { path: `${BASE_URL}/api/vendors`, method: "GET" },
-    NearByVendors: { path: `${BASE_URL}/api/nearby_vendors`, method: "GET" },
-    TopRatedVendors: { path: `${BASE_URL}/api/top_rated_vendors`, method: "GET" },
-    VendorShopDetails: { path: `${BASE_URL}/api/vendor_details_and_products`, method: "POST" },
-    VendorsByType: { path: `${BASE_URL}/api/vendor_by_type`, method: "POST" },
-    SearchVendors: { path: `${BASE_URL}/api/search/vendors`, method: "GET" },
-
-    // Products
-    TopBrandsVendors: { path: `${BASE_URL}/api/get_top_brands`, method: "GET" },
-    ProductDetails: { path: `${BASE_URL}/api/get_product`, method: "POST" },
-    ProductsWithOffer: { path: `${BASE_URL}/api/products_with_discount`, method: "GET" },
-    RandomPaginatedProducts: { path: `${BASE_URL}/api/random_paginated_products`, method: "POST" },
-
-    // Search
-    Search: { path: `${BASE_URL}/api/search`, method: "GET" },
-
-    // Cart
-    AddToCart: { path: `${BASE_URL}/api/cart/add_to_cart`, method: "POST" },
-    GetCart: { path: `${BASE_URL}/api/cart/get_cart`, method: "GET" },
-    GetDetailedCart: { path: `${BASE_URL}/api/cart/get_detailed_cart`, method: "GET" },
-    ChangeCartItemQuantity: { path: `${BASE_URL}/api/cart/change_cart_item_quantity`, method: "POST" },
-    DeleteCartItem: { path: `${BASE_URL}/api/cart/delete_cart_item`, method: "POST" },
-    CartQuote: { path: `${BASE_URL}/api/cart/quote`, method: "POST" },
-    Checkout: { path: `${BASE_URL}/api/cart/mpesa_payment`, method: "POST" },
-    ConfirmPayment: { path: `${BASE_URL}/api/cart/confirm_payment`, method: "POST" },
-
-    // Orders
-    GetOrders: { path: `${BASE_URL}/api/cart/get_orders`, method: "GET" },
-    // Order-scoped actions live under /api/cart/orders/{id}/… — see ROUTES below.
-    CancelOrder: (id: string) => ({ path: `${BASE_URL}/api/cart/orders/${id}/cancel`, method: "PUT" }),
-
-    // Reviews
-    SubmitReview: { path: `${BASE_URL}/api/reviews`, method: "POST" },
-
-    // Favourites
-    GetFavorites: { path: `${BASE_URL}/api/favorites`, method: "GET" },
-    AddFavorite: { path: `${BASE_URL}/api/favorites/add`, method: "POST" },
-    RemoveFavorite: { path: `${BASE_URL}/api/favorites/remove`, method: "POST" },
-
-    // Notifications
-    GetNotifications: { path: `${BASE_URL}/api/notifications`, method: "GET" },
-    MarkNotificationRead: { path: `${BASE_URL}/api/notifications/read`, method: "POST" },
-    MarkAllNotificationsRead: { path: `${BASE_URL}/api/notifications/read-all`, method: "POST" },
-    UnreadCount: { path: `${BASE_URL}/api/notifications/unread-count`, method: "GET" },
-    DeleteNotification: (id: string) => ({ path: `${BASE_URL}/api/notifications/${id}`, method: "DELETE" }),
-
-    // Push Token
-    RegisterPushToken: { path: `${BASE_URL}/api/auth/push-token`, method: "POST" },
-    ClearPushToken: { path: `${BASE_URL}/api/auth/push-token`, method: "DELETE" },
-
-    // Saved Locations
-    GetSavedLocations: { path: `${BASE_URL}/api/auth/saved-locations`, method: "GET" },
-    CreateSavedLocation: { path: `${BASE_URL}/api/auth/saved-locations`, method: "POST" },
-    UpdateSavedLocation: (id: string) => ({ path: `${BASE_URL}/api/auth/saved-locations/${id}`, method: "PUT" }),
-    DeleteSavedLocation: (id: string) => ({ path: `${BASE_URL}/api/auth/saved-locations/${id}`, method: "DELETE" }),
-    UseSavedLocation: (id: string) => ({ path: `${BASE_URL}/api/auth/saved-locations/${id}/use`, method: "POST" }),
-};
+/**
+ * The socket origin, derived from the one BASE_URL.
+ *
+ * Two hooks derived this separately and differently. `useWebSocket` split a REST
+ * path on `/api/` and called `.replace('http', 'ws')` unanchored — so a base URL
+ * that stopped containing `/api/` would silently yield the whole REST URL, and
+ * the first `http` anywhere in the string was the one rewritten.
+ */
+export const WS_BASE_URL =
+    process.env.EXPO_PUBLIC_WS_BASE_URL || BASE_URL.replace(/^http/, "ws");
 
 // Strictly typed routes for React Query
 export const ROUTES = {
@@ -86,8 +34,14 @@ export const ROUTES = {
     GET_USER_DETAILS: `${BASE_URL}/api/auth/get_user_details`,
     UPDATE_PROFILE_PIC: `${BASE_URL}/api/auth/update_profile_pic`,
     UPDATE_LOCATION: `${BASE_URL}/api/auth/update_user_location`,
+    REVOKE_LOCATION: `${BASE_URL}/api/auth/revoke_user_location`,
     REGISTER_PUSH_TOKEN: `${BASE_URL}/api/auth/push-token`,
-    CLEAR_PUSH_TOKEN: `${BASE_URL}/api/auth/push-token`,
+    // Stated, not inherited. `app_type` defaults to `customer` server-side, so
+    // this app is the one that happens to be right by accident — and the rider
+    // app, which was relying on the same default, cleared nothing at all for
+    // every rider on every sign-out. A default that three callers depend on
+    // silently is one change away from being wrong for all three.
+    CLEAR_PUSH_TOKEN: `${BASE_URL}/api/auth/push-token?app_type=customer`,
     UPDATE_USER: `${BASE_URL}/api/auth/update_user`,
     DELETE_ACCOUNT: `${BASE_URL}/api/auth/delete_account`,
     GET_PROFILE_STATUS: (appType: string) => `${BASE_URL}/api/auth/profile-status?app_type=${appType}`,
@@ -182,6 +136,15 @@ export const ROUTES = {
     WALLET_WITHDRAW: `${BASE_URL}/api/wallet/withdraw`,
     GET_TRANSACTIONS: `${BASE_URL}/api/wallet/transactions`,
 
+    // Bottle deposits: what the customer is holding, and getting it back.
+    // `bottle_deposit_balance` and `bottles_held` were maintained correctly from
+    // the day they existed and reachable from no screen — a balance somebody
+    // cannot check is a balance they cannot trust.
+    BOTTLE_DEPOSIT_SUMMARY: `${BASE_URL}/api/bottle-returns/summary`,
+    BOOK_BOTTLE_COLLECTION: `${BASE_URL}/api/bottle-returns`,
+    CONFIRM_BOTTLE_HANDOVER: (id: string) => `${BASE_URL}/api/bottle-returns/${id}/confirm`,
+    CANCEL_BOTTLE_COLLECTION: (id: string) => `${BASE_URL}/api/bottle-returns/${id}`,
+
     // Maps — Google web services, proxied.
     // The apps' Maps keys are SDK-restricted and cannot call Places; the server
     // holds the only key that can. See docs/maps-architecture.md.
@@ -205,5 +168,3 @@ export const ROUTES = {
     // Misc
     APP_VERSION: `${BASE_URL}/api/app-version`,
 } as const;
-
-export default ApiRoutes;

@@ -4,7 +4,6 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload, selectinload, with_loader_criteria
 from models.cart_model import Cart, CartItem
 from models.product_model import Product
-from models.user_model import User
 from models.vendor_model import Vendor
 from schemas.cart_schemas import CartDetailed
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,8 +74,10 @@ async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetai
   # Progress toward the wholesale minimum order quantity, so the UI can show
   # "62 / 100 kg" instead of letting the customer discover the rule as a 400.
   if vendor_type_str == "wholesale_b2b":
-      cart.moq_kg = float(DispatchPolicy.WHOLESALE_MOQ_KG)
-      cart.moq_met = total_weight_kg >= float(DispatchPolicy.WHOLESALE_MOQ_KG)
+      # The accessor: the bar shown and the bar enforced have to be one number.
+      moq_kg = DispatchPolicy.wholesale_moq_kg()
+      cart.moq_kg = moq_kg
+      cart.moq_met = total_weight_kg >= moq_kg
       cart.max_units = None
   else:
       cart.moq_kg = None

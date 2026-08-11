@@ -1,4 +1,4 @@
-import ApiRoutes from "@/API/routes/ApiRoutes";
+import { WS_BASE_URL } from "@/API/routes/ApiRoutes";
 import NetInfo from '@react-native-community/netinfo';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
@@ -11,6 +11,22 @@ export interface OrderUpdate {
   status?: string;
   [key: string]: any;
 }
+
+/**
+ * Silence past this is a dead socket. Comfortably above the server's 30s
+ * heartbeat cadence, so a slow network cannot trip it.
+ */
+const LIVENESS_TIMEOUT_MS = 75_000;
+const LIVENESS_CHECK_MS = 15_000;
+
+/**
+ * After the backoff ladder is exhausted the socket is not abandoned — it is
+ * retried on a slow, fixed interval. Giving up permanently left a foregrounded
+ * app on a working network with a screen that had quietly stopped updating and
+ * no way back short of navigating away; the only things that reset the counter
+ * were a background→foreground trip and a connectivity change.
+ */
+const IDLE_RETRY_MS = 60_000;
 
 const useWebSocket = (
   entityType: string,
@@ -54,9 +70,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
   const mountedRef = useRef(true);
 
   // BUG-WS-FE-03 FIX: Use secure URL construction from env vars with flexible fallback
-  const BASE_URL = useRef(
-    process.env.EXPO_PUBLIC_WS_BASE_URL || ApiRoutes.GetOrders.path.split('/api/')[0].replace('http', 'ws')
-  ).current;
+  const BASE_URL = WS_BASE_URL;
 
 
   // Push a fresh token onto the live socket so the server can extend the session
@@ -84,14 +98,65 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
 
   // FIX-WS-RERENDER-02: `connect` has ZERO external dependencies — all values read from refs.
   // This means useCallback never produces a new reference, so the useEffect never re-fires.
+  /**
+   * Declared **before** the connect effect, not after it.
+   *
+   * Effects run in declaration order, so with this one last a remount — Fast
+   * Refresh, StrictMode's double-invoke, or any unmount/mount of the screen —
+   * ran `connect()` while `mountedRef` was still `false` from the previous
+   * teardown, and every early return in the connect path fired. The socket
+   * silently never opened, and only a background→foreground trip brought it
+   * back.
+   */
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  /**
+   * Liveness, not just connectedness.
+   *
+   * A mobile socket can go **half-open**: the TCP connection survives a cell
+   * handover or a NAT timeout on paper, so `onclose` never fires and
+   * `readyState` stays `OPEN`, while nothing can actually get through. The
+   * client sits believing it is live and the screen silently stops updating —
+   * which on the rider's radar means missed offers and on the customer's map
+   * means a marker that stopped moving.
+   *
+   * The traffic to watch for already exists: the server sends
+   * `{"action":"heartbeat"}` after 30s of client silence, and acks every
+   * `auth_refresh` with `auth_refreshed`. One or the other arrives at least
+   * every ~30s on a healthy socket, so silence past `LIVENESS_TIMEOUT_MS` means
+   * the socket is dead however it looks. Closing it ourselves lets the normal
+   * reconnect path take over.
+   */
+  const lastMessageAtRef = useRef(Date.now());
+  const livenessTimerRef = useRef<any | null>(null);
+
+  const stopLivenessWatch = useCallback(() => {
+    if (livenessTimerRef.current) {
+      clearInterval(livenessTimerRef.current);
+      livenessTimerRef.current = null;
+    }
+  }, []);
+
+  const startLivenessWatch = useCallback((ws: WebSocket) => {
+    stopLivenessWatch();
+    lastMessageAtRef.current = Date.now();
+    livenessTimerRef.current = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - lastMessageAtRef.current < LIVENESS_TIMEOUT_MS) return;
+      if (__DEV__) console.warn('WebSocket went quiet — treating as dead and reconnecting');
+      // `close()` fires `onclose`, which schedules the reconnect. Handlers are
+      // left in place on purpose: this is a failure, not an intentional teardown.
+      try { ws.close(); } catch { /* already gone */ }
+    }, LIVENESS_CHECK_MS);
+  }, [stopLivenessWatch]);
+
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
     if (!entityIdRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    if (attemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
-        if (__DEV__) console.warn('WebSocket max reconnect attempts reached, stopping.');
-        return;
-    }
 
     try {
         const token = await getTokenRef.current();
@@ -108,9 +173,13 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
       attemptRef.current = 0; // Reset backoff on success
       ws.send(JSON.stringify({ action: 'join-entity-room' }));
       startAuthRefresh(ws);
+      startLivenessWatch(ws);
     };
 
     ws.onmessage = (event) => {
+      // Any frame at all proves the socket is alive — heartbeats included,
+      // which is the whole point of watching for their absence.
+      lastMessageAtRef.current = Date.now();
       try {
         const data = JSON.parse(event.data) as OrderUpdate;
         // FIX-WS-RERENDER-03: Silently ignore heartbeat messages — they are keep-alive pings,
@@ -125,6 +194,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
 
     ws.onclose = () => {
       stopAuthRefresh();
+      stopLivenessWatch();
       if (__DEV__) console.log('WebSocket disconnected');
       setConnected(false);
       wsRef.current = null;
@@ -138,11 +208,13 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
 
       // BUG-WS-FE-02 FIX: Exponential backoff with jitter, capped at MAX_RECONNECT_ATTEMPTS
       attemptRef.current += 1;
-      if (attemptRef.current > MAX_RECONNECT_ATTEMPTS) {
-        if (__DEV__) console.warn('WebSocket max reconnect attempts reached, stopping.');
-        return;
-      }
-      const baseDelay = Math.min(3000 * Math.pow(2, attemptRef.current - 1), 60000);
+      // Past the ladder, keep trying on a slow interval instead of giving
+      // up. Stopping outright left a foregrounded app on a working network
+      // with a screen that had silently stopped updating.
+      const exhausted = attemptRef.current > MAX_RECONNECT_ATTEMPTS;
+      const baseDelay = exhausted
+        ? IDLE_RETRY_MS
+        : Math.min(3000 * Math.pow(2, attemptRef.current - 1), 60000);
       const jitter = Math.random() * 1000;
       const delay = baseDelay + jitter;
       
@@ -184,7 +256,8 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
         }
         if (wsRef.current) {
           // Nullify handlers BEFORE close to prevent onclose from spawning zombie reconnects
-          wsRef.current.onclose = null;
+          stopLivenessWatch();
+        wsRef.current.onclose = null;
           wsRef.current.onerror = null;
           wsRef.current.onmessage = null;
           wsRef.current.onopen = null;
@@ -219,6 +292,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (wsRef.current) {
+        stopLivenessWatch();
         wsRef.current.onclose = null;
         wsRef.current.onerror = null;
         wsRef.current.onmessage = null;
@@ -230,11 +304,6 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId]); // Only re-run when the actual entityId value changes (null → "abc-123")
 
-  // Cleanup on unmount
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   const sendMessage = useCallback((message: any) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

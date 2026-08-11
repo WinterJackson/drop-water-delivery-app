@@ -1,5 +1,5 @@
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import or_, func
@@ -9,6 +9,7 @@ from models.user_model import User
 from models.vendor_model import Vendor
 from models.deliverer_model import Deliverer
 from services.payment_service import initiate_stk_push, initiate_b2c_payout
+from utils.money import money_str
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,43 @@ async def resolve_wallet_owner(
     return normalised, model, owner
 
 
+async def _locked_wallet_owner(session: AsyncSession, model, transaction: WalletTransaction):
+    """The exact balance row a transaction belongs to, locked FOR UPDATE.
+
+    Prefers `wallet_owner_id` — the row the money actually came off or is going
+    to. One Clerk identity may own several stores, each with its own
+    `wallet_balance`, so resolving a callback by `clerk_id` and taking `.first()`
+    settles against an arbitrary one: a top-up paid into the second branch
+    credited the first, and a failed withdrawal from the second refunded the
+    first. Both leave two real balances wrong by the same amount, in opposite
+    directions, with nothing in either ledger to explain it.
+
+    Falls back to the clerk id for rows written before the column existed. Those
+    are single-store owners in practice, and refusing to settle them would strand
+    real money rather than merely misplace it.
+    """
+    owner_id = getattr(transaction, "wallet_owner_id", None)
+    if owner_id is not None:
+        result = await session.execute(
+            select(model).where(model.id == owner_id).with_for_update()
+        )
+        owner = result.scalars().first()
+        if owner is not None:
+            return owner
+        logger.warning(
+            "Wallet transaction %s names owner %s, which no longer exists.",
+            transaction.id, owner_id,
+        )
+
+    result = await session.execute(
+        select(model)
+        .where(model.clerk_id == transaction.user_id)
+        .order_by(model.created_at.asc(), model.id.asc())
+        .with_for_update()
+    )
+    return result.scalars().first()
+
+
 async def record_wallet_movement(
     session: AsyncSession,
     *,
@@ -105,6 +143,55 @@ async def record_wallet_movement(
     return entry
 
 
+def _rebalance_restricted_credit(owner, *, delta: Decimal, transaction_type, user_type=None) -> None:
+    """Keep `non_withdrawable_balance` honest as the wallet moves.
+
+    Only customers carry one; it is a returned bottle deposit, spendable on
+    water and not withdrawable as cash (see
+    `settlement_service.restricted_customer_credit`).
+
+    Two rules, and the distinction between them is the whole point:
+
+    * **Spending consumes the restricted part first.** Otherwise buying water
+      out of a wallet holding 300 restricted and 200 free would eat the free
+      money and leave the restriction intact — the customer's *withdrawable*
+      balance falling because they bought water, which is precisely backwards.
+      Consuming it first is what makes the deposit genuinely turn into water.
+    * **A withdrawal consumes none of it.** `assert_withdrawable` has already
+      limited the withdrawal to the unrestricted part, so treating it like a
+      spend would release the restriction a shilling at a time and hand back
+      exactly the cash-out path this exists to close.
+
+    The clamp at the end holds in both cases: restricted can never exceed the
+    balance it is a part of.
+
+    Keyed on `user_type`, not on whether the attribute happens to exist. Only a
+    customer has restricted credit; riders and vendors have committed cash float
+    instead, which `settlement_service` owns. A `hasattr` check reads as
+    equivalent and is not — it is true of anything duck-typed, and it would
+    silently sweep in any future model that grows a similarly named column.
+
+    An unreadable value leaves the field **untouched** rather than resetting it.
+    Failing to zero here would release a restriction, which is the one direction
+    this must never fail in; failing to leave it alone costs nothing.
+    """
+    if user_type is not None and user_type != "customer":
+        return
+
+    from models.wallet_transaction_model import TransactionType
+
+    try:
+        restricted = Decimal(str(owner.non_withdrawable_balance or 0))
+        balance = Decimal(str(owner.wallet_balance or 0))
+    except (AttributeError, InvalidOperation, TypeError, ValueError):
+        return
+
+    if delta < 0 and transaction_type != TransactionType.withdrawal:
+        restricted = max(Decimal("0"), restricted + delta)   # delta is negative
+
+    owner.non_withdrawable_balance = max(Decimal("0"), min(restricted, balance))
+
+
 async def apply_wallet_delta(
     session: AsyncSession,
     *,
@@ -133,6 +220,9 @@ async def apply_wallet_delta(
         return None
 
     owner.wallet_balance = Decimal(str(owner.wallet_balance or 0)) + delta
+    _rebalance_restricted_credit(
+        owner, delta=delta, transaction_type=transaction_type, user_type=user_type
+    )
 
     return await record_wallet_movement(
         session,
@@ -164,11 +254,16 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
             detail="Phone number must be in the format 2547XXXXXXXX or 2541XXXXXXXX.",
         )
 
-    # Confirms the caller owns a wallet of this type before any money moves.
-    await resolve_wallet_owner(session, user_id, user_type, store_id=store_id)
+    # Confirms the caller owns a wallet of this type before any money moves, and
+    # tells us *which* row — `store_id` was resolved here and then thrown away,
+    # so a two-branch owner topping up their second store had the first one
+    # credited by the callback below.
+    user_type, _model, owner = await resolve_wallet_owner(
+        session, user_id, user_type, store_id=store_id
+    )
 
     # Trigger M-Pesa STK Push
-    response = await initiate_stk_push(phone=phone, amount=int(amount))
+    response = await initiate_stk_push(phone=phone, amount=int(amount_dec))
     if "error" in response or response.get("ResponseCode") != "0":
         logger.error(f"STK Push Failed: {response}")
         raise HTTPException(status_code=400, detail="Failed to initiate STK push. Please try again.")
@@ -179,8 +274,9 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
     transaction = WalletTransaction(
         user_id=user_id,
         user_type=UserType[user_type.lower()],
+        wallet_owner_id=owner.id,
         transaction_type=TransactionType.top_up,
-        amount=amount,
+        amount=amount_dec,
         status=TransactionStatus.pending,
         reference_id=checkout_request_id,
         description="M-Pesa STK Push Top Up"
@@ -277,10 +373,7 @@ async def handle_mpesa_topup_callback(session: AsyncSession, payload: dict):
             logger.error("Top-up %s has unknown user_type %s", checkout_request_id, transaction.user_type)
             return {"status": "rejected", "reason": "unknown_user_type"}
 
-        owner_res = await session.execute(
-            select(model).where(model.clerk_id == transaction.user_id).with_for_update()
-        )
-        owner = owner_res.scalars().first()
+        owner = await _locked_wallet_owner(session, model, transaction)
         if owner is None:
             logger.error("Top-up %s references a missing account.", checkout_request_id)
             transaction.status = TransactionStatus.failed
@@ -340,7 +433,7 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
     # the app called.
     from services.settlement_service import (
         assert_withdrawable,
-        fee_for,
+        banded_fee_for,
         withdrawal_terms,
     )
 
@@ -358,9 +451,24 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
             status_code=400, detail=f"Minimum withdrawal amount is {minimum:.0f} KSH."
         )
 
-    transaction_fee = fee_for(amount, fee, waiver)
+    transaction_fee = banded_fee_for(amount, fee, waiver)
     if amount <= transaction_fee:
         raise HTTPException(status_code=400, detail=f"Withdrawal amount must be greater than network fee (KSH {transaction_fee}).")
+
+    # M-Pesa moves whole shillings only. The fee is a `Platform_Settings` row an
+    # administrator may set to 15.50 at any time; the amount withdrawn is
+    # integral, so the *net* need not be. `initiate_b2c_payout` used to
+    # `int()` it — the wallet was debited 1000, the fee recorded as 15.50 and
+    # 984 arrived on the phone, with the missing 50 cents in no ledger anywhere.
+    # Round the fee up instead: the provider is told the exact figure below and
+    # the debit, the disbursement and the fee reconcile to the shilling.
+    disbursement_amount = (amount - transaction_fee).to_integral_value(rounding=ROUND_DOWN)
+    transaction_fee = amount - disbursement_amount
+    if disbursement_amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Withdrawal amount must be greater than network fee (KSH {transaction_fee}).",
+        )
 
     # ── The float check this path was missing ──
     # `wallet_balance` alone is not what is spendable: a rider carrying open cash
@@ -377,33 +485,55 @@ async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_t
         amount=amount,
     )
 
-    user.wallet_balance = current_balance - amount
-    disbursement_amount = amount - transaction_fee
-
-    transaction = WalletTransaction(
-        user_id=user_id,
-        user_type=UserType[user_type],
-        transaction_type=TransactionType.withdrawal,
-        # Signed: money leaving is negative. `transaction_type` cannot carry the
-        # direction because `order_payment` goes both ways — it debits a rider
-        # settling a cash order and credits them for delivery earnings.
+    # Balance and ledger row in one call, like every other movement on the
+    # platform. This function used to assign `wallet_balance` and hand-build the
+    # `WalletTransaction` beside it — the one pairing `apply_wallet_delta` exists
+    # to make inseparable, on the single largest debit the platform performs.
+    #
+    # Signed: money leaving is negative. `transaction_type` cannot carry the
+    # direction because `order_payment` goes both ways — it debits a rider
+    # settling a cash order and credits them for delivery earnings.
+    transaction = await apply_wallet_delta(
+        session,
+        owner=user,
+        clerk_id=user_id,
+        user_type=user_type,
         amount=-amount,
-        status=TransactionStatus.pending,
+        transaction_type=TransactionType.withdrawal,
         description=f"M-Pesa B2C Withdrawal (Net: {disbursement_amount}, Fee: {transaction_fee})",
+        status=TransactionStatus.pending,
     )
-    session.add(transaction)
+    #: The row this balance came off. `user_id` is a Clerk id, and one identity
+    #: can own several stores — without this the callback re-resolved by clerk id
+    #: and `.first()`, so a failed withdrawal from the second branch was refunded
+    #: to the first. Two real balances, one wrong by the amount of the other.
+    transaction.wallet_owner_id = user.id
     await session.commit()
     await session.refresh(transaction)
 
     response = await initiate_b2c_payout(phone=phone, amount=disbursement_amount, payout_id=str(transaction.id))
 
     if not response.get("success"):
-        # Re-fetch and lock again — never trust the stale `current_balance` closure on revert,
-        # since another transaction may have touched this wallet in the meantime.
-        result = await session.execute(select(model).where(model.clerk_id == user_id).with_for_update())
+        # Re-fetch and lock again — never trust the stale `current_balance`
+        # closure on revert, since another transaction may have touched this
+        # wallet in the meantime. **By primary key**, for the same reason the
+        # debit above locks by primary key: `clerk_id` plus `.first()` credits
+        # whichever of the owner's stores the database happens to return.
+        result = await session.execute(
+            select(model).where(model.id == user.id).with_for_update()
+        )
         fresh_user = result.scalars().first()
         if fresh_user is not None:
-            fresh_user.wallet_balance = Decimal(str(fresh_user.wallet_balance or 0)) + amount
+            await apply_wallet_delta(
+                session,
+                owner=fresh_user,
+                clerk_id=user_id,
+                user_type=user_type,
+                amount=amount,
+                transaction_type=TransactionType.refund,
+                description="Withdrawal failed before it left, amount returned",
+                reference_id=str(transaction.id),
+            )
         transaction.status = TransactionStatus.failed
         transaction.failure_reason = response.get("error")
         await session.commit()
@@ -471,8 +601,27 @@ async def get_wallet_transactions(
     transactions = result.scalars().all()
     next_offset = offset + limit
 
+    # Serialised explicitly rather than handed back as ORM rows. FastAPI's
+    # encoder turns a `Numeric` `Decimal` into a JSON number, so the wallet
+    # ledger — every top-up, withdrawal and refund a provider can inspect — was
+    # the one history of their money that left here as a float.
     return {
-        "data": transactions,
+        "data": [
+            {
+                "id": str(t.id),
+                "transaction_type": t.transaction_type.value
+                if hasattr(t.transaction_type, "value")
+                else t.transaction_type,
+                "status": t.status.value if hasattr(t.status, "value") else t.status,
+                "amount": money_str(t.amount),
+                "reference_id": t.reference_id,
+                "mpesa_receipt_number": t.mpesa_receipt_number,
+                "description": t.description,
+                "failure_reason": t.failure_reason,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in transactions
+        ],
         "nextCursor": next_offset if next_offset < total_count else None,
         "hasNextPage": next_offset < total_count,
         "total": total_count

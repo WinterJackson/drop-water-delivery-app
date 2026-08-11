@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import func, select

@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { Text, TouchableWithoutFeedback } from 'react-native';
+import { TouchableWithoutFeedback } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
@@ -43,7 +44,7 @@ export default function DropButton({ title, onPress, style = "", textStyle = "",
         className={`bg-primary p-4 px-6 rounded-full items-center justify-center ${style} ${disabled ? 'opacity-50' : ''}`} 
         style={animatedStyle}
       >
-        <Text numberOfLines={1} className={`text-white font-bold text-center text-lg whitespace-nowrap ${textStyle}`}>{title}</Text>
+        <Text numberOfLines={1} className={`text-white font-sans-bold text-center text-lg whitespace-nowrap ${textStyle}`}>{title}</Text>
       </Animated.View>
     </TouchableWithoutFeedback>
   );

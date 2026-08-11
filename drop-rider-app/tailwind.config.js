@@ -5,6 +5,35 @@ module.exports = {
   darkMode: "class",
   theme: {
     extend: {
+      /**
+       * Typography. Karla for body/UI, Fredoka for headings, JetBrains Mono
+       * for figures and codes.
+       *
+       * One token per real font file, on purpose. React Native has no
+       * `font-synthesis-weight`: pairing a family with `font-bold` makes the OS
+       * thicken the strokes itself, which looks smeared next to the real face.
+       * `font-sans-bold` loads Karla's actual Bold instead of faking it.
+       *
+       * Fredoka stops at 600 — there is no `font-heading-bold`, and that is not
+       * an omission. Its heavier weights read as a children's brand.
+       */
+      fontFamily: {
+        sans: ["Karla_400Regular"],
+        "sans-light": ["Karla_300Light"],
+        "sans-medium": ["Karla_500Medium"],
+        "sans-semibold": ["Karla_600SemiBold"],
+        "sans-bold": ["Karla_700Bold"],
+        "sans-extrabold": ["Karla_800ExtraBold"],
+
+        heading: ["Fredoka_400Regular"],
+        "heading-medium": ["Fredoka_500Medium"],
+        "heading-semibold": ["Fredoka_600SemiBold"],
+
+        mono: ["JetBrainsMono_400Regular"],
+        "mono-medium": ["JetBrainsMono_500Medium"],
+        "mono-semibold": ["JetBrainsMono_600SemiBold"],
+        "mono-bold": ["JetBrainsMono_700Bold"],
+      },
       colors: {
         primary: "#0295f7",
         "primary-container": "#0295f7",

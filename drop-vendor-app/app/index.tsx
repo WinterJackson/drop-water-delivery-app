@@ -1,7 +1,8 @@
 import { useCallback, useContext, useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { Redirect } from "expo-router";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 
 import { apiFetch } from "@/API/apiFetch";
 import { ApiError, errorMessage } from "@/API/errors";
@@ -10,8 +11,6 @@ import PressableScale from "@/components/ui/PressableScale";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useActiveStore } from "@/stores/activeStoreStore";
-
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
 
 interface ProfileStatus {
   exists: boolean;
@@ -39,7 +38,7 @@ export default function Index() {
       const token = await getToken();
 
       const status = await apiFetch<ProfileStatus>(
-        `${BASE_URL}/api/auth/profile-status?app_type=vendor`,
+        VendorApiRoutes.GetProfileStatus.path,
         { token }
       );
 
@@ -86,7 +85,7 @@ export default function Index() {
   if (canProceed && isSignedIn && startupError) {
     return (
       <View className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-black" : "bg-white"}`}>
-        <Text className={`text-lg font-bold mb-2 text-center ${darkTheme ? "text-white" : "text-black"}`}>
+        <Text className={`text-lg font-sans-bold mb-2 text-center ${darkTheme ? "text-white" : "text-black"}`}>
           Couldn&apos;t start up
         </Text>
         <Text className={`text-center mb-6 ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
@@ -97,7 +96,7 @@ export default function Index() {
           className="bg-accentbg px-8 py-3 rounded-xl flex-row items-center"
         >
           <ActivityIndicator animating={false} />
-          <Text className="text-white font-bold">Try again</Text>
+          <Text className="text-white font-sans-bold">Try again</Text>
         </PressableScale>
       </View>
     );

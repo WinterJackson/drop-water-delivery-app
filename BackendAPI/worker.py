@@ -1,7 +1,5 @@
-import asyncio
 import logging
 import os
-from arq import Worker
 from arq.connections import RedisSettings
 from dotenv import load_dotenv
 
@@ -108,6 +106,54 @@ async def stale_asset_monitor_task(ctx):
     return "Swept stale assets"
 
 
+async def release_unclaimed_cash_task(ctx):
+    """Free float locked to cash orders nobody delivered.
+
+    Float is committed from the moment a rider accepts until the order reaches a
+    terminal state, so one order taken and forgotten locked that money
+    indefinitely — and the customer waited on a delivery nobody was bringing.
+    Frequent, because both halves of that are time-sensitive: every minute is a
+    rider who cannot accept work and a customer who has not been told.
+    """
+    from dependencies.dependencies import get_db_session
+    from services import cod_policy
+
+    async with get_db_session() as session:
+        result = await cod_policy.release_unclaimed_cash_orders(session)
+    return str(result)
+
+
+async def resume_paused_stores_task(ctx):
+    """Reopen stores whose pause has run out, and tell them it happened.
+
+    The state is already correct without this — `store_state` compares the
+    expiry against the clock, so a worker that never ran cannot leave a shop
+    shut. What this adds is the notification and a tidy column: a vendor who
+    paused for twenty minutes and heard nothing has no way to know it worked,
+    and the usual response to that is to pause again.
+    """
+    from dependencies.dependencies import get_db_session
+    from services import vendor_availability
+
+    async with get_db_session() as session:
+        result = await vendor_availability.resume_expired_pauses(session)
+    return str(result)
+
+
+async def deposit_maintenance_task(ctx):
+    """The deposit book's nightly upkeep, including the reconciliation.
+
+    One task rather than four schedules, because the order matters: the sweeps
+    bring the book up to date and the reconciliation then reads it. Split
+    across separate crons they would race, and the reconciliation would report
+    drift that the settlement due a minute later was about to remove.
+    """
+    from jobs.deposit_maintenance import run_deposit_maintenance
+
+    result = await run_deposit_maintenance()
+    return str(result)[:400]
+
+
 async def dispatch_trip_radar_task(ctx, order_id: str, params: dict):
     """Tier 2 of the dispatch escalation, twenty seconds after Tier 1.
 
@@ -156,6 +202,9 @@ class WorkerSettings:
         reassign_unassigned_orders_task,
         check_push_receipts_task,
         stale_asset_monitor_task,
+        deposit_maintenance_task,
+        release_unclaimed_cash_task,
+        resume_paused_stores_task,
         dispatch_trip_radar_task,
     ]
     redis_settings = redis_settings
@@ -192,6 +241,9 @@ if os.getenv("ARQ_INTERNAL_CRON", "0").lower() in ("1", "true", "yes"):
         cron(reassign_unassigned_orders_task, minute=set(range(0, 60, 3))),
         cron(check_push_receipts_task, minute=set(range(0, 60, 10))),
         cron(stale_asset_monitor_task, hour=3, minute=0),
+        cron(deposit_maintenance_task, hour=3, minute=30),
+        cron(release_unclaimed_cash_task, minute=set(range(0, 60, 10))),
+        cron(resume_paused_stores_task, minute=set(range(0, 60, 5))),
         cron(evaluate_platinum_riders_task, hour=0, minute=0),
     ]
     logger.warning("ARQ internal cron enabled — cron-job.org schedules must be paused.")

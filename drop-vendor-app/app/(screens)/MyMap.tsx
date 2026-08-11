@@ -1,14 +1,13 @@
 import { UIThemeContext } from "@/context/ThemeContext";
 import * as Location from "expo-location";
-import { useContext, useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useContext, useEffect, useRef, useState, useMemo } from "react";
 import {
     Dimensions,
     Platform,
     StatusBar,
-    Text,
     View,
-    TextInput
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +18,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { useRouter } from "expo-router";
 import { darkMapStyle, standardMapStyle } from "@/constants/mapStyles";
 import useWebSocket from "@/hooks/useWebSocket";
-import { useVendorProfile, useUpdateVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { useStorefront } from "@/hooks/queries/useStorefront";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { useQueryClient } from "@tanstack/react-query";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
@@ -57,7 +57,7 @@ export default function MyMap() {
     const router = useRouter();
 
     const { data: vendorProfile, isLoading: isProfileLoading } = useVendorProfile();
-    const updateProfile = useUpdateVendorProfile();
+    const { data: storefront } = useStorefront();
     const { data: orders = [], isLoading: isOrdersLoading } = useVendorOrders();
 
     const [currentLocation, setCurrentLocation] = useState<any>(null);
@@ -87,34 +87,22 @@ export default function MyMap() {
         ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 }
         : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 };
 
-    const [optimisticRadius, setOptimisticRadius] = useState<number | null>(null);
-    const radiusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const currentDisplayRadius = optimisticRadius !== null ? optimisticRadius : (vendorProfile?.delivery_radius || DEFAULT_RADIUS_KM);
-
-    const handleUpdateRadius = useCallback((increment: number) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        const newRadius = Math.min(15, Math.max(1, currentDisplayRadius + increment));
-        if (newRadius === currentDisplayRadius) return;
-        setOptimisticRadius(newRadius);
-        if (radiusTimeoutRef.current) clearTimeout(radiusTimeoutRef.current);
-        radiusTimeoutRef.current = setTimeout(async () => {
-            try {
-                await updateProfile.mutateAsync({ delivery_radius: newRadius });
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (e) {
-                if (__DEV__) console.error("Radius update error:", e);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                setOptimisticRadius(null);
-            }
-        }, 800);
-    }, [currentDisplayRadius, updateProfile]);
-
-    useEffect(() => {
-        if (vendorProfile?.delivery_radius && !radiusTimeoutRef.current) {
-            setOptimisticRadius(null);
-        }
-    }, [vendorProfile?.delivery_radius]);
+    /**
+     * The catchment this store actually has.
+     *
+     * This screen used to render a stepper writing `Vendor.delivery_radius`,
+     * and nothing on the dispatch path has ever read that column: how far an
+     * order travels is `retail_max_distance_km` / `wholesale_max_distance_km`
+     * on the console. So a vendor dragging it to 15 km changed no delivery —
+     * it only widened the circle on this map, and inflated the delivery
+     * estimate the customer app quoted from the same column, making the store
+     * look slower to everyone browsing it.
+     *
+     * The server now reports the real figure with the rest of the storefront
+     * limits, for the same reason the pause presets and the order-minimum
+     * ceiling arrive that way: a number the server owns, stated once.
+     */
+    const currentDisplayRadius = storefront?.limits?.delivery_radius_km ?? DEFAULT_RADIUS_KM;
 
     useEffect(() => {
         let cancelled = false;
@@ -338,7 +326,6 @@ export default function MyMap() {
         return overlays;
     }, [vendorProfile?.lat, vendorProfile?.lng, vendorProfile?.business_name, vendorProfile?.location_address, radiusMeters, activeOrders, deliveredOrders, riderLocations]);
 
-
     const handleZoom = async (zoomIn: boolean) => {
         if (!mapRef.current || Platform.OS === 'web') return;
         try {
@@ -417,8 +404,8 @@ export default function MyMap() {
                         <View className={`w-28 h-28 rounded-full items-center justify-center mb-6 shadow-sm border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-slate-200"}`}>
                             <Ionicons name="map" size={56} color={BRAND.primary} />
                         </View>
-                        <Text className={`mt-4 text-center px-10 font-bold text-lg ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Map Engine Unavailable</Text>
-                        <Text className={`mt-2 text-center px-12 font-semibold text-sm ${darkTheme ? "text-[#89929b]" : "text-slate-400"}`}>Map requires a native build.</Text>
+                        <Text className={`mt-4 text-center px-10 font-sans-bold text-lg ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Map Engine Unavailable</Text>
+                        <Text className={`mt-2 text-center px-12 font-sans-semibold text-sm ${darkTheme ? "text-[#89929b]" : "text-slate-400"}`}>Map requires a native build.</Text>
                     </View>
                 )}
                 <SafeAreaView edges={["top"]} className="absolute w-full" pointerEvents="box-none">
@@ -441,13 +428,13 @@ export default function MyMap() {
                         <View className="flex-row items-center gap-2 pointer-events-auto">
                             <View className="flex-row gap-2">
                                 <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
+                                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
                                 </PressableScale>
                                 <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
+                                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
                                 </PressableScale>
                             </View>
-                            <PressableScale
+                            <PressableScale accessibilityLabel="Centre the map on your store"
                                 onPress={() => {
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                     mapRef.current?.animateToRegion({ latitude: safeCenter.latitude, longitude: safeCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 800);
@@ -465,7 +452,7 @@ export default function MyMap() {
                 <View className="items-center mb-4">
                     <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-slate-700" : "bg-slate-300"}`} />
                 </View>
-                <Text className={`text-xl font-bold mb-6 ${darkTheme ? "text-white" : "text-slate-900"}`}>Delivery Zone Details</Text>
+                <Text className={`text-xl font-sans-bold mb-6 ${darkTheme ? "text-white" : "text-slate-900"}`}>Delivery Zone Details</Text>
                 {loading ? (
                     <VendorMapBottomSkeleton />
                 ) : (
@@ -473,21 +460,15 @@ export default function MyMap() {
                         <View className={`rounded-[24px] p-5 mb-5 border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
                             <View className="flex-row justify-between items-center">
                                 <View className="flex-1 mr-4">
-                                    <Text className={`text-[10px] font-bold mb-1 tracking-widest uppercase ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Service Radius</Text>
-                                    <Text className={`text-sm font-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Determines your catchment</Text>
+                                    <Text className={`text-[10px] font-sans-bold mb-1 tracking-widest uppercase ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Service Radius</Text>
+                                    <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                                        How far Drop carries your orders. Set by Drop, the same for every store.
+                                    </Text>
                                 </View>
-                                <View className="flex-row items-center bg-transparent">
-                                    <PressableScale onPress={() => handleUpdateRadius(-1)} className="w-12 h-12 rounded-full bg-red-500/10 items-center justify-center border border-red-500/20">
-                                        <Ionicons name="remove" size={24} color="#ef4444" />
-                                    </PressableScale>
-                                    <View className="w-16 items-center">
-                                        <Text className={`text-2xl font-black ${darkTheme ? "text-white" : "text-slate-900"}`}>
-                                            {currentDisplayRadius}<Text className="text-sm font-bold">km</Text>
-                                        </Text>
-                                    </View>
-                                    <PressableScale onPress={() => handleUpdateRadius(1)} className="w-12 h-12 rounded-full bg-green-500/10 items-center justify-center border border-green-500/20">
-                                        <Ionicons name="add" size={24} color={TOAST.success} />
-                                    </PressableScale>
+                                <View className="items-center bg-transparent">
+                                    <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                                        {currentDisplayRadius}<Text className="text-sm font-sans-bold">km</Text>
+                                    </Text>
                                 </View>
                             </View>
                         </View>
@@ -496,15 +477,15 @@ export default function MyMap() {
                                 <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
                                     <Ionicons name="bicycle-outline" size={20} color={BRAND.primary} />
                                 </View>
-                                <Text className={`text-3xl font-black ${darkTheme ? "text-white" : "text-slate-900"}`}>{activeOrders.length}</Text>
-                                <Text className={`text-xs font-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Active Orders</Text>
+                                <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{activeOrders.length}</Text>
+                                <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Active Orders</Text>
                             </View>
                             <View className={`flex-1 rounded-[24px] p-5 border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
                                 <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-green-500/20" : "bg-green-500/10"}`}>
                                     <Ionicons name="checkmark-circle-outline" size={20} color={TOAST.success} />
                                 </View>
-                                <Text className={`text-3xl font-black ${darkTheme ? "text-white" : "text-slate-900"}`}>{deliveredOrders.length}</Text>
-                                <Text className={`text-xs font-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Delivered</Text>
+                                <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{deliveredOrders.length}</Text>
+                                <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Delivered</Text>
                             </View>
                         </View>
                     </>
@@ -521,11 +502,11 @@ export default function MyMap() {
             >
                 <BottomSheetView style={{ flex: 1 }}>
                     <View className="px-6 pt-2 pb-4 flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800">
-                        <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                        <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                             Active Dispatches
                         </Text>
                         <View className={`px-2 py-1 rounded-full ${activeOrders.length > 0 ? "bg-amber-100" : "bg-gray-100"}`}>
-                            <Text className={`text-xs font-semibold ${activeOrders.length > 0 ? "text-amber-700" : "text-gray-500"}`}>
+                            <Text className={`text-xs font-sans-semibold ${activeOrders.length > 0 ? "text-amber-700" : "text-gray-500"}`}>
                                 {activeOrders.length} Riders
                             </Text>
                         </View>
@@ -572,7 +553,7 @@ export default function MyMap() {
                                                 )}
                                             </View>
                                             <View className="flex-1 ml-4">
-                                                <Text className={`font-semibold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+                                                <Text className={`font-sans-semibold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
                                                     {order.deliverer?.name || 'Waiting for Rider'}
                                                 </Text>
                                                 <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -581,7 +562,7 @@ export default function MyMap() {
                                             </View>
                                             <View className="items-end">
                                                 <View className={`px-2 py-1 rounded-md bg-[${STATUS_COLORS[order.order_status] || '#ccc'}20]`}>
-                                                    <Text style={{ color: STATUS_COLORS[order.order_status] || '#ccc', fontSize: 12, fontWeight: '600' }}>
+                                                    <Text style={{ color: STATUS_COLORS[order.order_status] || '#ccc', fontSize: 12, fontFamily: 'Karla_600SemiBold' }}>
                                                         {order.order_status.toUpperCase()}
                                                     </Text>
                                                 </View>

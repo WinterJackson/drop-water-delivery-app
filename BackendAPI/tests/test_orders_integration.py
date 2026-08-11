@@ -144,12 +144,14 @@ class TestOrdersIntegration:
             staircase_surcharge=Decimal("0.00"),
             bottle_deposit=Decimal("0.00"),
             debt_settlement=Decimal("0.00"),
-            welcome_discount=Decimal("0.00"), wallet_discount=Decimal("0.00"),
+            welcome_discount=Decimal("0.00"),
+            mpesa_discount=Decimal('0.00'), wallet_discount=Decimal("0.00"),
             total=Decimal("590"), surge_active=True, is_welcome_offer=False,
             revenue={
                 "vendor_commission": 25.0, "service_fee": 12.0, "rider_commission": 6.8,
                 "platform_total": 53.8, "vendor_net": 475.0, "rider_net": 61.2,
                 "surge_fee": 10.0, "delivery_markup": 0.0,
+                "platform_cost": 15.0, "platform_net": 45.0,
             },
         )
 
@@ -190,5 +192,6 @@ class TestOrdersIntegration:
         # 2. The order was created from that identical quote — not re-priced.
         assert mock_create_order.await_args.kwargs["quote"] is quote
 
-        # 3. And the amount reported back to the client agrees too.
-        assert body["amount"] == 590.0
+        # 3. And the amount reported back to the client agrees too — as a
+        #    decimal *string*, like every money field this API returns.
+        assert body["amount"] == "590.00"

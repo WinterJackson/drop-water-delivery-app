@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
-import { View, Text, Modal, TouchableOpacity, FlatList, Platform } from "react-native";
+import { View, Modal, TouchableOpacity, FlatList, Platform } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import PressableScale from "@/components/ui/PressableScale";
@@ -54,7 +55,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
                 <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${darkTheme ? "bg-white/10" : "bg-gray-100"}`}>
                     <Ionicons name={item.icon as any} size={20} color={BRAND.primary} />
                 </View>
-                <Text className={`text-lg font-semibold flex-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                <Text className={`text-lg font-sans-semibold flex-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>
                     {item.label}
                 </Text>
                 {isSelected && (
@@ -67,7 +68,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
     return (
         <View className={containerStyle ? "" : "mb-4 w-[90%] max-w-[350px]"} style={containerStyle}>
             {label && (
-                <Text className={`font-semibold mb-2 ml-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                <Text className={`font-sans-semibold mb-2 ml-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                     {label}
                 </Text>
             )}
@@ -81,7 +82,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
                 {selectedOption ? (
                     <>
                         <Ionicons name={selectedOption.icon as any} size={20} color={BRAND.primary} style={{ marginRight: 10 }} />
-                        <Text className={`flex-1 font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                        <Text className={`flex-1 font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                             {selectedOption.label}
                         </Text>
                     </>
@@ -111,7 +112,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
                         <View className="items-center mb-4">
                             <View className={`w-12 h-1.5 rounded-full mt-2 ${darkTheme ? "bg-gray-800" : "bg-gray-300"}`} />
                         </View>
-                        <Text className={`text-xl font-bold px-5 mb-4 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                        <Text className={`text-xl font-sans-bold px-5 mb-4 ${darkTheme ? "text-white" : "text-gray-900"}`}>
                             Select Vehicle Type
                         </Text>
                         <FlatList

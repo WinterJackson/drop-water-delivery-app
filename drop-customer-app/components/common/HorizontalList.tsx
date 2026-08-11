@@ -1,4 +1,3 @@
-import ApiRoutes from "@/API/routes/ApiRoutes";
 import { useApiClient } from "@/API/useApiClient";
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -10,11 +9,11 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useContext, useState } from "react";
 import {
-	useWindowDimensions,
-	View,
-	Text,
-	FlatList
+    useWindowDimensions,
+    View,
+    FlatList,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
 import { estimateDeliveryTime } from "@/utils/distance";
 import { Skeleton, SkeletonText, SkeletonAvatar } from "../ui/Skeleton";
@@ -23,6 +22,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Popup } from "@/lib/popup";
 import { Toast } from "@/lib/toast";
 import { errorMessage } from "@/API/errors";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 
 type Props = {
 	title: string;
@@ -132,14 +132,13 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 		return null;
 	}
 
-
 	return (
 		<View className={`  ${darkTheme ? "" : ""} shadow-2x`}>
 			<View className="px-5 py-3 justify-between flex-row items-center">
-				<Text className={` text-xl font-semibold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+				<Text className={` text-xl font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
 				{onSeeAll && (
 					<PressableScale onPress={onSeeAll} hitSlop={8}>
-						<Text className="text-sm font-semibold" style={{ color: BRAND.primary }}>See all</Text>
+						<Text className="text-sm font-sans-semibold" style={{ color: BRAND.primary }}>See all</Text>
 					</PressableScale>
 				)}
 			</View>
@@ -172,7 +171,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									<View
 										className={`absolute w-[65px]  bg-red-500 z-20 top-0 right-0 items-center justify-center rotate-45 translate-x-5 translate-y-2`}
 									>
-										<Text className={`text-white font-semibold`}>
+										<Text className={`text-white font-sans-semibold`}>
 											{item.price ? `${Math.ceil((item.discount / item.price) * 100)}%` : "Sale"}
 										</Text>
 									</View>
@@ -202,14 +201,14 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
 										<Text
-											className={`font-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
+											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
 										>
 											{item.name}
 										</Text>
 									) : (
 										<Text
-											className={`font-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
+											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
 										>
 											{item.business_name}
@@ -220,7 +219,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									{type === "product" ? (
 										// <---------------------<PRODUCT PRICE>--------------------->
 										<View className={`flex-row gap-2 items-center mt-0.5`}>
-											<Text className={`font-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+											<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 												KSH {Math.round((item.price - item.discount) * 100) / 100}
 											</Text>
 											{item.discount > 0 && (
@@ -236,15 +235,26 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 										</View>
 									) : (
 										// <------------------------<RATING>------------------------->
+										// A shut shop shows why it is shut instead of a delivery
+										// estimate it cannot meet. The store page renders the same
+										// component from the same server field — a card that says
+										// open over a page that says paused is the version of this
+										// bug people screenshot.
+										item.is_accepting_orders === false ? (
+											<View className="mt-1">
+												<StoreClosedNotice store={item} compact />
+											</View>
+										) : (
 										<View className="flex-row gap-3 justify-between items-center mt-1">
 											<View className="flex-row gap-1 items-center">
 												<Ionicons name="bicycle" size={14} color={BRAND.primary} />
 												<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
 											</View>
-											<Text className={`text-xs font-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+											<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
 												⭐ {Number(item.rating).toFixed(1)}
 											</Text>
 										</View>
+										)
 									)}
 
 									{/* <--------------------<ADD TO CART BUTTON>--------------------> */}

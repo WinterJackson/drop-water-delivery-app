@@ -19,7 +19,6 @@ other — `_apply_movement` is the only place either is touched.
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -29,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.bottle_ledger_model import BottleLedgerEntry, BottleLedgerEntryType
 from models.vendor_rider_model import VendorRiderRegistry
+from typing import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -282,8 +282,18 @@ async def get_rider_outstanding(session: AsyncSession, rider_id: UUID) -> list[d
     """
     Every vendor this rider owes bottles to. Powers the rider app's debt screen —
     until now a rider had no way to see what they were holding.
+
+    Carries `held_days` and `is_stale` as well as the counts. The platform judges
+    a rider on **age**: `admin_bottle_service.STALE_AFTER_DAYS` flags a pair at 14
+    days and `stale_asset_monitor` sweeps nightly. The rider was shown the
+    quantity and never the clock, so the first they knew of the threshold was
+    being flagged against it. Same `min(created_at)` per group and same
+    `STALE_AFTER_DAYS` the console reads, so the two cannot disagree.
     """
+    from datetime import datetime, timezone
+
     from models.vendor_model import Vendor
+    from services.admin_bottle_service import STALE_AFTER_DAYS
 
     result = await session.execute(
         select(
@@ -291,14 +301,17 @@ async def get_rider_outstanding(session: AsyncSession, rider_id: UUID) -> list[d
             Vendor.business_name,
             BottleLedgerEntry.capacity_litres,
             func.coalesce(func.sum(BottleLedgerEntry.quantity), 0).label("outstanding"),
+            func.min(BottleLedgerEntry.created_at).label("since"),
         )
         .join(Vendor, Vendor.id == BottleLedgerEntry.vendor_id)
         .where(BottleLedgerEntry.rider_id == rider_id)
         .group_by(BottleLedgerEntry.vendor_id, Vendor.business_name, BottleLedgerEntry.capacity_litres)
     )
 
+    now = datetime.now(timezone.utc)
+
     by_vendor: dict[UUID, dict] = {}
-    for vendor_id, business_name, capacity, outstanding in result.all():
+    for vendor_id, business_name, capacity, outstanding, since in result.all():
         if int(outstanding) <= 0:
             continue
         entry = by_vendor.setdefault(
@@ -310,6 +323,8 @@ async def get_rider_outstanding(session: AsyncSession, rider_id: UUID) -> list[d
                 "pending_20L_empties": 0,
                 "other_capacities": {},
                 "total_bottles": 0,
+                "held_days": None,
+                "is_stale": False,
             },
         )
         capacity = int(capacity)
@@ -320,7 +335,23 @@ async def get_rider_outstanding(session: AsyncSession, rider_id: UUID) -> list[d
             entry["other_capacities"][f"{capacity}L"] = outstanding
         entry["total_bottles"] += outstanding
 
-    return sorted(by_vendor.values(), key=lambda v: v["total_bottles"], reverse=True)
+        if since is not None:
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            age = max(0, (now - since).days)
+            # The oldest capacity in this pair sets the vendor's age — that is
+            # the one the console's staleness check will trip on first.
+            if entry["held_days"] is None or age > entry["held_days"]:
+                entry["held_days"] = age
+            entry["is_stale"] = (entry["held_days"] or 0) >= STALE_AFTER_DAYS
+
+    # Oldest first. A debt sorted by size buries the one about to be escalated
+    # under the one that happens to be largest.
+    return sorted(
+        by_vendor.values(),
+        key=lambda v: (v["held_days"] if v["held_days"] is not None else -1, v["total_bottles"]),
+        reverse=True,
+    )
 
 
 async def get_vendor_outstanding(session: AsyncSession, vendor_id: UUID) -> list[dict]:

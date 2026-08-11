@@ -1,7 +1,8 @@
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { errorMessage } from "@/API/errors";
@@ -218,7 +219,7 @@ export default function StoreProfile() {
 
     const InfoRow = ({ label, value, stateVal, setStateVal, placeholder, editable = true, keyboardType = "default" }: any) => (
         <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
-            <Text className={`w-1/3 mt-3 text-sm font-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>{label}</Text>
+            <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>{label}</Text>
             {isEditing && editable ? (
                 <TextInput
                     value={stateVal}
@@ -229,7 +230,7 @@ export default function StoreProfile() {
                     className={`w-[60%] p-3 rounded-xl border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"}`}
                 />
             ) : (
-                <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"} ${!editable && isEditing ? "opacity-50" : ""}`}>{value || "—"}</Text>
+                <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"} ${!editable && isEditing ? "opacity-50" : ""}`}>{value || "—"}</Text>
             )}
         </View>
     );
@@ -241,7 +242,7 @@ export default function StoreProfile() {
                     <Ionicons name={icon} size={26} color={color || BRAND.primary} />
                 </View>
                 <View className="flex-1">
-                    <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
+                    <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
                     <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{desc}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -266,7 +267,7 @@ export default function StoreProfile() {
                         <PressableScale onPress={() => router.back()} className="mr-4">
                             <BackButtonMinimal />
                         </PressableScale>
-                        <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Store Profile
                         </Text>
                     </View>
@@ -300,10 +301,10 @@ export default function StoreProfile() {
                     ) : (
                         <>
                             <View className="flex-row justify-between items-center mb-4 px-1">
-                                <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Business Information</Text>
+                                <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Business Information</Text>
                                 {!isStaff && (
                                     <PressableScale onPress={() => setIsEditing(!isEditing)} className="px-3 py-1 bg-accentbg/10 rounded-full">
-                                        <Text className="text-accentbg font-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
+                                        <Text className="text-accentbg font-sans-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
                                     </PressableScale>
                                 )}
                             </View>
@@ -321,13 +322,13 @@ export default function StoreProfile() {
                                         
                                         {/* Vendor Type Selection */}
                                         <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
-                                            <Text className={`w-1/3 mt-2 text-sm font-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Vendor Type</Text>
+                                            <Text className={`w-1/3 mt-2 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Vendor Type</Text>
                                             <View className="w-[60%] flex-row gap-2">
                                                 <PressableScale onPress={() => setVendorType("retail_refill")} className={`flex-1 py-2 px-1 items-center justify-center rounded-lg border ${vendorType === "retail_refill" ? (darkTheme ? "bg-accentbg/20 border-accentbg" : "bg-accentbg/10 border-accentbg") : (darkTheme ? "border-gray-700" : "border-gray-300")}`}>
-                                                    <Text className={`text-xs font-semibold text-center ${vendorType === "retail_refill" ? (darkTheme ? "text-accenttxt" : "text-accentbg") : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>Retail</Text>
+                                                    <Text className={`text-xs font-sans-semibold text-center ${vendorType === "retail_refill" ? (darkTheme ? "text-accenttxt" : "text-accentbg") : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>Retail</Text>
                                                 </PressableScale>
                                                 <PressableScale onPress={() => setVendorType("wholesale_b2b")} className={`flex-1 py-2 px-1 items-center justify-center rounded-lg border ${vendorType === "wholesale_b2b" ? (darkTheme ? "bg-accentbg/20 border-accentbg" : "bg-accentbg/10 border-accentbg") : (darkTheme ? "border-gray-700" : "border-gray-300")}`}>
-                                                    <Text className={`text-xs font-semibold text-center ${vendorType === "wholesale_b2b" ? (darkTheme ? "text-accenttxt" : "text-accentbg") : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>Wholesale</Text>
+                                                    <Text className={`text-xs font-sans-semibold text-center ${vendorType === "wholesale_b2b" ? (darkTheme ? "text-accenttxt" : "text-accentbg") : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>Wholesale</Text>
                                                 </PressableScale>
                                             </View>
                                         </View>
@@ -339,8 +340,8 @@ export default function StoreProfile() {
                                         <InfoRow label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? `Ksh ${vendorProfile?.deposit_fee}` : "N/A"} editable={false} />
                                         <InfoRow label="Operating Hours" value={vendorProfile?.shift_start && vendorProfile?.shift_end ? `${vendorProfile.shift_start.slice(0, 5)} - ${vendorProfile.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
                                         <View className="flex-row justify-between pt-3">
-                                            <Text className={`w-1/3 mt-3 text-sm font-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Location</Text>
-                                            <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"}`}>{vendorProfile?.location_address || "Not Set"}</Text>
+                                            <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Location</Text>
+                                            <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"}`}>{vendorProfile?.location_address || "Not Set"}</Text>
                                         </View>
                                     </>
                                 )}
@@ -349,7 +350,7 @@ export default function StoreProfile() {
                             {/* Location Update Section - ONLY IF EDITING */}
                             {isEditing && (
                                 <View className={`rounded-2xl p-4 mb-8 ${darkTheme ? "bg-white/5 border border-white/5" : "bg-white border border-gray-100"} shadow-sm`}>
-                                    <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                    <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                         Store Location Update
                                     </Text>
                                     <Text className={`text-xs mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -366,7 +367,7 @@ export default function StoreProfile() {
                                         ) : (
                                             <View className="flex-row items-center gap-2">
                                                 <Ionicons name="location" size={18} color={BRAND.primary} />
-                                                <Text className={`font-bold text-base ${darkTheme ? "text-accentbg" : "text-blue-600"}`}>Update via GPS</Text>
+                                                <Text className={`font-sans-bold text-base ${darkTheme ? "text-accentbg" : "text-blue-600"}`}>Update via GPS</Text>
                                             </View>
                                         )}
                                     </PressableScale>
@@ -395,7 +396,7 @@ export default function StoreProfile() {
                                             >
                                                 <View className="flex-row items-center gap-2">
                                                     <Ionicons name="pencil" size={14} color={BRAND.primary} />
-                                                    <Text className={`font-semibold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>Use This Address</Text>
+                                                    <Text className={`font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>Use This Address</Text>
                                                 </View>
                                             </PressableScale>
                                         </View>
@@ -405,7 +406,7 @@ export default function StoreProfile() {
                                         <View className={`p-4 mt-2 rounded-xl border ${darkTheme ? "bg-black border-green-900" : "bg-green-50 border-green-200"}`}>
                                             <View className="flex-row items-center gap-2">
                                                 <Ionicons name="checkmark-circle" size={20} color={BRAND.primary} />
-                                                <Text className={`text-base font-bold ${darkTheme ? "text-green-400" : "text-green-700"}`}>New Location Ready</Text>
+                                                <Text className={`text-base font-sans-bold ${darkTheme ? "text-green-400" : "text-green-700"}`}>New Location Ready</Text>
                                             </View>
                                             <Text className={`mt-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{locationData.address}</Text>
                                         </View>
@@ -419,7 +420,7 @@ export default function StoreProfile() {
                                         {isSaving ? (
                                             <ActivityIndicator color={BRAND.white} />
                                         ) : (
-                                            <Text className="text-white text-lg font-bold">Save Changes</Text>
+                                            <Text className="text-white text-lg font-sans-bold">Save Changes</Text>
                                         )}
                                     </View>
                                 </PressableScale>
@@ -428,7 +429,7 @@ export default function StoreProfile() {
                             {/* Vendor Operations Network Block */}
                             {!isEditing && (
                                 <View className="mt-2 mb-4">
-                                    <Text className={`mb-4 ml-1 font-bold text-lg ${darkTheme ? "text-white" : "text-gray-800"}`}>Operations & Team</Text>
+                                    <Text className={`mb-4 ml-1 font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-800"}`}>Operations & Team</Text>
                                     
                                     {!isStaff && (
                                         <>

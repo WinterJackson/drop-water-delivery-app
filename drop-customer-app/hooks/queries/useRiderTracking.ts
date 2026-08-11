@@ -1,4 +1,4 @@
-import { ROUTES } from '@/API/routes/ApiRoutes';
+import { ROUTES, WS_BASE_URL } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
 import { useAuth } from '@clerk/clerk-expo';
 import NetInfo from '@react-native-community/netinfo';
@@ -13,11 +13,6 @@ export interface RiderLocation {
     lng: number | null;
     is_available: boolean;
 }
-
-const WS_BASE_URL = (
-    process.env.EXPO_PUBLIC_WS_BASE_URL ||
-    (process.env.EXPO_PUBLIC_BACKEND_BASE_URL || '').replace(/^http/, 'ws')
-);
 
 /**
  * Live rider tracking: WebSocket first, REST polling as a fallback.
@@ -46,6 +41,24 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
     const isMountedRef = useRef(true);
     const appStateRef = useRef(AppState.currentState);
     const MAX_WS_FAILURES = 3;
+    /**
+     * Silence past this means the socket is half-open: `readyState` still says
+     * OPEN, `onclose` never fires, and the marker has quietly stopped moving
+     * while the screen still says "Live". The server sends a heartbeat after
+     * 30s of client silence and acks every `auth_refresh`, so a healthy socket
+     * is never quiet this long.
+     */
+    const LIVENESS_TIMEOUT_MS = 75_000;
+    const LIVENESS_CHECK_MS = 15_000;
+    /**
+     * Polling is the floor, not the ceiling. Once the REST fallback is running
+     * the socket is still retried on a slow interval — otherwise a single bad
+     * stretch of network downgraded the map to 8-second polling for the rest of
+     * the delivery, with no way back.
+     */
+    const IDLE_RETRY_MS = 60_000;
+    const lastMessageAtRef = useRef(Date.now());
+    const livenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     // Clerk session tokens live about a minute and the server enforces `exp` on
     // open sockets. Without an in-band refresh the tracking map would tear down
     // and rebuild its connection every minute, flicking "Live" off each time.
@@ -83,6 +96,13 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
         }
     }, []);
 
+    const stopLivenessWatch = useCallback(() => {
+        if (livenessTimerRef.current) {
+            clearInterval(livenessTimerRef.current);
+            livenessTimerRef.current = null;
+        }
+    }, []);
+
     const stopPolling = useCallback(() => {
         if (pollTimerRef.current) {
             clearInterval(pollTimerRef.current);
@@ -98,6 +118,7 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
 
     const closeSocket = useCallback(() => {
         stopAuthRefresh();
+        stopLivenessWatch();
         const ws = wsRef.current;
         wsRef.current = null;
         if (ws) {
@@ -142,9 +163,21 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
                         // reconnect path reopens it with a new token.
                     }
                 }, AUTH_REFRESH_INTERVAL_MS);
+
+                lastMessageAtRef.current = Date.now();
+                stopLivenessWatch();
+                livenessTimerRef.current = setInterval(() => {
+                    if (ws.readyState !== WebSocket.OPEN) return;
+                    if (Date.now() - lastMessageAtRef.current < LIVENESS_TIMEOUT_MS) return;
+                    // Handlers stay attached: this is a failure, so `onclose`
+                    // should run and drive the reconnect.
+                    try { ws.close(); } catch { /* already gone */ }
+                }, LIVENESS_CHECK_MS);
             };
 
             ws.onmessage = (event) => {
+                // Any frame proves the socket is alive — heartbeats included.
+                lastMessageAtRef.current = Date.now();
                 try {
                     const payload = JSON.parse(event.data);
                     if (payload?.action === 'heartbeat') return;
@@ -171,6 +204,7 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
             ws.onclose = () => {
                 if (__DEV__) console.log('[WS Tracker] Disconnected');
                 stopAuthRefresh();
+                stopLivenessWatch();
                 wsRef.current = null;
                 if (isMountedRef.current) setIsLive(false);
                 wsFailCountRef.current++;
@@ -181,6 +215,9 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
                 if (wsFailCountRef.current >= MAX_WS_FAILURES) {
                     if (__DEV__) console.log('[WS Tracker] Falling back to REST polling');
                     startPolling();
+                    // Polling is a floor, not a destination — keep trying for the
+                    // socket so the map can return to live positions.
+                    reconnectTimerRef.current = setTimeout(connectWs, IDLE_RETRY_MS);
                 } else {
                     const delay = Math.min(1000 * Math.pow(2, wsFailCountRef.current), 10000);
                     reconnectTimerRef.current = setTimeout(connectWs, delay);
@@ -196,7 +233,7 @@ export function useRiderTracking(orderId: string | null, enabled = true, polling
             if (__DEV__) console.warn('[WS Tracker] Connection setup failed:', e);
             startPolling();
         }
-    }, [orderId, enabled, stopPolling, startPolling, stopAuthRefresh]);
+    }, [orderId, enabled, stopPolling, startPolling, stopAuthRefresh, stopLivenessWatch]);
 
     // ── Lifecycle ──────────────────────────────────────────────────────────
     useEffect(() => {

@@ -1,6 +1,7 @@
 import { errorMessage } from "@/API/errors";
 import React, { useContext } from 'react';
-import { View, Text, ScrollView, StatusBar } from 'react-native';
+import { View, ScrollView, StatusBar } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +18,8 @@ import { Toast } from '@/lib/toast';
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { RepeatOrderSkeleton } from "@/components/skeletons/ContextualSkeletons";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { formatMoney, sumMoney } from "@/utils/money";
 
 export default function RepeatOrderScreen() {
   const { vendorId } = useLocalSearchParams<{ vendorId: string }>();
@@ -89,7 +92,7 @@ export default function RepeatOrderScreen() {
             <PressableScale onPress={() => router.back()} activeOpacity={0.7}>
               <BackButtonMinimal />
             </PressableScale>
-            <Text className={`font-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+            <Text className={`font-sans-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
               Repeat Order
             </Text>
           </View>
@@ -100,7 +103,7 @@ export default function RepeatOrderScreen() {
         ) : !lastOrder ? (
           <View className="flex-1 items-center justify-center px-8">
             <Ionicons name="receipt-outline" size={64} color={BRAND.primary} />
-            <Text className={`font-bold text-lg mt-4 text-center ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+            <Text className={`font-sans-bold text-lg mt-4 text-center ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
               No Previous Orders
             </Text>
             <Text className={`text-sm text-center mt-2 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
@@ -126,32 +129,39 @@ export default function RepeatOrderScreen() {
                 <View className={`w-12 h-12 rounded-full items-center justify-center ${darkTheme ? "bg-primary-container/20" : "bg-blue-50"}`}>
                   <Ionicons name="storefront-outline" size={24} color={BRAND.primary} />
                 </View>
-                <View>
-                  <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                <View className="flex-1">
+                  <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
                     {lastOrder.vendor?.business_name || "Vendor"}
                   </Text>
                   <Text className={`text-sm ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
                     Last Order: {formatDate(lastOrder.created_at)}
                   </Text>
+                  {/* This screen exists to put a whole basket together in one
+                      tap. Doing that against a shop that is shut is the most
+                      wasted version of the trip — every item added, then
+                      refused at the last step. */}
+                  <View className="mt-1">
+                    <StoreClosedNotice store={lastOrder.vendor} compact />
+                  </View>
                 </View>
               </GlassCard>
 
               {/* Order Items */}
               <View>
-                <Text className={`font-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Order Details</Text>
+                <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Order Details</Text>
                 <GlassCard darkTheme={darkTheme} className="p-4 gap-4">
                   {lastOrder.items.map((item: any, index: number) => (
                     <View key={item.id} className={`flex-row justify-between items-center ${index !== lastOrder.items.length - 1 ? "border-b pb-4" : ""} ${darkTheme ? "border-outline-variant/20" : "border-gray-100"}`}>
                       <View className="flex-row items-center gap-3 flex-1">
                         <View className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-surface-container-high" : "bg-white"}`}>
-                          <Text className={`font-bold ${darkTheme ? "text-primary" : "text-blue-600"}`}>{item.quantity}x</Text>
+                          <Text className={`font-sans-bold ${darkTheme ? "text-primary" : "text-blue-600"}`}>{item.quantity}x</Text>
                         </View>
-                        <Text className={`font-medium flex-1 ${darkTheme ? "text-on-surface" : "text-gray-800"}`} numberOfLines={1}>
+                        <Text className={`font-sans-medium flex-1 ${darkTheme ? "text-on-surface" : "text-gray-800"}`} numberOfLines={1}>
                           {item.product?.name || "Item"}
                         </Text>
                       </View>
-                      <Text className={`font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
-                        KSH {Number(item.subtotal_at_order || 0).toFixed(2)}
+                      <Text className={`font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                        {formatMoney(item.subtotal_at_order)}
                       </Text>
                     </View>
                   ))}
@@ -160,24 +170,24 @@ export default function RepeatOrderScreen() {
 
               {/* Summary */}
               <View>
-                <Text className={`font-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Summary</Text>
+                <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Summary</Text>
                 <GlassCard darkTheme={darkTheme} className="p-4 gap-2">
                   <View className="flex-row justify-between">
                     <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Subtotal</Text>
                     <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
-                      KSH {lastOrder.items.reduce((sum: number, i: any) => sum + Number(i.subtotal_at_order || 0), 0).toFixed(2)}
+                      {formatMoney(sumMoney(lastOrder.items.map((i: any) => i.subtotal_at_order)))}
                     </Text>
                   </View>
                   <View className="flex-row justify-between">
                     <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Delivery Fee</Text>
                     <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
-                      KSH {Number(lastOrder.delivery_fee || 0).toFixed(2)}
+                      {formatMoney(lastOrder.delivery_fee)}
                     </Text>
                   </View>
                   <View className={`flex-row justify-between pt-2 mt-2 border-t ${darkTheme ? "border-outline-variant/20" : "border-gray-100"}`}>
-                    <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Total</Text>
-                    <Text className={`font-bold text-lg text-primary`}>
-                      KSH {Number(lastOrder.total_amount || 0).toFixed(2)}
+                    <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Total</Text>
+                    <Text className={`font-sans-bold text-lg text-primary`}>
+                      {formatMoney(lastOrder.total_amount)}
                     </Text>
                   </View>
                 </GlassCard>
@@ -187,7 +197,7 @@ export default function RepeatOrderScreen() {
             {/* Bottom Actions */}
             <View className={`px-5 py-4 border-t ${darkTheme ? "bg-surface border-outline-variant/10" : "bg-white border-gray-100"}`}>
               <DropButton
-                title={isOrdering ? "Adding to Cart..." : `Repeat Order • KSH ${Number(lastOrder.total_amount || 0).toFixed(2)}`}
+                title={isOrdering ? "Adding to Cart..." : `Repeat Order • ${formatMoney(lastOrder.total_amount)}`}
                 onPress={handleRepeatOrder}
                 disabled={isOrdering}
               />

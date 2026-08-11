@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import Optional
 
 from utils.s3_utils import generate_presigned_url
+from utils.money import MoneyField
 
 
 def _presign(v: str | None) -> str | None:
@@ -27,8 +28,8 @@ class BaseProduct(BaseModel):
   capacity: float
   weight_kg: float = 20.0
   minimum_order_qty: int = 1
-  price: float 
-  discount: float 
+  price: MoneyField
+  discount: MoneyField
   stock: int
 
   @computed_field
@@ -64,7 +65,6 @@ class VendorSnippet(BaseModel):
   location_address: str | None = None
   lat: float | None = None
   lng: float | None = None
-  delivery_radius: float | None = None
   rating: float | None = None
   profile_pic: str | None = None
 

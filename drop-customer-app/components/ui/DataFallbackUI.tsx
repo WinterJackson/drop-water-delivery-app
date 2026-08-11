@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Ionicons } from "@expo/vector-icons";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -26,7 +27,7 @@ export const DataFallbackUI: React.FC<DataFallbackUIProps> = ({
     return (
         <View className={`flex-1 items-center justify-center px-6 ${darkTheme ? "bg-black" : "bg-white"}`}>
             <Ionicons name="warning" size={48} color={BRAND.primary} />
-            <Text className={`text-lg font-bold text-center mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
+            <Text className={`text-lg font-sans-bold text-center mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
                 {title}
             </Text>
             <Text className={`text-sm text-center mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -35,13 +36,13 @@ export const DataFallbackUI: React.FC<DataFallbackUIProps> = ({
             
             {onRetry && (
                 <PressableScale onPress={onRetry} className="mt-6 bg-accentbg px-6 py-3 rounded-xl min-w-[120px] items-center">
-                    <Text className="text-white font-bold">Retry</Text>
+                    <Text className="text-white font-sans-bold">Retry</Text>
                 </PressableScale>
             )}
             
             {showHomeButton && (
                 <PressableScale onPress={() => router.replace("/")} className="mt-4 p-2">
-                    <Text className="text-accentbg font-bold">Go Home</Text>
+                    <Text className="text-accentbg font-sans-bold">Go Home</Text>
                 </PressableScale>
             )}
         </View>

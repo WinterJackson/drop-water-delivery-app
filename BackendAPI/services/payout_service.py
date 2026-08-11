@@ -5,9 +5,10 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from fastapi import HTTPException
 from models.payout_model import Payout
-from services.vendor_management_service import get_vendor_by_clerk_id, get_vendor_dashboard
+from services.vendor_management_service import get_vendor_dashboard
 from services.deliverer_service import get_deliverer_by_clerk_id, get_deliverer_earnings
 from schemas.payout_schemas import PayoutCreate
+from utils.money import money_str
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,9 @@ async def get_payout_limits(session: AsyncSession, clerk_id: str, provider_id, p
     minimum, fee, _waiver = await withdrawal_terms(
         session, provider_type=provider_type, vendor_type=vendor_type
     )
-    return float(minimum), float(fee)
+    # `Decimal`, not `float`: these are the figures the withdrawal is judged by
+    # and the ones the app is told, and the fee may legitimately be 15.50.
+    return minimum, fee
 
 
 async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreate):
@@ -183,26 +186,40 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
             return existing_payout
 
     # ── Limits and fee, from the one schedule ──
-    from services.settlement_service import fee_for, withdrawal_terms
+    from services.settlement_service import banded_fee_for, withdrawal_terms
 
     vendor_type = await _vendor_type_of(session, provider_id, provider_type)
     minimum, fee, waiver = await withdrawal_terms(
         session, provider_type=provider_type, vendor_type=vendor_type
     )
+    # Decimal end to end. These were cast to `float` here, which is the same
+    # defect `payment_service.whole_shillings` exists to prevent one step later:
+    # the withdrawal fee is a settings row an administrator may set to 15.50,
+    # and a fee that has been through a binary float is not the fee that was
+    # configured. `data.amount` is a `Decimal` off the schema.
     requested = Decimal(str(data.amount))
-    min_threshold = float(minimum)
-    tx_fee = float(fee_for(requested, fee, waiver))
+    min_threshold = Decimal(str(minimum))
+    tx_fee = banded_fee_for(requested, fee, waiver)
 
-    if data.amount < min_threshold:
+    if requested < min_threshold:
         raise HTTPException(status_code=400, detail=f"Minimum withdrawal is KSH {min_threshold}")
 
-    if data.amount <= tx_fee:
+    if requested <= tx_fee:
         raise HTTPException(status_code=400, detail=f"Amount must be greater than the transaction fee (KSH {tx_fee})")
 
-    # BUG-FIN-01 FIX: Serialize payout creation per-provider using PostgreSQL advisory lock
+    # BUG-FIN-01 FIX: Serialize payout creation per-provider using PostgreSQL advisory lock.
+    #
+    # The key must be derived deterministically. `hash()` on a str is salted per
+    # interpreter (PYTHONHASHSEED), so two API replicas computed two different
+    # keys for the same provider and the "lock" serialised nothing between them —
+    # the exact case it was added for. CRC32 of the UUID is stable across
+    # processes, machines and restarts.
+    from zlib import crc32
+
     from sqlalchemy import text
-    lock_key = abs(hash(str(provider_id))) % (2**31)  # Convert UUID to int32 for pg_advisory_xact_lock
-    await session.execute(text(f"SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+
+    lock_key = crc32(str(provider_id).encode()) % (2**31)
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
 
     # Lock the balance row before reading it, so a concurrent payout or a cash
     # order settling cannot move it between the check and the debit.
@@ -210,7 +227,8 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
 
     from services.settlement_service import assert_withdrawable
 
-    available_balance = await assert_withdrawable(
+    # Raises on a refusal — the return value is not needed here, only the check.
+    await assert_withdrawable(
         session,
         provider_id=provider_id,
         provider_type=provider_type,
@@ -250,7 +268,7 @@ async def request_payout(session: AsyncSession, clerk_id: str, data: PayoutCreat
     await session.refresh(payout)
 
     # Calculate actual disbursement (Withdrawal - Tx Fee)
-    disbursement_amount = data.amount - tx_fee
+    disbursement_amount = requested - tx_fee
 
     # If payment method is M-Pesa, initiate B2C disbursement immediately
     if data.payment_method.lower() == "mpesa":
@@ -329,16 +347,18 @@ async def get_provider_payouts(session: AsyncSession, clerk_id: str):
         Payout.provider_id == provider_id, Payout.status.in_(["pending", "processing"])
     )
 
-    completed = float((await session.execute(completed_q)).scalar() or 0)
-    pending = float((await session.execute(pending_q)).scalar() or 0)
+    completed = Decimal(str((await session.execute(completed_q)).scalar() or 0))
+    pending = Decimal(str((await session.execute(pending_q)).scalar() or 0))
 
+    # `ProviderBalanceResponse` renders these as decimal strings; the two
+    # threshold figures are the same rows the withdrawal is judged by.
     balance_summary = {
-        "lifetime_earnings": float(total_earnings),
-        "pending_payouts": pending,
-        "completed_payouts": completed,
-        "available_balance": available_balance,
-        "minimum_threshold": min_threshold,
-        "transaction_fee": tx_fee
+        "lifetime_earnings": money_str(total_earnings),
+        "pending_payouts": money_str(pending),
+        "completed_payouts": money_str(completed),
+        "available_balance": money_str(available_balance),
+        "minimum_threshold": money_str(min_threshold),
+        "transaction_fee": money_str(tx_fee),
     }
 
     return {"balance": balance_summary, "history": payouts}

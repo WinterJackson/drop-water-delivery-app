@@ -4,7 +4,8 @@ import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useContext, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StatusBar, Text, View, ActivityIndicator, TextInput } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StatusBar, View, ActivityIndicator } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -106,7 +107,7 @@ const RateOrder = () => {
                 <PressableScale onPress={() => router.back()} activeOpacity={0.7}>
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`font-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`font-sans-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
                     Rate Your Delivery
                 </Text>
             </View>
@@ -115,7 +116,7 @@ const RateOrder = () => {
             <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingVertical: 20, paddingBottom: 120}}>
                 {vendorId && (
                     <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Vendor Rating</Text>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Vendor Rating</Text>
                         <Text className={`mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>How was the product quality and packaging?</Text>
                         <RatingStars rating={vendorRating} setRating={setVendorRating} />
                     </View>
@@ -123,14 +124,14 @@ const RateOrder = () => {
 
                 {riderId && (
                     <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Rider Rating</Text>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Rider Rating</Text>
                         <Text className={`mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>How was the delivery speed and service?</Text>
                         <RatingStars rating={riderRating} setRating={setRiderRating} />
                     </View>
                 )}
 
                 <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Written Feedback (Optional)</Text>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Written Feedback (Optional)</Text>
                     <TextInput
                         className={`mt-4 p-4 rounded-xl border ${darkTheme ? "bg-black/50 border-gray-800 text-white" : "bg-white border-gray-200 text-black"}`}
                         placeholder="Tell us more about your experience..."
@@ -152,7 +153,7 @@ const RateOrder = () => {
                     {loading ? (
                         <ActivityIndicator color={BRAND.white} />
                     ) : (
-                        <Text className="text-white font-bold text-lg">Submit Ratings</Text>
+                        <Text className="text-white font-sans-bold text-lg">Submit Ratings</Text>
                     )}
                 </PressableScale>
             </ScrollView>

@@ -96,7 +96,7 @@ vendorProfilePics = [
 
 # ─── Realistic Kenyan Locations ──────────────────────────────────────────────
 # Strictly around Ngong Town and Matasia. The whole cluster spans about 4 km, so
-# retail's 2 km radius reaches a meaningful subset of it and wholesale's 15 km
+# retail's 2.5 km radius reaches a meaningful subset of it and wholesale's 15 km
 # reaches all of it — which is what makes the two tiers behave differently in a
 # seeded environment instead of both matching everything.
 KENYA_VENDOR_LOCATIONS = [
@@ -332,7 +332,6 @@ async def seed_vendors_and_products(session) -> list[Vendor]:
             # meant none of these stores appeared in search, "near you" or the
             # directory — the customer app looked empty against a full table.
             h3_index_res8=str(h3.latlng_to_cell(lat, lng, 8)),
-            delivery_radius=2.0,
             shift_start=time(7, 0),
             shift_end=time(19, 0),
             verification_status="verified",
@@ -383,7 +382,6 @@ async def seed_vendors_and_products(session) -> list[Vendor]:
             lng=lng,
             location=from_shape(Point(lng, lat), srid=4326),
             h3_index_res8=str(h3.latlng_to_cell(lat, lng, 8)),
-            delivery_radius=15.0,
             shift_start=time(6, 0),
             shift_end=time(18, 0),
             verification_status="verified",

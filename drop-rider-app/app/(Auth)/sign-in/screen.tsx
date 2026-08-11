@@ -28,14 +28,13 @@ import {
     Modal,
     ScrollView,
     StatusBar,
-    Text,
     View,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useWarmUpBrowser } from "../_layout";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
-
 
 const { width, height } = Dimensions.get("window");
 
@@ -57,7 +56,6 @@ export default function SignIn() {
 	const [errors, setErrors] = React.useState<ClerkAPIError[]>();
 	const [LocationFinal, setLocation] = useState<Location.LocationObject | null>(null);
 	const [ShowLocationPrompt, setShowLocationPrompt] = useState(false);
-
 
 	useEffect(() => {
 		const resetError = () => {
@@ -296,7 +294,7 @@ export default function SignIn() {
 												<Ionicons name="sync" size={32} color={BRAND.white} />
 											</View>
 										) : (
-											<Text className={`text-white text-lg font-semibold`}>
+											<Text className={`text-white text-lg font-sans-semibold`}>
 												Log In
 											</Text>
 										)}
@@ -363,7 +361,7 @@ export default function SignIn() {
 					<View className="flex-1 items-center justify-center bg-black/50">
 						<View className="bg-white p-6 rounded-2xl items-center shadow-xl">
 							<ActivityIndicator size="large" color={BRAND.primary} />
-							<Text className="mt-4 font-semibold text-gray-700">Loading...</Text>
+							<Text className="mt-4 font-sans-semibold text-gray-700">Loading...</Text>
 						</View>
 					</View>
 				</Modal>
@@ -375,7 +373,7 @@ export default function SignIn() {
 							>
 								<View className={`flex-row gap-3 `}>
 									<Ionicons name="locate" size={24} color={BRAND.primary} />
-									<Text className="font-semibold text-2xl text-blue-500">
+									<Text className="font-heading-semibold text-2xl text-blue-500">
 										Location Access
 									</Text>
 								</View>
@@ -409,7 +407,7 @@ export default function SignIn() {
 										className={`bg-blue-500 p-3 px-6 rounded-xl items-center `}
 									>
 										<Text
-											className={`text-white font-bold`}
+											className={`text-white font-sans-bold`}
 										>
 											Allow Location Access
 										</Text>

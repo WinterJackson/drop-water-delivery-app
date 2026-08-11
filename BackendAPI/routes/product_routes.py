@@ -4,7 +4,6 @@ from schemas.common_schemas import RequestBodyPage
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
 from services.product_service import get_product_details, fetch_products_with_offer, fetch_paginated_products, fetch_products_by_category
-from models.product_model import ProductCategory
 
 
 router = APIRouter()

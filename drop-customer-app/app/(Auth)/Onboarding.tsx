@@ -12,12 +12,12 @@ import {
     Platform,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { ROUTES } from "@/API/routes/ApiRoutes";
+import { getDeviceId } from "@/utils/deviceId";
 import { useApiRequest } from "@/API/useApiClient";
 import { errorMessage } from "@/API/errors";
 import PressableScale from "@/components/ui/PressableScale";
@@ -87,7 +87,12 @@ export default function CustomerOnboarding() {
                 full_name: user?.fullName || "",
                 email: user?.emailAddresses[0]?.emailAddress || "",
                 phone_number: phoneNumber,
-                profile_pic: user?.imageUrl || ""
+                profile_pic: user?.imageUrl || "",
+                // Written once, at registration, and never updatable. It gates
+                // the one-per-handset welcome discount. No app sent it before,
+                // so every account carried a null and the gate never once fired
+                // — the offer was limited per account, and accounts are free.
+                device_id: await getDeviceId(),
             };
 
             await api.post(ROUTES.CREATE_USER, payload);
@@ -122,13 +127,13 @@ export default function CustomerOnboarding() {
             <SafeAreaView className={`flex-1 items-center justify-center ${darkTheme ? "bg-black" : ""}`}>
                 <StatusBar barStyle={darkTheme ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
                 <Ionicons name="alert-circle-outline" size={64} color="red" />
-                <Text className={`mt-4 text-lg font-semibold ${darkTheme ? "text-white" : "text-black"}`}>Failed to load profile</Text>
+                <Text className={`mt-4 text-lg font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>Failed to load profile</Text>
                 <Text className={`mt-2 mb-6 text-center px-8 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>We couldn't connect to our servers to verify your profile status. Please check your internet connection.</Text>
                 <PressableScale
                     onPress={checkStatus}
                     className="bg-accentbg px-8 py-3 rounded-full"
                 >
-                    <Text className="text-white font-bold">Retry</Text>
+                    <Text className="text-white font-sans-bold">Retry</Text>
                 </PressableScale>
             </SafeAreaView>
         );
@@ -148,7 +153,7 @@ export default function CustomerOnboarding() {
                 <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
                     
                     <View className="mt-8 mb-6 items-center">
-                        <Text className={`text-3xl text-center ${darkTheme ? "text-white" : "text-black"}`}>{"Complete Your Profile"}</Text>
+                        <Text className={`text-3xl text-center font-heading-semibold ${darkTheme ? "text-white" : "text-black"}`}>{"Complete Your Profile"}</Text>
                         <Text className={`mt-3 text-center ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                             Hey {user?.firstName}! We just need a few more details before you can start ordering.
                         </Text>
@@ -156,7 +161,7 @@ export default function CustomerOnboarding() {
 
                     {missingFields.includes("phone_number") && (
                         <View className={`mt-6 p-5 rounded-3xl ${darkTheme ? "bg-white/5" : "bg-white border border-gray-100"}`}>
-                            <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                            <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                 Phone Number
                             </Text>
                             <Text className={`text-xs mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -165,7 +170,7 @@ export default function CustomerOnboarding() {
                             
                             <View className={`flex-row items-center h-[55px] rounded-2xl px-4 ${darkTheme ? "bg-black border border-white/20" : "bg-white border border-gray-200"}`}>
                                 <Ionicons name="call" size={24} color={BRAND.primary} />
-                                <Text className={`ml-3 mr-1 font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
+                                <Text className={`ml-3 mr-1 font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
                                 <TextInput
                                     className={`flex-1 h-full ml-1 text-base ${darkTheme ? "text-white" : "text-black"}`}
                                     placeholder="712345678"
@@ -194,7 +199,7 @@ export default function CustomerOnboarding() {
                         {submitting ? (
                             <ActivityIndicator color={BRAND.white} />
                         ) : (
-                            <Text className="text-white font-bold text-lg">Complete Profile</Text>
+                            <Text className="text-white font-sans-bold text-lg">Complete Profile</Text>
                         )}
                     </PressableScale>
 

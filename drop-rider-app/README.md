@@ -171,7 +171,7 @@ components under `components/delivery/`.
 ### Getting an order
 
 1. A paid order the store cannot cover with its own rider hits the Trip Radar.
-2. The backend finds online riders within the search radius — 2 km for retail, 15 km for wholesale — and broadcasts over WebSocket.
+2. The backend finds online riders within the search radius — 2.5 km for retail, 15 km for wholesale — and broadcasts over WebSocket.
 3. The first rider to swipe **Accept** claims it. The race is settled by `SELECT ... FOR UPDATE` on the server, not by who rendered first. A rider who loses gets a **409** and must be told gracefully — not shown a stack trace.
 
 Registering with a store is a separate thing: the rider asks, the store approves,

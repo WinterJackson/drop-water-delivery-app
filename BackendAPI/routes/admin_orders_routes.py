@@ -22,7 +22,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.redis_client import redis_limiter as limiter
-from dependencies.admin_dependencies import AdminAccess, current_admin, require_admin
+from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_DISPUTES_READ,
@@ -39,6 +39,7 @@ from models.vendor_model import Vendor
 from services import admin_delivery_replay_service, admin_service
 from services.notification_service import create_notification
 from utils.s3_utils import generate_presigned_url
+from services.order_service import apply_status_transition
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +329,7 @@ async def cancel_order(
         )
 
     before = {"order_status": order.order_status}
-    order.order_status = "cancelled"
+    apply_status_transition(order, "cancelled")
     order.cancellation_reason = f"Cancelled by support: {body.reason}"
 
     admin_service.record_audit(

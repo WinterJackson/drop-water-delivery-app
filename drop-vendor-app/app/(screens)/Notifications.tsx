@@ -5,7 +5,8 @@ import { UIThemeContext } from "@/context/ThemeContext";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import React, { memo, useContext } from "react";
-import { RefreshControl, StatusBar, Text, View } from "react-native";
+import { RefreshControl, StatusBar, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NotificationItem } from "@/hooks/queries/useNotifications";
 import icons from "@/constants/icons/icons";
@@ -50,7 +51,7 @@ const NotificationItemCard = memo(({
 }) => {
     if (item.isHeader) {
         return (
-            <Text className={`font-bold text-lg mt-6 mb-3 px-1 uppercase tracking-wider text-xs ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
+            <Text className={`font-sans-bold text-lg mt-6 mb-3 px-1 uppercase tracking-wider text-xs ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
                 {item.title}
             </Text>
         );
@@ -84,17 +85,17 @@ const NotificationItemCard = memo(({
                     </View>
                     <View className="flex-1 pt-1">
                         <View className="flex-row justify-between items-start mb-1">
-                            <Text className={`font-bold text-base flex-1 pr-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                            <Text className={`font-sans-bold text-base flex-1 pr-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                                 {item.title}
                             </Text>
                             {!item.is_read && (
                                 <View className="w-2.5 h-2.5 rounded-full bg-accentbg mt-1.5 shadow-sm shadow-accentbg" />
                             )}
                         </View>
-                        <Text className={`text-sm leading-5 font-medium ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
+                        <Text className={`text-sm leading-5 font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
                             {item.message}
                         </Text>
-                        <Text className={`text-xs mt-3 font-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
+                        <Text className={`text-xs mt-3 font-sans-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
                             {item.created_at
                                 ? new Date(item.created_at).toLocaleTimeString("en-US", {
                                     hour: "2-digit", minute: "2-digit"
@@ -185,18 +186,18 @@ export default function Notifications() {
                         <BackButtonMinimal />
                     </PressableScale>
                     <View className="flex-1 flex-row items-center">
-                        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Notifications
                         </Text>
                         {unreadCount > 0 && (
                             <View className="ml-2 bg-accentbg px-2 py-0.5 rounded-full">
-                                <Text className="text-white text-xs font-bold">{unreadCount} New</Text>
+                                <Text className="text-white text-xs font-sans-bold">{unreadCount} New</Text>
                             </View>
                         )}
                     </View>
                     {unreadCount > 0 && (
                         <PressableScale onPress={markAllAsRead} className="bg-accentbg/10 px-3 py-1.5 rounded-full border border-accentbg/20">
-                            <Text className="text-accentbg font-bold text-xs uppercase tracking-wider">Mark Read</Text>
+                            <Text className="text-accentbg font-sans-bold text-xs uppercase tracking-wider">Mark Read</Text>
                         </PressableScale>
                     )}
                 </View>
@@ -227,8 +228,8 @@ export default function Notifications() {
                                     <View className={`w-24 h-24 rounded-full items-center justify-center mb-6 shadow-sm border ${darkTheme ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}>
                                         <Ionicons name="notifications" size={40} color={BRAND.primary} />
                                     </View>
-                                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>All Caught Up</Text>
-                                    <Text className={`text-base mt-2 text-center px-10 font-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>All Caught Up</Text>
+                                    <Text className={`text-base mt-2 text-center px-10 font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
                                         You are up to date. No new notifications.
                                     </Text>
                                 </View>

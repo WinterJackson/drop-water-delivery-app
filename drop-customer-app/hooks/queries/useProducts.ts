@@ -25,7 +25,6 @@ export interface Product {
         location_address?: string;
         lat?: number;
         lng?: number;
-        delivery_radius?: number;
         rating?: number;
         profile_pic?: string;
     };

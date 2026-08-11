@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber, timeAgo } from "@/lib/utils/format";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Notifications" };
 
@@ -76,10 +78,45 @@ const AUDIENCE_LABEL: Record<string, string> = {
   vendor: "Stores",
 };
 
-export default async function NotificationsPage() {
+const WINDOWS = [7, 30, 90] as const;
+
+const AUDIENCE_TABS = [
+  { key: "", label: "Everyone" },
+  { key: "customer", label: "Customers" },
+  { key: "rider", label: "Riders" },
+  { key: "vendor", label: "Stores" },
+] as const;
+
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ days?: string; audience?: string }>;
+}) {
+  // Gated on the capability `nav-config` declares for `/platform/notifications` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/platform/notifications");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
+  const { days: rawDays, audience: rawAudience } = await searchParams;
+
+  // The endpoint has always taken both and the page has never sent either, so
+  // the window was fixed at 30 days and the feed always mixed all three
+  // audiences — on the one screen whose job is to compare them.
+  const days = WINDOWS.includes(Number(rawDays) as (typeof WINDOWS)[number])
+    ? Number(rawDays)
+    : 30;
+  const audience = AUDIENCE_TABS.some((tab) => tab.key === rawAudience)
+    ? (rawAudience ?? "")
+    : "";
+
+  const query = new URLSearchParams({ days: String(days) });
+  if (audience) query.set("audience", audience);
+
   let data: Payload;
   try {
-    data = await get<Payload>("/api/admin/notifications");
+    data = await get<Payload>(`/api/admin/notifications?${query.toString()}`);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load notifications" detail={message} />;
@@ -96,6 +133,48 @@ export default async function NotificationsPage() {
           What the platform has been telling people. Sending and arriving are
           different things, and only one of them was ever visible.
         </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <nav aria-label="Window" className="scroll-x -mx-1 px-1">
+          <ul className="flex gap-1">
+            {WINDOWS.map((window) => (
+              <li key={window}>
+                <Link
+                  href={`/platform/notifications?days=${window}${audience ? `&audience=${audience}` : ""}`}
+                  aria-current={window === days ? "page" : undefined}
+                  className={
+                    window === days
+                      ? "inline-flex rounded-lg bg-[color-mix(in_oklch,var(--accent)_14%,transparent)] px-3 py-1.5 text-sm font-medium text-[var(--accent)]"
+                      : "inline-flex rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-surface-muted"
+                  }
+                >
+                  {window} days
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <nav aria-label="Audience" className="scroll-x -mx-1 px-1">
+          <ul className="flex gap-1">
+            {AUDIENCE_TABS.map((tab) => (
+              <li key={tab.key || "all"}>
+                <Link
+                  href={`/platform/notifications?days=${days}${tab.key ? `&audience=${tab.key}` : ""}`}
+                  aria-current={tab.key === audience ? "page" : undefined}
+                  className={
+                    tab.key === audience
+                      ? "inline-flex rounded-lg bg-[color-mix(in_oklch,var(--accent)_14%,transparent)] px-3 py-1.5 text-sm font-medium text-[var(--accent)]"
+                      : "inline-flex rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-surface-muted"
+                  }
+                >
+                  {tab.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
       </div>
 
       {summary.unreachable_accounts > 0 && pushed > 0 ? (
@@ -227,10 +306,18 @@ export default async function NotificationsPage() {
 
       <Card className="overflow-hidden">
         <div className="border-b border-default px-4 py-3">
-          <h2 className="text-sm font-semibold">Recent</h2>
+          <h2 className="text-sm font-semibold">
+            Recent
+            {audience
+              ? ` — ${(AUDIENCE_LABEL[audience] ?? audience).toLowerCase()} only`
+              : ""}
+          </h2>
           <p className="mt-0.5 text-xs text-muted">
             No recipient is named. Who was told what belongs on their support
             ticket, not on a feed everyone with analytics access can read.
+            {audience
+              ? " The audience filter narrows this feed; the totals above stay platform-wide."
+              : ""}
           </p>
         </div>
         {recent.length === 0 ? (

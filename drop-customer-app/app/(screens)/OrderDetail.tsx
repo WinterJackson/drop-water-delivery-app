@@ -15,14 +15,15 @@ import {
     Image,
     ScrollView,
     StatusBar,
-    Text,
     View,
     Platform,
     Dimensions,
     Modal,
-    Linking
+    Linking,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
+import { formatMoney, isZeroMoney, multiplyMoney, sumMoney } from "@/utils/money";
 
 let MapView: any = null;
 let Marker: any = null;
@@ -156,7 +157,6 @@ export default function OrderDetail() {
         Linking.openURL(`tel:${phone}`);
     };
 
-
     const mapRef = useRef<any>(null);
     const markerRef = useRef<any>(null);
 
@@ -172,7 +172,6 @@ export default function OrderDetail() {
             });
         }
     };
-
 
     // Smoothly animate the map camera to follow the rider as WebSockets stream GPS coords natively
     useEffect(() => {
@@ -372,7 +371,7 @@ export default function OrderDetail() {
                 {/* Overlaid Header */}
                 <View className="absolute top-0 left-0 right-0 z-10 px-4 pointer-events-box-none" style={{ paddingTop: (StatusBar.currentHeight || 40) + 10 }}>
                     <View className="flex-row items-center gap-3">
-                        <PressableScale onPress={() => router.back()} activeOpacity={0.7}>
+                        <PressableScale accessibilityLabel="Go back" onPress={() => router.back()} activeOpacity={0.7}>
                             <View 
                                 className={`w-10 h-10 rounded-full items-center justify-center`}
                                 style={{ backgroundColor: BRAND.primary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}
@@ -384,7 +383,7 @@ export default function OrderDetail() {
                             className={`px-4 py-2 rounded-full border ${darkTheme ? "bg-[#1c1c1e] border-[#2c2c2e]" : "bg-white border-gray-200"}`}
                             style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }}
                         >
-                            <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
+                            <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
                                 Order #{order.id?.slice(-6)}
                             </Text>
                         </View>
@@ -396,7 +395,7 @@ export default function OrderDetail() {
                     <View className="absolute top-36 left-4 z-10">
                         <View className={`px-4 py-2 rounded-full flex-row items-center gap-2 border ${darkTheme ? "bg-[#1c1c1e] border-[#2c2c2e]" : "bg-white border-gray-200"}`} style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }}>
                             <View className="w-2 h-2 rounded-full bg-green-500" />
-                            <Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>Live Tracking</Text>
+                            <Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>Live Tracking</Text>
                         </View>
                     </View>
                 )}
@@ -408,14 +407,14 @@ export default function OrderDetail() {
                         className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#1c1c1e] border-[#2c2c2e]" : "bg-white border-gray-200"}`}
                         style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3.84, elevation: 5 }}
                     >
-                        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>+</Text>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>+</Text>
                     </PressableScale>
                     <PressableScale
                         onPress={() => handleZoom(false)}
                         className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#1c1c1e] border-[#2c2c2e]" : "bg-white border-gray-200"}`}
                         style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3.84, elevation: 5 }}
                     >
-                        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>−</Text>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>−</Text>
                     </PressableScale>
                 </View>
             </View>
@@ -431,7 +430,7 @@ export default function OrderDetail() {
                 >
                  {/* Status Timeline Tracking Bar */}
                  <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                     <Text className={`text-lg font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
+                     <Text className={`text-lg font-sans-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
                          Tracking Status
                      </Text>
                      {["cancelled", "rejected", "mismatch_pending", "pending_review"].includes(order.order_status) ? (
@@ -440,11 +439,11 @@ export default function OrderDetail() {
                                 className="w-8 h-8 rounded-full items-center justify-center shrink-0"
                                 style={{ backgroundColor: ["mismatch_pending", "pending_review"].includes(order.order_status) ? BRAND.primary : TOAST.error }}
                              >
-                                 <Text className="text-white font-bold">{["mismatch_pending", "pending_review"].includes(order.order_status) ? "⚠️" : "✕"}</Text>
+                                 <Text className="text-white font-sans-bold">{["mismatch_pending", "pending_review"].includes(order.order_status) ? "⚠️" : "✕"}</Text>
                              </View>
                              <View className="flex-1">
                                 <Text 
-                                    className="text-base font-semibold"
+                                    className="text-base font-sans-semibold"
                                     style={{ color: ["mismatch_pending", "pending_review"].includes(order.order_status) ? BRAND.primary : TOAST.error }}
                                 >
                                     {STATUS_LABELS[order.order_status] || "Notice"}
@@ -485,16 +484,16 @@ export default function OrderDetail() {
                                                  style={isCompleted ? { backgroundColor: TOAST.success } : (isCurrent ? { backgroundColor: TOAST.info } : {})}
                                              >
                                                  {isCompleted ? (
-                                                     <Text className="text-white text-xs font-bold">✓</Text>
+                                                     <Text className="text-white text-xs font-sans-bold">✓</Text>
                                                  ) : (
-                                                     <Text className={`text-xs font-bold ${isActive ? "text-white" : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>
+                                                     <Text className={`text-xs font-sans-bold ${isActive ? "text-white" : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>
                                                          {index + 1}
                                                      </Text>
                                                  )}
                                              </View>
                                              
                                              <Text 
-                                                 className={`absolute top-10 text-[10px] w-20 text-center font-semibold ${
+                                                 className={`absolute top-10 text-[10px] w-20 text-center font-sans-semibold ${
                                                      isCurrent
                                                          ? "text-blue-500"
                                                          : isActive
@@ -509,10 +508,10 @@ export default function OrderDetail() {
                                  })}
                              </View>
                              <View className="mt-4 flex-row items-center justify-between">
-                                 <Text className={`text-base font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                                 <Text className={`text-base font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                                     Current Stage:
                                  </Text>
-                                 <Text className="text-blue-500 font-bold text-lg">
+                                 <Text className="text-blue-500 font-sans-bold text-lg">
                                      {STATUS_LABELS[STATUS_STEPS[currentStepIndex]] || "Processing"}
                                  </Text>
                              </View>
@@ -520,12 +519,10 @@ export default function OrderDetail() {
                      )}
                  </View>
 
-
-
                 {/* ── Cross-Party Contact Cards ────────────────────────── */}
                 {contacts.length > 0 && (
                     <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                        <Text className={`text-lg font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`text-lg font-sans-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
                             Contact
                         </Text>
                         <View className="gap-3">
@@ -544,7 +541,7 @@ export default function OrderDetail() {
                                         <Text style={{ fontSize: 18 }}>🏪</Text>
                                     </View>
                                     <View className="flex-1">
-                                        <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
+                                        <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
                                             {vendorContact.name}
                                         </Text>
                                         <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Tap to call vendor</Text>
@@ -569,7 +566,7 @@ export default function OrderDetail() {
                                         <Text style={{ fontSize: 18 }}>🛵</Text>
                                     </View>
                                     <View className="flex-1">
-                                        <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
+                                        <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
                                             {riderContact.name}
                                         </Text>
                                         <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -588,7 +585,7 @@ export default function OrderDetail() {
                 {/* Vendor Info */}
                 {order.vendor && (
                     <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                        <Text className={`text-lg font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                             Vendor
                         </Text>
                         <View className="flex-row items-center gap-3">
@@ -600,7 +597,7 @@ export default function OrderDetail() {
                                 </View>
                             )}
                             <View>
-                                <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
                                     {order.vendor.business_name}
                                 </Text>
                                 <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -613,7 +610,7 @@ export default function OrderDetail() {
 
                 {/* Order Items */}
                 <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                    <Text className={`text-lg font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                         Items ({order.order_item?.length || 0})
                     </Text>
                     {order.order_item?.map((item: any) => (
@@ -626,15 +623,15 @@ export default function OrderDetail() {
                                 </View>
                             )}
                             <View className="flex-1">
-                                <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
                                     {item.product?.name || "Product"}
                                 </Text>
                                 <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                                     Qty: {item.quantity} × KSH {item.price}
                                 </Text>
                             </View>
-                            <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                                KSH {(Number(item.quantity || 0) * Number(item.price || 0)).toFixed(2)}
+                            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(multiplyMoney(item.price, item.quantity ?? 0))}
                             </Text>
                         </View>
                     ))}
@@ -642,30 +639,30 @@ export default function OrderDetail() {
 
                 {/* Price Breakdown */}
                 <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                    <Text className={`text-lg font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                         Price Summary
                     </Text>
                     
                     {/* C-01 FIX: Use server-provided product_subtotal, fallback to computing it from items for legacy orders */}
                     <View className="flex-row justify-between mb-2">
                         <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
-                        <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                            KSH {Number((Number(order.product_subtotal) > 0 ? order.product_subtotal : order.order_item?.reduce((sum: number, item: any) => sum + (Number(item.quantity || 0) * Number(item.price || 0)), 0)) || 0).toFixed(2)}
+                        <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                            {formatMoney(!isZeroMoney(order.product_subtotal) ? order.product_subtotal : sumMoney((order.order_item ?? []).map((i: any) => multiplyMoney(i.price, i.quantity ?? 0))))}
                         </Text>
                     </View>
 
                     <View className="flex-row justify-between mb-2">
                         <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Delivery Fee</Text>
-                        <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                            KSH {Number(order.delivery_fee || 0).toFixed(2)}
+                        <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                            {formatMoney(order.delivery_fee)}
                         </Text>
                     </View>
 
                     {order.service_fee ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Service Fee</Text>
-                            <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                                KSH {Number(order.service_fee).toFixed(2)}
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(order.service_fee)}
                             </Text>
                         </View>
                     ) : null}
@@ -673,8 +670,8 @@ export default function OrderDetail() {
                     {order.surge_fee ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Surge Pricing</Text>
-                            <Text className={`font-semibold text-orange-500`}>
-                                KSH {Number(order.surge_fee).toFixed(2)}
+                            <Text className={`font-sans-semibold text-orange-500`}>
+                                {formatMoney(order.surge_fee)}
                             </Text>
                         </View>
                     ) : null}
@@ -682,8 +679,8 @@ export default function OrderDetail() {
                     {order.payload_surcharge ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Large Order Surcharge</Text>
-                            <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                                KSH {Number(order.payload_surcharge).toFixed(2)}
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(order.payload_surcharge)}
                             </Text>
                         </View>
                     ) : null}
@@ -691,8 +688,8 @@ export default function OrderDetail() {
                     {order.staircase_surcharge ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Surcharge</Text>
-                            <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                                KSH {Number(order.staircase_surcharge).toFixed(2)}
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(order.staircase_surcharge)}
                             </Text>
                         </View>
                     ) : null}
@@ -700,8 +697,8 @@ export default function OrderDetail() {
                     {order.welcome_discount ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Welcome Offer</Text>
-                            <Text className={`font-semibold text-green-500`}>
-                                -KSH {Number(order.welcome_discount).toFixed(2)}
+                            <Text className={`font-sans-semibold text-green-500`}>
+                                -{formatMoney(order.welcome_discount)}
                             </Text>
                         </View>
                     ) : null}
@@ -709,32 +706,28 @@ export default function OrderDetail() {
                     {order.wallet_discount ? (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Balance Applied</Text>
-                            <Text className={`font-semibold text-green-500`}>
-                                -KSH {Number(order.wallet_discount).toFixed(2)}
+                            <Text className={`font-sans-semibold text-green-500`}>
+                                -{formatMoney(order.wallet_discount)}
                             </Text>
                         </View>
                     ) : null}
 
                     <View className={`border-t pt-2 mt-2 flex-row justify-between ${darkTheme ? "border-gray-700" : "border-gray-200"}`}>
-                        <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>Total</Text>
-                        <Text className={`text-lg font-bold text-green-500`}>
-                            KSH {(
-                                Number((Number(order.product_subtotal) > 0 ? order.product_subtotal : order.order_item?.reduce((sum: number, item: any) => sum + (Number(item.quantity || 0) * Number(item.price || 0)), 0)) || 0) +
-                                Number(order.delivery_fee || 0) +
-                                Number(order.service_fee || 0) +
-                                Number(order.surge_fee || 0) +
-                                Number(order.payload_surcharge || 0) +
-                                Number(order.staircase_surcharge || 0) -
-                                Number(order.welcome_discount || 0) -
-                                Number(order.wallet_discount || 0)
-                            ).toFixed(2)}
+                        <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Total</Text>
+                        <Text className={`text-lg font-sans-bold text-green-500`}>
+                            {/* `total_amount` is what the customer was charged,
+                                frozen on the order. Re-adding the lines here was
+                                a second pricing formula that left out the bottle
+                                deposit and any settled balance, so this screen
+                                and the M-Pesa message disagreed. */}
+                            {formatMoney(order.total_amount)}
                         </Text>
                     </View>
                 </View>
 
                 {/* Order Info */}
                 <View className={`p-5 rounded-2xl mb-5 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-                    <Text className={`text-lg font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                         Order Info
                     </Text>
                     <View className="gap-3">
@@ -746,7 +739,7 @@ export default function OrderDetail() {
                         </View>
                         <View className="flex-row justify-between">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Placed On</Text>
-                            <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
                                 {order.created_at ? new Date(order.created_at).toLocaleDateString("en-US", {
                                     day: "numeric",
                                     month: "short",
@@ -759,7 +752,7 @@ export default function OrderDetail() {
                         {order.delivery_address && (
                             <View className="flex-row justify-between">
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Address</Text>
-                                <Text className={`font-semibold text-right max-w-[60%] ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-semibold text-right max-w-[60%] ${darkTheme ? "text-white" : "text-black"}`}>
                                     {order.delivery_address}
                                 </Text>
                             </View>
@@ -767,7 +760,7 @@ export default function OrderDetail() {
                         {order.delivery_type && (
                             <View className="flex-row justify-between">
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Delivery Type</Text>
-                                <Text className={`font-semibold capitalize ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-semibold capitalize ${darkTheme ? "text-white" : "text-black"}`}>
                                     {order.delivery_type.replace('_', ' ')}
                                 </Text>
                             </View>
@@ -775,7 +768,7 @@ export default function OrderDetail() {
                         {order.bottle_source && (
                             <View className="flex-row justify-between">
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Bottle Exchange</Text>
-                                <Text className={`font-semibold capitalize ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-semibold capitalize ${darkTheme ? "text-white" : "text-black"}`}>
                                     {order.bottle_source.replace('_', ' ')}
                                 </Text>
                             </View>
@@ -785,17 +778,17 @@ export default function OrderDetail() {
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Payment Method</Text>
                                 {order.payment_method === "cash" ? (
                                     <View className="flex-row items-center gap-1">
-                                        <Text className="text-amber-500 font-bold">Cash on Delivery</Text>
+                                        <Text className="text-amber-500 font-sans-bold">Cash on Delivery</Text>
                                         <Text className="text-amber-500">💰</Text>
                                     </View>
                                 ) : order.payment_method === "card" ? (
                                     <View className="flex-row items-center gap-1">
-                                        <Text className="text-blue-500 font-bold">Card</Text>
+                                        <Text className="text-blue-500 font-sans-bold">Card</Text>
                                         <Text className="text-blue-500">💳</Text>
                                     </View>
                                 ) : (
                                     <View className="flex-row items-center gap-1">
-                                        <Text className="text-green-500 font-bold">M-PESA</Text>
+                                        <Text className="text-green-500 font-sans-bold">M-PESA</Text>
                                         <Text className="text-green-500">📱</Text>
                                     </View>
                                 )}
@@ -803,7 +796,7 @@ export default function OrderDetail() {
                             <View className="flex-row justify-between items-center">
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Payment Status</Text>
                                 <View className={`px-3 py-1 rounded-full ${order.payment_status === 'paid' ? 'bg-green-500/20' : 'bg-amber-500/20'}`}>
-                                    <Text className={`font-bold capitalize ${order.payment_status === 'paid' ? 'text-green-500' : 'text-amber-500'}`}>
+                                    <Text className={`font-sans-bold capitalize ${order.payment_status === 'paid' ? 'text-green-500' : 'text-amber-500'}`}>
                                         {order.payment_status || "Pending"}
                                     </Text>
                                 </View>
@@ -821,7 +814,7 @@ export default function OrderDetail() {
                         className="py-4 rounded-2xl items-center mb-4"
                         style={{ backgroundColor: TOAST.error }}
                     >
-                        <Text className="text-white font-bold text-lg">{cancelLoading ? "Cancelling..." : "Cancel Order"}</Text>
+                        <Text className="text-white font-sans-bold text-lg">{cancelLoading ? "Cancelling..." : "Cancel Order"}</Text>
                     </PressableScale>
                 )}
 
@@ -841,7 +834,7 @@ export default function OrderDetail() {
                         className="py-4 rounded-2xl items-center mb-4"
                         style={{ backgroundColor: BRAND.primary }}
                     >
-                        <Text className="text-white font-bold text-lg">⭐ Rate This Order</Text>
+                        <Text className="text-white font-sans-bold text-lg">⭐ Rate This Order</Text>
                     </PressableScale>
                 )}
 
@@ -861,7 +854,7 @@ export default function OrderDetail() {
                     style={{ borderWidth: 1, borderColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
                 >
                     <Ionicons name="help-buoy-outline" size={18} color={BRAND.primary} />
-                    <Text className="font-bold text-base" style={{ color: BRAND.primary }}>
+                    <Text className="font-sans-bold text-base" style={{ color: BRAND.primary }}>
                         Get help with this order
                     </Text>
                 </PressableScale>
@@ -883,7 +876,7 @@ export default function OrderDetail() {
                             <View className="w-12 h-12 rounded-full items-center justify-center mb-3" style={{ backgroundColor: TOAST.errorLight }}>
                                 <Text className="text-2xl">⚠️</Text>
                             </View>
-                            <Text className={`text-xl font-bold text-center mb-2 ${darkTheme ? 'text-white' : 'text-black'}`}>
+                            <Text className={`text-xl font-sans-bold text-center mb-2 ${darkTheme ? 'text-white' : 'text-black'}`}>
                                 Address Mismatch Detected
                             </Text>
                             <Text className={`text-base text-center ${darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -895,7 +888,7 @@ export default function OrderDetail() {
                             className={`p-4 rounded-xl mb-6 ${darkTheme ? 'bg-black/50' : 'bg-white'}`}
                             style={{ borderWidth: 1, borderColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
                         >
-                            <Text className={`text-sm text-center font-medium ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
+                            <Text className={`text-sm text-center font-sans-medium ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
                                 Please approve the KSh 30 adjustment to receive your water at your door, or tap 'Leave at Ground Floor'.
                             </Text>
                         </View>
@@ -916,7 +909,7 @@ export default function OrderDetail() {
                                 className="w-full py-4 rounded-full items-center"
                                 style={{ backgroundColor: BRAND.primary, opacity: resolveLoading ? 0.7 : 1 }}
                             >
-                                <Text className="text-white font-bold text-lg">{resolveLoading ? "Processing..." : "Approve Charge (+KSh 30)"}</Text>
+                                <Text className="text-white font-sans-bold text-lg">{resolveLoading ? "Processing..." : "Approve Charge (+KSh 30)"}</Text>
                             </PressableScale>
 
                             <PressableScale
@@ -934,7 +927,7 @@ export default function OrderDetail() {
                                 className="w-full py-4 rounded-full items-center"
                                 style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.gray200, opacity: resolveLoading ? 0.7 : 1 }}
                             >
-                                <Text className={`font-bold text-lg ${darkTheme ? 'text-white' : 'text-black'}`}>
+                                <Text className={`font-sans-bold text-lg ${darkTheme ? 'text-white' : 'text-black'}`}>
                                     {resolveLoading ? "Processing..." : "Leave at Ground Floor"}
                                 </Text>
                             </PressableScale>

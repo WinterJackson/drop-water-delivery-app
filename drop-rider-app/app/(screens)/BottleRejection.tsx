@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
-import { View, Text, StatusBar, TextInput, Image, ScrollView, TouchableOpacity } from "react-native";
+import { View, StatusBar, Image, ScrollView, TouchableOpacity } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -144,7 +145,7 @@ export default function BottleRejection() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Flag Empty Bottle
               </Text>
           </View>
@@ -156,14 +157,14 @@ export default function BottleRejection() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} className="flex-1 p-5">
-         <Text className={`font-bold text-lg mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>1. Photographic Evidence</Text>
+         <Text className={`font-sans-bold text-lg mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>1. Photographic Evidence</Text>
          <Text className={`text-sm mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Please provide at least 2 clear photos showing the damage. Max 3 photos.</Text>
          
          <View className="flex-row flex-wrap gap-3 mb-6">
              {photos.map((uri, index) => (
                  <View key={index} className="relative w-24 h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10">
                      <Image source={{ uri }} className="w-full h-full" />
-                     <PressableScale onPress={() => removePhoto(index)} className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full items-center justify-center">
+                     <PressableScale accessibilityLabel={`Remove photo ${index + 1}`} onPress={() => removePhoto(index)} className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full items-center justify-center">
                          <Ionicons name="close" size={14} color="#fff" />
                      </PressableScale>
                  </View>
@@ -172,12 +173,12 @@ export default function BottleRejection() {
              {photos.length < 3 && (
                  <PressableScale onPress={takePhoto} className={`w-24 h-24 rounded-xl items-center justify-center border-2 border-dashed ${darkTheme ? "border-white/20 bg-white/5" : "border-gray-300 bg-white"}`}>
                      <Ionicons name="camera-outline" size={32} color={BRAND.primary} />
-                     <Text className={`text-xs mt-1 font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Add Photo</Text>
+                     <Text className={`text-xs mt-1 font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Add Photo</Text>
                  </PressableScale>
              )}
          </View>
 
-         <Text className={`font-bold text-lg mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>2. Reason for Rejection</Text>
+         <Text className={`font-sans-bold text-lg mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>2. Reason for Rejection</Text>
          <TextInput
             multiline
             numberOfLines={4}
@@ -185,7 +186,7 @@ export default function BottleRejection() {
             onChangeText={setReason}
             placeholder="e.g., The bottle has a large crack at the bottom and cannot hold water..."
             placeholderTextColor={darkTheme ? BRAND.gray400 : BRAND.gray500}
-            className={`p-4 rounded-2xl min-h-[120px] font-semibold text-base border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-black"}`}
+            className={`p-4 rounded-2xl min-h-[120px] font-sans-semibold text-base border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-black"}`}
             style={{ textAlignVertical: "top" }}
          />
       </ScrollView>
@@ -197,7 +198,7 @@ export default function BottleRejection() {
           className="py-4 rounded-xl items-center shadow-sm"
           style={{ backgroundColor: TOAST.error }}
         >
-          <Text className="text-white font-bold text-lg">{isSubmitting ? "Submitting for Review..." : "Submit Report"}</Text>
+          <Text className="text-white font-sans-bold text-lg">{isSubmitting ? "Submitting for Review..." : "Submit Report"}</Text>
         </PressableScale>
       </View>
     </SafeAreaView>

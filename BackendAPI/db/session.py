@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load variables from .env
 
-import ssl as _ssl
 
 DATABASE_URL = os.getenv("NEONDB_URL")
 
@@ -30,6 +29,7 @@ AsyncSessionLocal = sessionmaker (bind=engine, class_=AsyncSession, autoflush=Fa
 
 Base = declarative_base()
 
-async def create_table():
-  async with engine.begin() as conn:
-    await conn.run_sync(Base.metadata.create_all)
+# There is deliberately no `create_all` helper here. The schema is owned by
+# Alembic — the repository head `e6b2c8d40f17` is gated on purpose, and a
+# `Base.metadata.create_all` would build a database that no migration has ever
+# run against, silently diverging from every deployed one.

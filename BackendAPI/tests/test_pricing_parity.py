@@ -56,7 +56,10 @@ def _user(*, wallet=0, first_order=False, floor=0, elevator=False):
     user.has_used_welcome_offer = not first_order
     user.floor_level = floor
     user.has_elevator = elevator
-    user.device_id = None
+    # A device is now required for the welcome offer: an absent one used to be
+    # treated as eligible, and since no app sent the field, that was every
+    # account. A first-order fixture without one is refused, correctly.
+    user.device_id = f"test-device-{user.id}"
     return user
 
 
@@ -156,24 +159,35 @@ def test_surge_window_is_evaluated_in_eat_not_utc():
 
 
 @pytest.mark.asyncio
-async def test_welcome_discount_is_30_percent_of_the_whole_deposit():
-    """Not 30% of the single most expensive bottle.
+async def test_welcome_discount_is_30_percent_of_one_bottle_only():
+    """Scoped to a single bottle, and to the cheapest one.
 
-    The checkout route used `highest_bottle_price * 0.30` while the order ledger
-    used `bottle_deposit * 0.30`, so a first order of three bottles diverged by
-    180 KSH between the amount charged and the amount recorded.
+    It used to be 30% of the **whole** deposit, which made the platform's
+    acquisition cost a function of what a stranger put in their basket: a first
+    order of six 20 L bottles cost KSH 540 out of pure margin, and the cheapest
+    way to claim the maximum was to order bottles you did not want and hand them
+    straight back. One bottle is an incentive to try the platform; six is an
+    arbitrage.
+
+    (Two implementations of this once disagreed — the checkout route used
+    `highest_bottle_price * 0.30` and the ledger used `bottle_deposit * 0.30` —
+    so a three-bottle first order diverged by KSH 180 between what was charged
+    and what was recorded. There is one implementation now.)
     """
     vendor = _vendor("retail_refill")
     items = [_item(vendor.id, quantity=3, price="250.00", capacity=20)]
     user = _user(first_order=True)
 
+    # `new_bottle`, because that is the only option that takes a deposit now.
+    # It used to be charged on any first order regardless of type, so a
+    # first-time customer exchanging a bottle they already owned paid for one.
     quote = await compute_order_quote(
         _mock_session(), items=items, user=user, vendor=vendor,
-        delivery_type="quick_swap", lat=-1.2804, lng=36.8165,
+        delivery_type="new_bottle", lat=-1.2804, lng=36.8165,
     )
 
-    assert quote.bottle_deposit == Decimal("900.00")   # 3 × 300
-    assert quote.welcome_discount == Decimal("270.00")  # 30% of 900, not of 300
+    assert quote.bottle_deposit == Decimal("900.00")   # 3 × 300, all charged
+    assert quote.welcome_discount == Decimal("90.00")   # 30% of ONE bottle
     assert quote.is_welcome_offer is True
 
 
@@ -228,7 +242,14 @@ async def test_welcome_discount_applies_before_wallet_credit():
     )
 
     gross = quote.gross_before_discounts
-    assert quote.wallet_discount == (gross - quote.welcome_discount - Decimal("1")).quantize(Decimal("0.01"))
+    # Every discount that lands before the wallet, then the wallet against what
+    # is left, never consuming the last shilling. `mpesa_discount` is the newest
+    # of them: an M-Pesa order is cheaper than the same order paid in cash,
+    # because cash costs the platform float risk and reconciliation rather than
+    # a Safaricom tariff.
+    assert quote.wallet_discount == (
+        gross - quote.welcome_discount - quote.mpesa_discount - Decimal("1")
+    ).quantize(Decimal("0.01"))
     assert quote.total == Decimal("1")
 
 

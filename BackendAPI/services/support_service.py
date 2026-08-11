@@ -4,9 +4,15 @@ A ticket is raised by a customer, rider or vendor from their own app, and worked
 in the admin console. Two things about the design are deliberate:
 
 **A reply is a notification, not an email that hopes to arrive.** Every response
-writes a `Notification` row for the requester — so it appears in the app they
-already have open — and additionally emails them when an address is known. The
-row is what makes the history survive; the email is best-effort.
+writes a `Notification` row for the requester, **pushes** to their device, and
+additionally emails them when an address is known. The row is what makes the
+history survive; the push is what makes it arrive; the email is best-effort.
+
+Only the row and the push existed as an intention for a long time — the row was
+written and nothing was ever pushed, so the one message on this platform a
+person is actively waiting for was the only one that never interrupted them.
+`_notify_requester` is now the single place that fans a reply out, and a
+structural test fails the build if `reply` stops calling it.
 
 **Internal notes never leave the building.** A thread entry marked `internal` is
 visible to administrators and is not sent anywhere. Support staff need somewhere
@@ -29,11 +35,19 @@ from models.deliverer_model import Deliverer
 from models.platform_setting_model import SupportTicket
 from models.user_model import User
 from models.vendor_model import Vendor
-from services.notification_service import create_notification
+from services.notification_service import create_notification, push_allowed, queue_push
 
 logger = logging.getLogger(__name__)
 
 REQUESTER_MODELS = {"customer": User, "rider": Deliverer, "vendor": Vendor}
+
+#: Where a support notification points **in the apps**. Every other `action_url`
+#: on this platform is an Expo Router path; this one was `/support/{id}`, which
+#: is the admin console's route. The customer app's deep-link whitelist blocked
+#: it silently and the other two pushed an unmatched route, so the reply was
+#: unreachable even once you found it in the list.
+def ticket_deep_link(ticket_id) -> str:
+    return f"/(screens)/SupportTicket?id={ticket_id}"
 
 CATEGORIES = (
     "order",
@@ -50,6 +64,23 @@ CATEGORIES = (
 PRIORITIES = ("low", "normal", "high", "urgent")
 
 OPEN_STATUSES = ("open", "pending")
+
+
+def _awaiting_us(ticket) -> bool:
+    """True when the last thing said on an unfinished ticket came from them.
+
+    Internal notes are ignored: a colleague writing "checking the GPS trail" is
+    not an answer to the customer, and counting it as one is how a ticket gets
+    marked as handled while the person who raised it is still waiting.
+    """
+    if ticket.status in ("resolved", "closed"):
+        return False
+    for message in reversed(ticket.messages or []):
+        if message.get("internal"):
+            continue
+        return message.get("author") != "admin"
+    # Nothing but the opening body — which is theirs.
+    return True
 
 
 def _requester_name(row) -> Optional[str]:
@@ -161,6 +192,10 @@ async def list_tickets(
                     message.get("author") == "admin" and not message.get("internal")
                     for message in (ticket.messages or [])
                 ),
+                # Who spoke last. A ticket where they replied after our answer
+                # is waiting on *us*, and was previously indistinguishable from
+                # one where we are legitimately waiting on them.
+                "awaiting_us": _awaiting_us(ticket),
             }
             for ticket in rows
         ]
@@ -270,17 +305,61 @@ async def reply(
         ticket.assigned_admin_email = admin_email
 
     if not internal:
-        await create_notification(
-            session=session,
-            user_id=ticket.requester_id,
-            user_type=ticket.requester_type,
-            title=f"Re: {ticket.subject}",
-            message=body.strip(),
-            message_type="support_reply",
-            action_url=f"/support/{ticket.id}",
-        )
+        await _notify_requester(session, ticket, body.strip())
 
     return ticket
+
+
+async def _notify_requester(session: AsyncSession, ticket, body: str) -> None:
+    """Write the in-app row and queue the push. The one place a reply goes out.
+
+    `queue_push` rather than `dispatch_background`: the route commits *after*
+    this returns, and telling somebody we replied to a reply that then rolled
+    back is the exact failure the two-path rule exists to prevent.
+
+    A vendor ticket reaches the store's staff as well as its owner. Staff raise
+    and read the store's tickets — a reply only the owner is interrupted by is
+    a reply the person actually standing in the shop never sees. No capability
+    is required: support is not one of the four staff permissions, and gating it
+    on one would silence whoever happens to hold none of them.
+    """
+    action_url = ticket_deep_link(ticket.id)
+    title = f"Re: {ticket.subject}"
+
+    await create_notification(
+        session=session,
+        user_id=ticket.requester_id,
+        user_type=ticket.requester_type,
+        title=title,
+        message=body,
+        message_type="support_reply",
+        action_url=action_url,
+    )
+
+    account = await session.get(REQUESTER_MODELS[ticket.requester_type], ticket.requester_id)
+    if account is None:
+        # The account was deleted after raising the ticket. The row above is
+        # still written — the thread is evidence — but there is nobody to push to.
+        return
+
+    tokens = [getattr(account, "push_token", None)]
+    if ticket.requester_type == "vendor":
+        from services.vendor_staff_service import push_tokens_for_store
+
+        tokens += await push_tokens_for_store(session, account.id)
+
+    # `support_reply` is unmapped in `_MESSAGE_TYPE_PREFERENCE`, so `push_allowed`
+    # treats it as transactional. Asked anyway rather than assumed: the mapping is
+    # data and someone may reasonably decide to add a key for it later.
+    for token in tokens:
+        if token and push_allowed(account, "support_reply"):
+            queue_push(
+                session,
+                to=token,
+                title=title,
+                body=body,
+                data={"url": action_url, "ticket_id": str(ticket.id)},
+            )
 
 
 async def set_status(
@@ -308,6 +387,36 @@ async def set_status(
     if not ticket.assigned_admin_email:
         ticket.assigned_admin_email = admin_email
 
+    return ticket
+
+
+async def set_priority(
+    session: AsyncSession, *, ticket_id: UUID, priority: str, admin_email: str
+) -> SupportTicket:
+    """Escalate or de-escalate a ticket.
+
+    Nothing could write this column, so every ticket ever raised was `normal`
+    for its whole life while the queue offered a priority filter and the console
+    coloured a badge from it — a control that could only ever return everything
+    or nothing.
+
+    Deliberately an **administrator's** judgement, not the requester's. A field
+    on the intake form marked "urgent" is a field everybody ticks, and a queue
+    where everything is urgent has no priority at all.
+    """
+    ticket = await session.get(SupportTicket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+
+    if priority not in PRIORITIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Priority must be one of {', '.join(PRIORITIES)}.",
+        )
+
+    ticket.priority = priority
+    if not ticket.assigned_admin_email:
+        ticket.assigned_admin_email = admin_email
     return ticket
 
 

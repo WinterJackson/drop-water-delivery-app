@@ -12,10 +12,9 @@ import {
     Platform,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -70,9 +69,8 @@ export default function VendorOnboarding() {
     useEffect(() => {
         const checkStatus = async () => {
             try {
-                const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? "";
                 const data = await apiFetch<{ exists: boolean; missing_fields?: string[] }>(
-                    `${BASE_URL}/api/auth/profile-status?app_type=vendor`,
+                    VendorApiRoutes.GetProfileStatus.path,
                     { token: await getToken() }
                 );
                 if (!data.exists || (data.missing_fields && data.missing_fields.length > 0)) {
@@ -263,13 +261,13 @@ export default function VendorOnboarding() {
                 <View className="px-6 pt-4 pb-2">
                     <View className="flex-row items-center justify-between mb-2">
                         {step > 1 ? (
-                            <PressableScale onPress={() => setStep((step - 1) as 1|2|3)} className="w-10 h-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                            <PressableScale accessibilityLabel="Go back a step" onPress={() => setStep((step - 1) as 1|2|3)} className="w-10 h-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
                                 <Ionicons name="arrow-back" size={20} color={darkTheme ? "#fff" : "#000"} />
                             </PressableScale>
                         ) : (
                             <View className="w-10 h-10" />
                         )}
-                        <Text className={`font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                        <Text className={`font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                             Step {step} of 3
                         </Text>
                         <View className="w-10 h-10" />
@@ -284,7 +282,7 @@ export default function VendorOnboarding() {
                 <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                     
                     <View className="mb-8 mt-2 items-center">
-                        <Text className={`text-3xl text-center font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`text-3xl text-center font-heading-semibold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                             {step === 1 ? "Set Up Your Store" : step === 2 ? "Contact & Location" : "Operations & KYC"}
                         </Text>
                         <Text className={`text-center px-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -307,16 +305,16 @@ export default function VendorOnboarding() {
                                         <Ionicons name="camera" size={16} color="white" />
                                     </View>
                                 </View>
-                                <Text className={`mt-3 font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Store Profile Photo</Text>
+                                <Text className={`mt-3 font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Store Profile Photo</Text>
                             </View>
 
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Business Details
                                 </Text>
                                 <View className={`h-[55px] px-4 rounded-2xl border-2 justify-center ${focusBusiness ? "border-primary bg-primary/5" : (darkTheme ? "border-white/10 bg-black" : "border-gray-200 bg-white")}`}>
                                     <TextInput
-                                        className={`text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                        className={`text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                         placeholder="Business / Store Name"
                                         placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                         value={businessName}
@@ -328,7 +326,7 @@ export default function VendorOnboarding() {
                             </View>
 
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>Business Model</Text>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>Business Model</Text>
                                 <View className="gap-3">
                                     <PressableScale 
                                         onPress={() => {
@@ -341,7 +339,7 @@ export default function VendorOnboarding() {
                                             <Ionicons name="water" size={24} color={vendorType === "retail_refill" ? "#0295f7" : (darkTheme ? "#888" : "#9CA3AF")} />
                                         </View>
                                         <View className="flex-1 ml-4">
-                                            <Text className={`text-base font-bold ${vendorType === "retail_refill" ? "text-primary" : (darkTheme ? "text-white" : "text-gray-800")}`}>
+                                            <Text className={`text-base font-sans-bold ${vendorType === "retail_refill" ? "text-primary" : (darkTheme ? "text-white" : "text-gray-800")}`}>
                                                 Retail Refill Station
                                             </Text>
                                             <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-500" : "text-gray-500"}`}>
@@ -364,7 +362,7 @@ export default function VendorOnboarding() {
                                             <Ionicons name="cube" size={24} color={vendorType === "wholesale_b2b" ? "#0295f7" : (darkTheme ? "#888" : "#9CA3AF")} />
                                         </View>
                                         <View className="flex-1 ml-4">
-                                            <Text className={`text-base font-bold ${vendorType === "wholesale_b2b" ? "text-primary" : (darkTheme ? "text-white" : "text-gray-800")}`}>
+                                            <Text className={`text-base font-sans-bold ${vendorType === "wholesale_b2b" ? "text-primary" : (darkTheme ? "text-white" : "text-gray-800")}`}>
                                                 Wholesale / B2B
                                             </Text>
                                             <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-500" : "text-gray-500"}`}>
@@ -379,7 +377,7 @@ export default function VendorOnboarding() {
                             </View>
 
                             <PressableScale onPress={handleStep1Next} className={`mt-4 h-[55px] rounded-2xl items-center justify-center bg-primary`}>
-                                <Text className="text-white font-bold text-lg">Next Step</Text>
+                                <Text className="text-white font-sans-bold text-lg">Next Step</Text>
                             </PressableScale>
                         </View>
                     )}
@@ -387,14 +385,14 @@ export default function VendorOnboarding() {
                     {step === 2 && (
                         <View className="gap-6">
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Phone Number
                                 </Text>
                                 <View className={`flex-row items-center h-[55px] rounded-2xl px-4 border-2 ${focusPhone ? "border-primary bg-primary/5" : (darkTheme ? "bg-black border-white/10" : "bg-white border-gray-200")}`}>
                                     <Ionicons name="call" size={20} color={darkTheme ? "#888" : "#9CA3AF"} />
-                                    <Text className={`ml-3 mr-1 font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
+                                    <Text className={`ml-3 mr-1 font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
                                     <TextInput
-                                        className={`flex-1 h-full ml-1 text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                        className={`flex-1 h-full ml-1 text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                         placeholder="712345678"
                                         placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                         keyboardType="phone-pad"
@@ -417,23 +415,23 @@ export default function VendorOnboarding() {
                                 ) : (
                                     <View className="flex-row items-center gap-2">
                                         <Ionicons name="location" size={20} color={darkTheme ? "#0295f7" : "#0295f7"} />
-                                        <Text className={`font-bold text-lg ${darkTheme ? "text-primary" : "text-primary"}`}>Auto-Detect GPS Location</Text>
+                                        <Text className={`font-sans-bold text-lg ${darkTheme ? "text-primary" : "text-primary"}`}>Auto-Detect GPS Location</Text>
                                     </View>
                                 )}
                             </PressableScale>
 
                             <View className="flex-row items-center">
                                 <View className={`flex-1 h-[1px] ${darkTheme ? "bg-white/10" : "bg-white"}`} />
-                                <Text className={`mx-4 text-xs font-bold ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>OR</Text>
+                                <Text className={`mx-4 text-xs font-sans-bold ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>OR</Text>
                                 <View className={`flex-1 h-[1px] ${darkTheme ? "bg-white/10" : "bg-white"}`} />
                             </View>
 
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>Manual Address</Text>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>Manual Address</Text>
                                 <View className="gap-3">
                                     <View className={`h-[55px] px-4 rounded-2xl border-2 justify-center ${focusAddress ? "border-primary bg-primary/5" : (darkTheme ? "border-white/10 bg-black" : "border-gray-200 bg-white")}`}>
                                         <TextInput
-                                            className={`text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                            className={`text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                             placeholder="e.g. Moi Avenue, Nairobi CBD"
                                             placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                             value={manualAddress}
@@ -449,7 +447,7 @@ export default function VendorOnboarding() {
                                     >
                                         <View className="flex-row items-center gap-2">
                                             <Ionicons name="pencil" size={16} color={darkTheme ? "#888" : "#6B7280"} />
-                                            <Text className={`font-semibold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>Use This Address</Text>
+                                            <Text className={`font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>Use This Address</Text>
                                         </View>
                                     </PressableScale>
                                 </View>
@@ -459,14 +457,14 @@ export default function VendorOnboarding() {
                                 <View className={`p-4 rounded-xl border ${darkTheme ? "bg-black border-green-900" : "bg-green-50 border-green-200"}`}>
                                     <View className="flex-row items-center gap-2">
                                         <Ionicons name="checkmark-circle" size={20} color={darkTheme ? "#4ade80" : "#16a34a"} />
-                                        <Text className={`text-base font-bold ${darkTheme ? "text-green-400" : "text-green-700"}`}>Location Set!</Text>
+                                        <Text className={`text-base font-sans-bold ${darkTheme ? "text-green-400" : "text-green-700"}`}>Location Set!</Text>
                                     </View>
                                     <Text className={`mt-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{locationData.address}</Text>
                                 </View>
                             )}
 
                             <PressableScale onPress={handleStep2Next} className={`mt-4 h-[55px] rounded-2xl items-center justify-center bg-primary`}>
-                                <Text className="text-white font-bold text-lg">Next Step</Text>
+                                <Text className="text-white font-sans-bold text-lg">Next Step</Text>
                             </PressableScale>
                         </View>
                     )}
@@ -474,14 +472,14 @@ export default function VendorOnboarding() {
                     {step === 3 && (
                         <View className="gap-6">
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Operating Hours
                                 </Text>
                                 <View className="flex-row justify-between items-center">
                                     <View className={`flex-1 h-[55px] px-4 rounded-2xl border-2 justify-center ${darkTheme ? "border-white/10 bg-black" : "border-gray-200 bg-white"}`}>
                                         <Text className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Opens At</Text>
                                         <TextInput
-                                            className={`text-base font-bold ${darkTheme ? "text-white" : "text-black"}`}
+                                            className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}
                                             placeholder="07:00"
                                             placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                             value={shiftStart}
@@ -489,12 +487,12 @@ export default function VendorOnboarding() {
                                         />
                                     </View>
                                     <View className="px-4">
-                                        <Text className={`font-bold ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>TO</Text>
+                                        <Text className={`font-sans-bold ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>TO</Text>
                                     </View>
                                     <View className={`flex-1 h-[55px] px-4 rounded-2xl border-2 justify-center ${darkTheme ? "border-white/10 bg-black" : "border-gray-200 bg-white"}`}>
                                         <Text className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Closes At</Text>
                                         <TextInput
-                                            className={`text-base font-bold ${darkTheme ? "text-white" : "text-black"}`}
+                                            className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}
                                             placeholder="19:00"
                                             placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                             value={shiftEnd}
@@ -505,12 +503,12 @@ export default function VendorOnboarding() {
                             </View>
 
                             <View>
-                                <Text className={`text-base font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-2 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Business License / KRA PIN (Optional)
                                 </Text>
                                 <View className={`h-[55px] px-4 rounded-2xl border-2 justify-center ${focusLicense ? "border-primary bg-primary/5" : (darkTheme ? "border-white/10 bg-black" : "border-gray-200 bg-white")}`}>
                                     <TextInput
-                                        className={`text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                        className={`text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                         placeholder="e.g. A012345678Z"
                                         placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                         value={businessLicense}
@@ -532,7 +530,7 @@ export default function VendorOnboarding() {
                                 {submitting ? (
                                     <Ionicons name="sync" size={32} color={BRAND.white} />
                                 ) : (
-                                    <Text className="text-white font-bold text-lg">Complete Registration</Text>
+                                    <Text className="text-white font-sans-bold text-lg">Complete Registration</Text>
                                 )}
                             </PressableScale>
                         </View>

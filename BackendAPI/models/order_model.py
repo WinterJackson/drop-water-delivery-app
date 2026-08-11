@@ -88,6 +88,17 @@ class Order(Base):
   customer_note = Column(Text, nullable=True)
   actual_floor_level = Column(Integer, nullable=True)
   proof_url = Column(String, nullable=True)
+  #: What this order cost the platform to process — Safaricom's C2B tariff on
+  #: an M-Pesa order, or the handling cost of a cash one — and what was left
+  #: after it. Frozen at quote time like every other split beside it: changing
+  #: the tariff setting tomorrow must not restate yesterday's margin.
+  #:
+  #: Neither was modelled at all before, so every profitability figure on the
+  #: console was gross presented as net. Nullable, and null means *unknown* on a
+  #: historic order rather than zero.
+  platform_cost = Column(Numeric(10, 2), nullable=True)
+  platform_net = Column(Numeric(10, 2), nullable=True)
+
   cancellation_reason = Column(String, nullable=True)
   created_at= Column(TIMESTAMP(timezone=True), server_default=func.now())
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())

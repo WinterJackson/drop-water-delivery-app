@@ -59,14 +59,23 @@ async def test_a_second_account_on_the_same_handset_is_refused():
 
 
 @pytest.mark.asyncio
-async def test_an_account_with_no_device_id_is_not_punished_for_it():
-    """Older accounts predate the field.
+async def test_an_account_with_no_device_is_refused_the_offer():
+    """Reversed deliberately, because "not punished for it" was the whole hole.
 
-    Refusing them a first order would be a worse error than the one being
-    closed — the platform would be denying a genuine customer their offer on the
-    strength of a column that did not exist when they registered.
+    No app ever sent `device_id`, so **every** account carried a null and every
+    null was treated as eligible. The gate had never once fired: the discount
+    was limited per account, and accounts are free. Treating an absent device as
+    "cannot be checked, so allow" is indistinguishable from having no gate.
+
+    `welcome_offer_requires_device` is the escape hatch, and it fails open only
+    when an operator deliberately sets it that way.
     """
-    assert await welcome_offer_available(_session(), _customer(device=None)) is True
+    from services import platform_config_service as config
+
+    assert await welcome_offer_available(_session(), _customer(device=None)) is False
+
+    with config.temporarily({**config.effective(), "welcome_offer_requires_device": False}):
+        assert await welcome_offer_available(_session(), _customer(device=None)) is True
 
 
 @pytest.mark.asyncio

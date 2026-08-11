@@ -224,11 +224,18 @@ async def reply_to_own_ticket(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """A follow-up reopens the ticket.
+    """A follow-up reopens the ticket. **Always** — including from `pending`.
 
     A requester replying to something marked resolved is saying it is not
     resolved, and leaving it closed would lose them in the queue — which is the
     most common way a support system quietly fails the people using it.
+
+    `pending` used to be excluded, and that was the same bug wearing a different
+    hat. An administrator's reply moves a ticket to `pending`, meaning "waiting
+    on them"; the moment they answer it is waiting on *us* again. Leaving it
+    `pending` kept it labelled as somebody else's turn, and — because the nav
+    badge counts only `open` — meant the console was never told at all. The
+    person who replied within a minute became invisible.
     """
     account = await _resolve_account(db, user_type, user["sub"], x_store_id)
     ticket = await db.get(SupportTicket, ticket_id)
@@ -250,7 +257,7 @@ async def reply_to_own_ticket(
     # A JSONB list mutated in place is invisible to the ORM without this.
     flag_modified(ticket, "messages")
 
-    if ticket.status in ("resolved", "closed"):
+    if ticket.status != "open":
         ticket.status = "open"
         ticket.resolved_at = None
 

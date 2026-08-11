@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useContext } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from '@/components/ui/Text';
 
 import PressableScale from "@/components/ui/PressableScale";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -47,7 +48,7 @@ export default function LowStockCard({ products }: { products?: LowStockProduct[
         <View className="flex-row items-center justify-between mb-3">
           <View className="flex-row items-center">
             <Ionicons name="alert-circle" size={22} color="#d97706" />
-            <Text className={`font-bold text-lg ml-2 ${darkTheme ? "text-amber-100" : "text-amber-900"}`}>
+            <Text className={`font-sans-bold text-lg ml-2 ${darkTheme ? "text-amber-100" : "text-amber-900"}`}>
               Needs restocking
             </Text>
           </View>
@@ -55,7 +56,7 @@ export default function LowStockCard({ products }: { products?: LowStockProduct[
         </View>
 
         {outOfStock.length > 0 && (
-          <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-red-300" : "text-red-700"}`}>
+          <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-red-300" : "text-red-700"}`}>
             {outOfStock.length === 1
               ? `${outOfStock[0].name} is out of stock — customers can't order it.`
               : `${outOfStock.length} products are out of stock — customers can't order them.`}
@@ -70,7 +71,7 @@ export default function LowStockCard({ products }: { products?: LowStockProduct[
             >
               {product.name}
             </Text>
-            <Text className={`text-sm font-bold ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>
+            <Text className={`text-sm font-sans-bold ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>
               {product.stock} left
             </Text>
           </View>

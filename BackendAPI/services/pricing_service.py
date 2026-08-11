@@ -32,7 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.vendor_model import Vendor
 from services import platform_config_service as config
+from services import delivery_types
 from services.dispatch_policy import DispatchPolicy
+from utils.money import money_str
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,34 @@ def bottle_deposit_for(capacity_litres: int) -> Optional[Decimal]:
 
 
 def welcome_discount_rate() -> Decimal:
-    """Off the bottle deposit on a customer's first order. The platform absorbs
-    it as an acquisition cost — it is never charged to the vendor."""
+    """Off the deposit for **one** bottle on a customer's first order.
+
+    The platform absorbs it as an acquisition cost — it is never charged to the
+    vendor. Scoped to a single bottle deliberately: applied to the whole
+    deposit, a first order of six 20 L bottles cost the platform KSH 540 of pure
+    margin, and the cheapest way to claim the maximum was to order bottles the
+    customer did not want and return them. One bottle is the incentive to try
+    the platform; six is an arbitrage.
+    """
     return config.get_decimal("welcome_discount_rate")
+
+
+def cheapest_bottle_deposit(items: Iterable) -> Decimal:
+    """The deposit on the single least expensive deposit-bearing bottle.
+
+    The *cheapest*, not the first or the dearest: the discount is a fixed,
+    predictable acquisition cost the platform can budget for, and taking the
+    largest would make the cost depend on what a stranger put in their basket.
+    """
+    deposits = []
+    for item in items:
+        product = getattr(item, "product", None)
+        if product is None:
+            continue
+        per_bottle = bottle_deposit_for(int(_d(getattr(product, "capacity", 0))))
+        if per_bottle is not None and per_bottle > ZERO:
+            deposits.append(per_bottle)
+    return min(deposits) if deposits else ZERO
 
 
 def min_chargeable_total() -> Decimal:
@@ -156,6 +183,9 @@ class OrderQuote:
     #: like any other line and cleared by `create_order`.
     debt_settlement: Decimal
     welcome_discount: Decimal
+    #: Taken off for paying by M-Pesa rather than cash. A reward, not a cash
+    #: surcharge — see `compute_order_quote`.
+    mpesa_discount: Decimal
     wallet_discount: Decimal
 
     # ── Result ──
@@ -180,15 +210,22 @@ class OrderQuote:
             + self.delivery_fee
             + self.service_fee
             + self.surge_fee
-            + self.delivery_markup
             + self.payload_surcharge
             + self.staircase_surcharge
             + self.bottle_deposit
             + self.debt_settlement
-        )
+        )  # `delivery_markup` is inside `delivery_fee`, never beside it
 
     def as_dict(self) -> dict:
-        """JSON-serialisable breakdown for the client to render verbatim."""
+        """JSON-serialisable breakdown for the client to render verbatim.
+
+        Money is a decimal string. This is the single most-read money payload
+        on the platform — the cart renders every line of it and the customer is
+        charged `total` — and it went out as JSON numbers, so the one figure
+        the whole pricing discipline exists to protect was a float by the time
+        anybody saw it. `total_weight_kg` stays a number: it is a weight, and
+        the wholesale MOQ check compares it against `moq_kg`.
+        """
         return {
             "vendor_id": str(self.vendor_id),
             "vendor_type": self.vendor_type,
@@ -198,18 +235,19 @@ class OrderQuote:
             "vehicle_class": self.vehicle_class,
             "distance_km": self.distance_km,
             "estimated_minutes": self.estimated_minutes,
-            "product_subtotal": float(self.product_subtotal),
-            "delivery_fee": float(self.delivery_fee),
-            "service_fee": float(self.service_fee),
-            "surge_fee": float(self.surge_fee),
-            "delivery_markup": float(self.delivery_markup),
-            "payload_surcharge": float(self.payload_surcharge),
-            "staircase_surcharge": float(self.staircase_surcharge),
-            "bottle_deposit": float(self.bottle_deposit),
-            "debt_settlement": float(self.debt_settlement),
-            "welcome_discount": float(self.welcome_discount),
-            "wallet_discount": float(self.wallet_discount),
-            "total": float(self.total),
+            "product_subtotal": money_str(self.product_subtotal),
+            "delivery_fee": money_str(self.delivery_fee),
+            "service_fee": money_str(self.service_fee),
+            "surge_fee": money_str(self.surge_fee),
+            "delivery_markup": money_str(self.delivery_markup),
+            "payload_surcharge": money_str(self.payload_surcharge),
+            "staircase_surcharge": money_str(self.staircase_surcharge),
+            "bottle_deposit": money_str(self.bottle_deposit),
+            "debt_settlement": money_str(self.debt_settlement),
+            "welcome_discount": money_str(self.welcome_discount),
+            "mpesa_discount": money_str(self.mpesa_discount),
+            "wallet_discount": money_str(self.wallet_discount),
+            "total": money_str(self.total),
             "surge_active": self.surge_active,
             "is_welcome_offer": self.is_welcome_offer,
         }
@@ -262,15 +300,27 @@ async def welcome_offer_available(session: AsyncSession, user) -> bool:
       margin, it could be farmed indefinitely with fresh sign-ups from one
       phone.
 
-    A null `device_id` cannot be checked and is not treated as a failure: older
-    accounts predate the field, and refusing them a first order would be a worse
-    error than the one being closed.
+    A null `device_id` is refused the offer when the platform requires one
+    (`welcome_offer_requires_device`, on by default). This is the opposite of
+    what it used to do, and the reversal matters: no app sent the field, so
+    **every** account had a null and every account passed. The gate was not
+    merely weak, it had never once been consulted — the discount was scoped to
+    one per account, and accounts are free.
+
+    Turning the requirement off is the escape hatch for a client release that
+    cannot report a device, and it fails *open* by explicit choice rather than
+    by accident.
     """
     if user is None or bool(getattr(user, "has_used_welcome_offer", True)):
         return False
 
     device_id = getattr(user, "device_id", None)
     if not device_id:
+        if config.get_bool("welcome_offer_requires_device"):
+            logger.info(
+                "Welcome offer refused for user %s: no device recorded.", user.id
+            )
+            return False
         return True
 
     from models.user_model import User as _User
@@ -323,6 +373,7 @@ async def compute_order_quote(
     lng: float,
     apply_wallet: bool = True,
     wallet_balance_override: Optional[Decimal] = None,
+    payment_method: str = "mpesa",
 ) -> OrderQuote:
     """Price a single-vendor set of cart (or order) items.
 
@@ -345,6 +396,10 @@ async def compute_order_quote(
     if not items:
         raise HTTPException(status_code=400, detail="Your cart is empty. Add an item before checking out.")
 
+    # One canonical value from here down. Old app builds still send `quick_swap`
+    # and `keep_my_bottle`, and they must price as what they meant.
+    delivery_type = delivery_types.normalise(delivery_type)
+
     vendor_type = vendor_type_of(vendor)
     total_quantity, total_weight_kg, product_subtotal = _cart_payload(items)
 
@@ -356,11 +411,11 @@ async def compute_order_quote(
     lat_from = getattr(vendor, "lat", None)
     lng_from = getattr(vendor, "lng", None)
 
-    wholesale_base = 0.0
-    wholesale_per_km = 0.0
+    wholesale_base = Decimal("0")
+    wholesale_per_km = Decimal("0")
     if vendor_type == "wholesale_b2b" and vendor is not None:
-        wholesale_base = float(_d(getattr(vendor, "wholesale_base_delivery_fee", 0)))
-        wholesale_per_km = float(_d(getattr(vendor, "wholesale_per_km_fee", 0)))
+        wholesale_base = _d(getattr(vendor, "wholesale_base_delivery_fee", 0))
+        wholesale_per_km = _d(getattr(vendor, "wholesale_per_km_fee", 0))
 
     delivery = calculate_delivery_fee(
         lat_from=lat_from or 0.0,
@@ -383,11 +438,34 @@ async def compute_order_quote(
     welcome_discount = ZERO
     is_welcome_offer = False
 
-    if delivery_type == "keep_my_bottle" or is_first_order:
+    # **The type alone decides.** It used to be `keep_my_bottle or
+    # is_first_order`, and the second half was standing in for `new_bottle`
+    # before that type existed — so a first-time customer exchanging a bottle
+    # they already owned was charged a deposit for it, and a customer having
+    # their *own* bottle refilled was charged one on their own property.
+    if delivery_types.takes_deposit(delivery_type):
         bottle_deposit = _bottle_deposit(items)
+
+        # The ceiling, checked here rather than at `create_order`, so the
+        # customer is refused *before* M-Pesa takes the money. Unlimited bottles
+        # against a deposit is unlimited liability, and an unlimited-size target
+        # for anyone who works out that the deposit is the cheapest way to buy a
+        # twenty-litre bottle at cost.
+        if bottle_deposit > ZERO:
+            from services import customer_bottle_service
+
+            await customer_bottle_service.assert_can_hold(
+                session, user=user, additional=customer_bottle_service.bottles_in(items)
+            )
+
         if is_first_order and bottle_deposit > ZERO:
-            welcome_discount = _money(bottle_deposit * welcome_discount_rate())
-            is_welcome_offer = True
+            # **One bottle only.** Against the whole deposit, a first order of
+            # six 20 L bottles cost the platform KSH 540 out of pure margin, and
+            # the cheapest way to claim the maximum was to order bottles you did
+            # not want and hand them straight back.
+            one_bottle = min(cheapest_bottle_deposit(items), bottle_deposit)
+            welcome_discount = _money(one_bottle * welcome_discount_rate())
+            is_welcome_offer = welcome_discount > ZERO
 
     # ── Surcharges ──────────────────────────────────────────────────────────
     payload_surcharge = ZERO
@@ -411,11 +489,16 @@ async def compute_order_quote(
     service_fee = service_fee_for(vendor_type)
     surge_active = is_surge_active()
     surge_fee = _money(config.get_decimal("surge_fee")) if surge_active else ZERO
-    delivery_markup = ZERO
-    if vendor_type == "wholesale_b2b":
-        markup_rate = config.get_decimal("wholesale_delivery_markup_rate")
 
-        delivery_markup = _money(delivery_fee * markup_rate)
+    # Platform margin taken **out of** the delivery fee, on both vendor types.
+    # It is not added to `gross` — the customer pays the delivery fee they were
+    # shown, and this is how that fee is divided. Adding it beside the fee made
+    # the rendered line understate what was charged.
+    markup_rate = config.get_decimal(
+        "wholesale_delivery_markup_rate" if vendor_type == "wholesale_b2b"
+        else "retail_delivery_markup_rate"
+    )
+    delivery_markup = _money(delivery_fee * markup_rate)
 
     # ── Outstanding debt ────────────────────────────────────────────────────
     # A cancellation penalty or an approved staircase charge from an earlier
@@ -431,23 +514,36 @@ async def compute_order_quote(
         if ZERO < outstanding < max_debt_before_block():
             debt_settlement = outstanding
 
+    # `delivery_markup` is **not** here: it comes out of `delivery_fee`, which
+    # is already in this sum. Adding it too would charge the customer the
+    # platform's margin twice and make the rendered delivery line understate
+    # itself.
     gross = _money(
         product_subtotal
         + delivery_fee
         + service_fee
         + surge_fee
-        + delivery_markup
         + payload_surcharge
         + staircase_surcharge
         + bottle_deposit
         + debt_settlement
     )
 
+    # ── Paying by M-Pesa instead of cash ────────────────────────────────────
+    # A discount, never a cash surcharge. Arithmetically identical; behaviourally
+    # not close. A surcharge reads as a penalty for paying the way most of this
+    # market pays and costs goodwill the platform cannot spare, while the same
+    # money framed as a reward steers volume to the method that costs nothing to
+    # police. Set `mpesa_payment_discount` to 0 to remove the steer entirely.
+    mpesa_discount = ZERO
+    if payment_method != "cash":
+        mpesa_discount = _money(min(config.get_decimal("mpesa_payment_discount"), gross))
+
     # ── Discounts ───────────────────────────────────────────────────────────
     # Welcome discount first (it reduces the deposit component), then wallet
     # credit against the remainder. Order matters: reversing it lets the wallet
     # over-discount when both apply.
-    after_welcome = _money(gross - welcome_discount)
+    after_welcome = _money(gross - welcome_discount - mpesa_discount)
 
     wallet_discount = ZERO
     if apply_wallet:
@@ -469,14 +565,15 @@ async def compute_order_quote(
         total = min_chargeable_total()
 
     revenue = calculate_revenue_splits(
-        product_total=float(product_subtotal),
-        delivery_fee=float(delivery_fee),
+        product_total=product_subtotal,
+        delivery_fee=delivery_fee,
         vendor_type=vendor_type,
-        bottle_deposit=float(bottle_deposit),
-        rider_surcharges=float(payload_surcharge + staircase_surcharge),
+        bottle_deposit=bottle_deposit,
+        rider_surcharges=payload_surcharge + staircase_surcharge,
         delivery_type=delivery_type,
-        welcome_discount=float(welcome_discount),
-        debt_settlement=float(debt_settlement),
+        welcome_discount=welcome_discount,
+        debt_settlement=debt_settlement,
+        payment_method=payment_method,
     )
 
     return OrderQuote(
@@ -500,6 +597,7 @@ async def compute_order_quote(
         bottle_deposit=bottle_deposit,
         debt_settlement=debt_settlement,
         welcome_discount=welcome_discount,
+        mpesa_discount=mpesa_discount,
         wallet_discount=wallet_discount,
         total=total,
         surge_active=surge_active,
@@ -508,12 +606,15 @@ async def compute_order_quote(
     )
 
 
-def validate_quote(quote: OrderQuote, items: list, *, user=None) -> None:
+def validate_quote(quote: OrderQuote, items: list, *, user=None, vendor=None) -> None:
     """Every gate that must pass before money moves.
 
     Called *before* the STK push so a validation failure can never leave the
     customer debited with no order (see H8). `create_order` calls it again under
     its row lock, because stock can change in between.
+
+    `vendor` is optional so a caller that has priced without loading the row
+    still validates everything else; every checkout path passes it.
     """
     # 1. Capacity + wholesale MOQ + retail distance/quantity caps.
     DispatchPolicy.validate_cart_preflight(
@@ -557,6 +658,16 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None) -> None:
         # Vendor identity is checked in create_order where the Vendor row is
         # loaded; nothing to assert here without another query.
         pass
+
+    # 5. The store's own minimum, on the goods rather than the total — see
+    #    `vendor_availability.assert_meets_minimum`. Here rather than beside the
+    #    open/closed check because this one is basket arithmetic, and putting it
+    #    in `validate_quote` reaches the quote, the pre-push validation and
+    #    `create_order`'s locked re-check without three call sites.
+    if vendor is not None:
+        from services import vendor_availability
+
+        vendor_availability.assert_meets_minimum(vendor, quote.product_subtotal)
 
     if quote.total < min_chargeable_total():
         raise HTTPException(status_code=400, detail="Order total must be greater than zero.")

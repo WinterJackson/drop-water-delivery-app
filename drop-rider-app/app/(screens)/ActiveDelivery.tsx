@@ -11,12 +11,16 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from "expo-location";
 import { useContext, useEffect, useRef, useState, useMemo } from "react";
 import {
-    Dimensions, Linking, Platform,
-    Text,
+    Dimensions,
+    Linking,
+    Platform,
     View,
-    Modal, ScrollView, TouchableOpacity, StatusBar,
-    TextInput
+    Modal,
+    ScrollView,
+    TouchableOpacity,
+    StatusBar,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -94,6 +98,7 @@ if (Platform.OS !== 'web') {
 }
 
 import { darkMapStyle, standardMapStyle } from "@/constants/mapStyles";
+import { formatMoney } from "@/utils/money";
 
 const { width } = Dimensions.get("window");
 
@@ -677,7 +682,6 @@ export default function ActiveDelivery() {
     return overlays;
   }, [routeCoords, currentLocation?.latitude, currentLocation?.longitude, activeOrder?.id, activeOrdersList]);
 
-
   return (
     <View className={`flex-1 ${darkTheme ? "bg-surface" : "bg-white"}`}>
       <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
@@ -696,7 +700,7 @@ export default function ActiveDelivery() {
                 <TouchableOpacity onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </TouchableOpacity>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Active Delivery
                 </Text>
             </View>
@@ -755,13 +759,13 @@ export default function ActiveDelivery() {
                   onPress={() => handleZoom(true)}
                   className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
                 >
-                  <Text className={`text-xl font-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>+</Text>
+                  <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>+</Text>
                 </PressableScale>
                 <PressableScale
                   onPress={() => handleZoom(false)}
                   className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
                 >
-                  <Text className={`text-xl font-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>−</Text>
+                  <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>−</Text>
                 </PressableScale>
               </View>
             )}
@@ -795,19 +799,19 @@ export default function ActiveDelivery() {
               <View className={`p-4 rounded-3xl border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`}>
                 <View className="flex-row justify-between items-start">
                   <View>
-                    <Text className={`font-semibold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                    <Text className={`font-sans-semibold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
                       Order #{activeOrder.id?.substring(0, 8)}
                     </Text>
-                    <Text className={`text-sm mt-1 font-semibold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>
+                    <Text className={`text-sm mt-1 font-sans-semibold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>
                       {STATUS_LABELS[activeOrder.order_status] || activeOrder.order_status}
                     </Text>
                     <Text className={`text-sm mt-1.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
-                      KSH {activeOrder.total_amount} · {activeOrder.order_item?.length || 0} item(s)
+                      {formatMoney(activeOrder.total_amount)} · {activeOrder.order_item?.length || 0} item(s)
                     </Text>
                     {activeOrder.payment_method === "cash" && (
                       <View className="mt-2 flex-row items-center gap-1 bg-amber-500/10 px-2 py-1 rounded-md self-start border border-amber-500/20">
                         <Ionicons name="cash" size={14} color="#f59e0b" />
-                        <Text className="text-xs font-bold text-amber-600">Collect Cash: KSH {activeOrder.total_amount}</Text>
+                        <Text className="text-xs font-sans-bold text-amber-600">Collect Cash: {formatMoney(activeOrder.total_amount)}</Text>
                       </View>
                     )}
                   </View>
@@ -821,7 +825,7 @@ export default function ActiveDelivery() {
                     disabled={(activeOrder.order_status !== "accepted" && activeOrder.order_status !== "ready")}
                   >
                     <Ionicons name="compass-outline" size={18} color={(activeOrder.order_status === "accepted" || activeOrder.order_status === "ready") ? BRAND.primary : "#9ca3af"} />
-                    <Text className={`font-semibold ${(activeOrder.order_status === "accepted" || activeOrder.order_status === "ready") ? "text-accentbg" : darkTheme ? "text-on-surface" : "text-gray-800"}`}>Nav to Pickup</Text>
+                    <Text className={`font-sans-semibold ${(activeOrder.order_status === "accepted" || activeOrder.order_status === "ready") ? "text-accentbg" : darkTheme ? "text-on-surface" : "text-gray-800"}`}>Nav to Pickup</Text>
                   </PressableScale>
                   
                   <PressableScale 
@@ -830,14 +834,14 @@ export default function ActiveDelivery() {
                     disabled={(activeOrder.order_status !== "picked_up")}
                   >
                     <Ionicons name="location-outline" size={18} color={(activeOrder.order_status === "picked_up") ? BRAND.primary : "#9ca3af"} />
-                    <Text className={`font-semibold ${(activeOrder.order_status === "picked_up") ? "text-accentbg" : darkTheme ? "text-on-surface" : "text-gray-800"}`}>Nav to Dropoff</Text>
+                    <Text className={`font-sans-semibold ${(activeOrder.order_status === "picked_up") ? "text-accentbg" : darkTheme ? "text-on-surface" : "text-gray-800"}`}>Nav to Dropoff</Text>
                   </PressableScale>
                 </View>
 
                 {/* ── Cross-Party Contact Cards ────────────────────────── */}
                 {contacts.length > 0 && (
                   <View className={`mt-4 pt-4 border-t ${darkTheme ? "border-outline-variant" : "border-gray-200"}`}>
-                    <Text className={`font-bold text-base mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>Contact</Text>
+                    <Text className={`font-sans-bold text-base mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>Contact</Text>
                     <View className="gap-2">
                       {customerContact && (
                         <PressableScale
@@ -853,7 +857,7 @@ export default function ActiveDelivery() {
                             <Ionicons name="person" size={18} color={TOAST.success} />
                           </View>
                           <View className="flex-1">
-                            <Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-slate-900"}`}>{customerContact.name}</Text>
+                            <Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-slate-900"}`}>{customerContact.name}</Text>
                             <Text className={`text-xs ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Tap to call customer</Text>
                           </View>
                           <View className="w-9 h-9 rounded-full items-center justify-center" style={{ backgroundColor: TOAST.success }}>
@@ -875,7 +879,7 @@ export default function ActiveDelivery() {
                             <Ionicons name="storefront" size={18} color={BRAND.primary} />
                           </View>
                           <View className="flex-1">
-                            <Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-slate-900"}`}>{vendorContact.name}</Text>
+                            <Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-slate-900"}`}>{vendorContact.name}</Text>
                             <Text className={`text-xs ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Tap to call vendor</Text>
                           </View>
                           <View className="w-9 h-9 rounded-full items-center justify-center" style={{ backgroundColor: BRAND.primary }}>
@@ -917,7 +921,7 @@ export default function ActiveDelivery() {
                   >
                     <View className="flex-row items-center gap-1">
                       {!isRejecting && <Ionicons name="close-circle-outline" size={20} color={TOAST.error} />}
-                      <Text style={{ color: TOAST.error }} className="font-bold text-lg">
+                      <Text style={{ color: TOAST.error }} className="font-sans-bold text-lg">
                         {isRejecting ? "Rejecting..." : "Reject Delivery"}
                       </Text>
                     </View>
@@ -925,21 +929,21 @@ export default function ActiveDelivery() {
                 )}
                 {activeOrder.order_status === "ready" && (
                   <PressableScale onPress={confirmPickup} className="py-4 rounded-3xl items-center shadow-sm" style={{ backgroundColor: BRAND.primary }}>
-                    <Text className="text-white font-bold text-lg">Mark as Picked Up</Text>
+                    <Text className="text-white font-sans-bold text-lg">Mark as Picked Up</Text>
                   </PressableScale>
                 )}
                 {(activeOrder.order_status === "picked_up") && (
                   <>
                     {/* Bottle Counter UI */}
                     <View className={`my-4 p-4 rounded-2xl border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
-                      <Text className={`font-bold mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>Empty Bottles Retrieved</Text>
+                      <Text className={`font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>Empty Bottles Retrieved</Text>
                       <View className="flex-row items-center justify-between">
                         <PressableScale onPress={() => setEmptiesReceived(Math.max(0, emptiesReceived - 1))} className="w-12 h-12 rounded-full items-center justify-center border" style={{ borderColor: TOAST.error + '33', backgroundColor: TOAST.error + '1A' }}>
-                          <Text style={{ color: TOAST.error }} className="font-bold text-2xl">-</Text>
+                          <Text style={{ color: TOAST.error }} className="font-sans-bold text-2xl">-</Text>
                         </PressableScale>
-                        <Text className={`text-3xl font-black ${darkTheme ? "text-white" : "text-gray-900"}`}>{emptiesReceived}</Text>
+                        <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-gray-900"}`}>{emptiesReceived}</Text>
                         <PressableScale onPress={() => setEmptiesReceived(emptiesReceived + 1)} className="w-12 h-12 rounded-full items-center justify-center border" style={{ borderColor: TOAST.success + '33', backgroundColor: TOAST.success + '1A' }}>
-                          <Text style={{ color: TOAST.success }} className="font-bold text-2xl">+</Text>
+                          <Text style={{ color: TOAST.success }} className="font-sans-bold text-2xl">+</Text>
                         </PressableScale>
                       </View>
                       
@@ -948,7 +952,7 @@ export default function ActiveDelivery() {
                         <View className="mt-3 p-3 rounded-xl border flex-row items-start gap-2" style={{ borderColor: TOAST.error + '33', backgroundColor: TOAST.error + '1A' }}>
                           <Ionicons name="warning-outline" size={18} color={TOAST.error} style={{ marginTop: 2 }} />
                           <View className="flex-1">
-                            <Text style={{ color: TOAST.error }} className="text-sm font-semibold">{computedEmptiesExpected - emptiesReceived} Bottles Missing (Deficit)</Text>
+                            <Text style={{ color: TOAST.error }} className="text-sm font-sans-semibold">{computedEmptiesExpected - emptiesReceived} Bottles Missing (Deficit)</Text>
                             <Text style={{ color: TOAST.error, opacity: 0.8 }} className="text-xs mt-1">Proof Photo is mandatory when reporting missing bottles.</Text>
                           </View>
                         </View>
@@ -958,14 +962,14 @@ export default function ActiveDelivery() {
                       {(computedEmptiesExpected < emptiesReceived) && (
                         <View className="mt-3 p-3 rounded-xl border flex-row items-center gap-2" style={{ borderColor: TOAST.success + '33', backgroundColor: TOAST.success + '1A' }}>
                           <Ionicons name="checkmark-circle-outline" size={18} color={TOAST.success} />
-                          <Text style={{ color: TOAST.success }} className="text-sm font-semibold">Extra empty bottles retrieved.</Text>
+                          <Text style={{ color: TOAST.success }} className="text-sm font-sans-semibold">Extra empty bottles retrieved.</Text>
                         </View>
                       )}
                     </View>
 
                     <PressableScale onPress={captureProofAndDeliver} className="py-4 rounded-3xl items-center shadow-sm flex-row justify-center gap-2" style={{ backgroundColor: BRAND.primary }}>
                       <Ionicons name="camera-outline" size={24} color={BRAND.white} />
-                      <Text className="text-white font-bold text-lg">Dropoff & Take Photo</Text>
+                      <Text className="text-white font-sans-bold text-lg">Dropoff & Take Photo</Text>
                     </PressableScale>
 
                     <PressableScale 
@@ -975,7 +979,7 @@ export default function ActiveDelivery() {
                       style={{ borderColor: TOAST.error + '4D', backgroundColor: darkTheme ? TOAST.error + '1A' : TOAST.error + '0D' }}
                     >
                       {!isReportingMismatch && <Ionicons name="warning-outline" size={18} color={TOAST.error} />}
-                      <Text style={{ color: TOAST.error }} className="font-bold text-base">
+                      <Text style={{ color: TOAST.error }} className="font-sans-bold text-base">
                         {isReportingMismatch ? "Reporting..." : "Report Floor Level Mismatch"}
                       </Text>
                     </PressableScale>
@@ -986,7 +990,7 @@ export default function ActiveDelivery() {
                       style={{ borderColor: TOAST.error + '4D', backgroundColor: darkTheme ? TOAST.error + '1A' : TOAST.error + '0D' }}
                     >
                       <Ionicons name="flag-outline" size={18} color={TOAST.error} />
-                      <Text style={{ color: TOAST.error }} className="font-bold text-base">
+                      <Text style={{ color: TOAST.error }} className="font-sans-bold text-base">
                         Flag Damaged Empty Bottle
                       </Text>
                     </PressableScale>
@@ -995,7 +999,7 @@ export default function ActiveDelivery() {
                     {(emptiesReceived >= computedEmptiesExpected) && (
                       <PressableScale onPress={() => updateDeliveryStatus("delivered")} className="py-4 mt-2 rounded-3xl items-center shadow-sm flex-row justify-center gap-2" style={{ backgroundColor: BRAND.primary }}>
                         <Ionicons name="checkmark-circle-outline" size={24} color={BRAND.white} />
-                        <Text className="text-white font-bold text-lg">Skip Photo, Mark Delivered</Text>
+                        <Text className="text-white font-sans-bold text-lg">Skip Photo, Mark Delivered</Text>
                       </PressableScale>
                     )}
 
@@ -1006,7 +1010,7 @@ export default function ActiveDelivery() {
                          Linking.openURL(`sms:${gatewayNumber}?body=DELIVERED ${activeOrder.id?.substring(0,8)}`);
                        }} 
                        className={`py-4 rounded-3xl items-center border ${darkTheme ? "border-gray-800 bg-white/5" : "border-gray-200 bg-white"}`}>
-                      <Text className={`font-bold text-sm ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                      <Text className={`font-sans-bold text-sm ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                         No Data? SMS to Complete
                       </Text>
                     </PressableScale>
@@ -1015,7 +1019,7 @@ export default function ActiveDelivery() {
                 {activeOrder.order_status === "mismatch_pending" && (
                   <View className="py-6 items-center">
                     <Ionicons name="hourglass-outline" size={64} color={TOAST.error} className="mb-4" />
-                    <Text style={{ color: TOAST.error }} className={`text-center font-bold text-lg`}>
+                    <Text style={{ color: TOAST.error }} className={`text-center font-sans-bold text-lg`}>
                       Delivery Paused
                     </Text>
                     <Text className={`text-center mt-2 mb-6 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -1024,14 +1028,14 @@ export default function ActiveDelivery() {
                     
                     <PressableScale onPress={captureProofAndDeliver} className="py-4 px-6 rounded-3xl items-center shadow-sm flex-row justify-center gap-2 mb-3" style={{ backgroundColor: BRAND.primary }}>
                       <Ionicons name="camera-outline" size={24} color={BRAND.white} />
-                      <Text className="text-white font-bold text-lg">Dropoff & Take Photo</Text>
+                      <Text className="text-white font-sans-bold text-lg">Dropoff & Take Photo</Text>
                     </PressableScale>
 
                     {/* Quick Deliver */}
                     {(emptiesReceived >= computedEmptiesExpected) && (
                       <PressableScale onPress={() => updateDeliveryStatus("delivered")} className="py-4 px-6 rounded-3xl items-center shadow-sm flex-row justify-center gap-2" style={{ backgroundColor: BRAND.primary }}>
                         <Ionicons name="checkmark-circle-outline" size={24} color={BRAND.white} />
-                        <Text className="text-white font-bold text-lg">Skip Photo, Mark Delivered</Text>
+                        <Text className="text-white font-sans-bold text-lg">Skip Photo, Mark Delivered</Text>
                       </PressableScale>
                     )}
                   </View>
@@ -1039,7 +1043,7 @@ export default function ActiveDelivery() {
                 {activeOrder.order_status === "pending_review" && (
                   <View className="py-6 items-center">
                     <Ionicons name="search-outline" size={64} color={TOAST.error} className="mb-4" />
-                    <Text style={{ color: TOAST.error }} className={`text-center font-bold text-lg`}>
+                    <Text style={{ color: TOAST.error }} className={`text-center font-sans-bold text-lg`}>
                       Under Review
                     </Text>
                     <Text className={`text-center mt-2 mb-6 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -1056,7 +1060,7 @@ export default function ActiveDelivery() {
                     style={{ borderColor: TOAST.error + '33', backgroundColor: darkTheme ? TOAST.error + '1A' : TOAST.error + '0D' }}
                   >
                     <Ionicons name="alert-circle-outline" size={18} color={TOAST.error} />
-                    <Text style={{ color: TOAST.error }} className="font-bold text-sm">
+                    <Text style={{ color: TOAST.error }} className="font-sans-bold text-sm">
                       Report Issue / Cancel Delivery
                     </Text>
                   </PressableScale>
@@ -1080,9 +1084,9 @@ export default function ActiveDelivery() {
         <View className="flex-1 justify-end bg-black/60">
           <View className={`rounded-t-3xl p-6 ${darkTheme ? 'bg-surface-container' : 'bg-white'}`}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className={`text-xl font-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>Report Address Mismatch</Text>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>Report Address Mismatch</Text>
               <PressableScale onPress={() => setShowMismatchSheet(false)} className="w-8 h-8 rounded-full bg-gray-200/20 items-center justify-center">
-                <Text className={`text-lg font-bold ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>✕</Text>
+                <Text className={`text-lg font-sans-bold ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>✕</Text>
               </PressableScale>
             </View>
             <Text className={`mb-4 ${darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -1100,7 +1104,7 @@ export default function ActiveDelivery() {
                     borderColor: selectedMismatchFloor === floor ? BRAND.primary : (darkTheme ? BRAND.gray700 : BRAND.gray200)
                   }}
                 >
-                  <Text className={`font-bold text-xl ${selectedMismatchFloor === floor ? 'text-white' : (darkTheme ? 'text-gray-300' : 'text-gray-700')}`}>
+                  <Text className={`font-sans-bold text-xl ${selectedMismatchFloor === floor ? 'text-white' : (darkTheme ? 'text-gray-300' : 'text-gray-700')}`}>
                     {floor === 1 ? 'GF' : floor}
                   </Text>
                 </PressableScale>
@@ -1113,7 +1117,7 @@ export default function ActiveDelivery() {
               className="py-4 rounded-xl items-center"
               style={{ backgroundColor: TOAST.error }}
             >
-              <Text className="text-white font-bold text-lg">
+              <Text className="text-white font-sans-bold text-lg">
                 {isReportingMismatch ? "Reporting..." : `Report Floor ${selectedMismatchFloor === 1 ? 'GF' : selectedMismatchFloor} Mismatch`}
               </Text>
             </PressableScale>
@@ -1126,9 +1130,9 @@ export default function ActiveDelivery() {
         <View className="flex-1 justify-end bg-black/60">
           <View className={`rounded-t-3xl p-6 ${darkTheme ? 'bg-surface-container' : 'bg-white'}`}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className={`text-xl font-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>Report Issue / Cancel</Text>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>Report Issue / Cancel</Text>
               <PressableScale onPress={() => setShowCancelSheet(false)} className="w-8 h-8 rounded-full bg-gray-200/20 items-center justify-center">
-                <Text className={`text-lg font-bold ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>✕</Text>
+                <Text className={`text-lg font-sans-bold ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>✕</Text>
               </PressableScale>
             </View>
             <Text className={`mb-4 ${darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -1151,7 +1155,7 @@ export default function ActiveDelivery() {
                       <View className={`w-5 h-5 rounded-full border-2 items-center justify-center`} style={{ borderColor: cancelReason === reason ? BRAND.primary : BRAND.gray400 }}>
                         {cancelReason === reason && <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BRAND.primary }} />}
                       </View>
-                      <Text className={`font-semibold capitalize ${cancelReason === reason ? (darkTheme ? 'text-white' : 'text-gray-900') : (darkTheme ? 'text-gray-400' : 'text-gray-600')}`}>
+                      <Text className={`font-sans-semibold capitalize ${cancelReason === reason ? (darkTheme ? 'text-white' : 'text-gray-900') : (darkTheme ? 'text-gray-400' : 'text-gray-600')}`}>
                         {reason.replace(/_/g, ' ')}
                       </Text>
                     </PressableScale>
@@ -1172,7 +1176,7 @@ export default function ActiveDelivery() {
                       <View className={`w-5 h-5 rounded-full border-2 items-center justify-center`} style={{ borderColor: cancelReason === reason ? BRAND.primary : BRAND.gray400 }}>
                         {cancelReason === reason && <View className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BRAND.primary }} />}
                       </View>
-                      <Text className={`font-semibold capitalize ${cancelReason === reason ? (darkTheme ? 'text-white' : 'text-gray-900') : (darkTheme ? 'text-gray-400' : 'text-gray-600')}`}>
+                      <Text className={`font-sans-semibold capitalize ${cancelReason === reason ? (darkTheme ? 'text-white' : 'text-gray-900') : (darkTheme ? 'text-gray-400' : 'text-gray-600')}`}>
                         {reason.replace(/_/g, ' ')}
                       </Text>
                     </PressableScale>
@@ -1187,7 +1191,7 @@ export default function ActiveDelivery() {
               className="py-4 rounded-xl items-center"
               style={{ backgroundColor: TOAST.error }}
             >
-              <Text className="text-white font-bold text-lg">
+              <Text className="text-white font-sans-bold text-lg">
                 {isCanceling ? "Processing..." : "Confirm Cancellation"}
               </Text>
             </PressableScale>

@@ -4,7 +4,8 @@ import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { TouchableOpacity } from "react-native";
-import { View, Text, ScrollView, Switch } from "react-native";
+import { Text } from '@/components/ui/Text';
+import { View, ScrollView, Switch } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
@@ -26,8 +27,6 @@ export default function Preferences() {
         analytics: true
     };
 
-
-
     const updatePreferencesMutation = useMutation({
         mutationFn: (newPrefs: any) =>
             put(RiderApiRoutes.UpdateProfile.path, { preferences: newPrefs }),
@@ -38,8 +37,6 @@ export default function Preferences() {
              Toast.error("Error", errorMessage(e, "Could not update preferences."));
         }
     });
-
-
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -57,20 +54,20 @@ export default function Preferences() {
                     <TouchableOpacity onPress={() => router.back()} className="mr-4">
                         <BackButtonMinimal />
                     </TouchableOpacity>
-                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         Preferences
                     </Text>
                 </View>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                <Text className={`text-lg font-bold mb-4 px-2 ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-lg font-sans-bold mb-4 px-2 ${darkTheme ? "text-white" : "text-black"}`}>
                     App Preferences
                 </Text>
 
                 <View className={`rounded-2xl border ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"} overflow-hidden`}>
                     <View className="flex-row justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800">
                         <View className="flex-1 pr-4">
-                            <Text className={`text-base font-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+                            <Text className={`text-base font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
                                 Order Updates
                             </Text>
                             <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -87,7 +84,7 @@ export default function Preferences() {
 
                     <View className="flex-row justify-between items-center p-4">
                         <View className="flex-1 pr-4">
-                            <Text className={`text-base font-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+                            <Text className={`text-base font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
                                 Analytics & Tracking
                             </Text>
                             <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>

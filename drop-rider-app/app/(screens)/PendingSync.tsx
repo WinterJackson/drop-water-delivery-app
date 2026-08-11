@@ -17,7 +17,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Stack, useRouter } from "expo-router";
 import React, { useCallback, useContext, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StatusBar, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, StatusBar, TouchableOpacity, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -126,7 +127,7 @@ export default function PendingSync() {
                 <TouchableOpacity onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </TouchableOpacity>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Pending Sync
                 </Text>
             </View>
@@ -158,7 +159,7 @@ export default function PendingSync() {
                         >
                             {busy === "all"
                                 ? <ActivityIndicator size="small" color="#fff" />
-                                : <Text className="text-white font-bold">Sync now</Text>}
+                                : <Text className="text-white font-sans-bold">Sync now</Text>}
                         </PressableScale>
 
                         {actions.map((action) => (
@@ -167,13 +168,13 @@ export default function PendingSync() {
                                 className={`p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`}
                             >
                                 <View className="flex-row items-center justify-between mb-1">
-                                    <Text className={`font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                                    <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                                         {LABELS[action.type] ?? action.type}
                                     </Text>
                                     {action.needs_attention ? (
                                         <View className="flex-row items-center gap-1">
                                             <Ionicons name="alert-circle" size={16} color={TOAST.error} />
-                                            <Text style={{ color: TOAST.error }} className="text-xs font-bold">Needs attention</Text>
+                                            <Text style={{ color: TOAST.error }} className="text-xs font-sans-bold">Needs attention</Text>
                                         </View>
                                     ) : (
                                         <Text className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
@@ -205,7 +206,7 @@ export default function PendingSync() {
                                     >
                                         {busy === action.row_id
                                             ? <ActivityIndicator size="small" color={BRAND.primary} />
-                                            : <Text style={{ color: BRAND.primary }} className="font-bold">Retry</Text>}
+                                            : <Text style={{ color: BRAND.primary }} className="font-sans-bold">Retry</Text>}
                                     </PressableScale>
                                     {action.needs_attention ? (
                                         <PressableScale
@@ -214,7 +215,7 @@ export default function PendingSync() {
                                             className="flex-1 py-2.5 rounded-xl items-center border"
                                             style={{ borderColor: `${TOAST.error}4D` }}
                                         >
-                                            <Text style={{ color: TOAST.error }} className="font-bold">Discard</Text>
+                                            <Text style={{ color: TOAST.error }} className="font-sans-bold">Discard</Text>
                                         </PressableScale>
                                     ) : null}
                                 </View>

@@ -10,10 +10,10 @@ import {
     Image,
     Modal,
     StatusBar,
-    Text,
     View,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -87,7 +87,7 @@ const Layout = () => {
 							>
 								<View className={`flex-row gap-3 `}>
 									<Ionicons name="locate" size={24} color={BRAND.primary} />
-									<Text className="font-semibold text-2xl text-blue-500">
+									<Text className="font-heading-semibold text-2xl text-blue-500">
 										Location Access
 									</Text>
 								</View>
@@ -121,7 +121,7 @@ const Layout = () => {
 										className={`bg-blue-500 p-3 px-6 rounded-xl items-center `}
 									>
 										<Text
-											className={`text-white font-bold`}
+											className={`text-white font-sans-bold`}
 										>
 											Allow Location Access
 										</Text>

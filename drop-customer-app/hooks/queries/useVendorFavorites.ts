@@ -14,6 +14,20 @@ export interface VendorFavoriteItem {
         profile_pic: string;
         rating: number;
         location_address: string;
+        /**
+         * Whether the store is taking orders, and why not.
+         *
+         * Favourites is the surface where this matters most — the customer
+         * already knows which shop they want. `is_online` is also returned and
+         * is deliberately *not* what to branch on: it answers one of the five
+         * reasons a store may be shut, so a paused or suspended shop reads as
+         * open through it.
+         */
+        is_online?: boolean;
+        is_accepting_orders?: boolean;
+        store_state?: string;
+        store_reason?: string | null;
+        reopens_at?: string | null;
     };
 }
 

@@ -1,8 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { ERROR_BOUNDARY, BRAND } from '@/constants/brandColors';
 import { UIThemeContext } from '@/context/ThemeContext';
+import { captureError } from '@/utils/sentry';
 
 const ErrorFallbackUI = ({ error, resetCount, maxResets, onReset }: any) => {
   const { currentTheme } = React.useContext(UIThemeContext);
@@ -57,11 +59,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[FATAL_CRASH] Caught error:', (error as Error).message, info.componentStack);
-    if (__DEV__) {
-      // Dev only actions if necessary
+    // The boundary swallows the crash, so without this the one class of error
+    // that actually breaks a screen is the only class Sentry never sees. This
+    // app reported nothing at all — and it is the surface where a crash costs a
+    // shop its orders while the owner is standing behind the counter.
+    // No-ops when EXPO_PUBLIC_SENTRY_DSN is unset (initSentry skips init).
+    if (!__DEV__) {
+      captureError(error, {
+        componentStack: info.componentStack,
+        resetCount: this.state.resetCount,
+      });
     }
-    // TODO: In production, report to Sentry/Crashlytics:
-    // Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
   }
 
   handleReset = () => {
@@ -100,7 +108,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: 'Fredoka_600SemiBold',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -119,7 +127,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: BRAND.white,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Karla_600SemiBold',
   },
   crashLimit: {
     color: '#EF4444',

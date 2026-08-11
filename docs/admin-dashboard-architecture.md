@@ -1087,3 +1087,135 @@ to answer a different, easier one:
 * a heuristic is labelled as a heuristic,
 * and where a table is empty on this deployment, the module docstring says so
   rather than implying the arithmetic has been observed against real volume.
+
+---
+
+## 16. The join between the console and the apps
+
+A later pass walked the console page by page against the endpoints behind it.
+The screens themselves held up — every one carries a summary band, real filters
+and written empty states, and none is a bare table. What did not hold up was the
+**join**: capability the backend already had and the console never asked for,
+and one path where the console recorded something and never delivered it.
+
+### 16.1 A support reply never pushed
+
+The worst of them, and invisible from either end.
+
+`support_service.reply` wrote a `Notification` row; the route sent an email.
+Nothing pushed. An exhaustive walk of every `queue_push` and
+`dispatch_background` call site on the platform found orders, refunds, riders,
+stores and broadcast — and no support anywhere. The compose box in this console
+said "Sent to their app, and emailed if we have an address", and the first half
+of that sentence was false.
+
+So the single message on this platform a person is *actively waiting for* was
+the only one that never interrupted them. They found it by opening the
+notifications screen and pulling to refresh.
+
+### 16.2 …and the link in it pointed here
+
+`action_url` was `/support/{ticket_id}` — a route in **this** application. Every
+other `action_url` in the backend is an Expo Router path. Three apps, three
+different silent failures: the customer app's deep-link whitelist blocked it and
+logged in dev only; the rider and vendor apps pushed an unmatched route.
+
+Both are now covered by structural tests, the second across the whole backend
+rather than the one line that was wrong.
+
+### 16.3 `pending` meant "waiting on them" even after they replied
+
+An administrator's reply moves a ticket to `pending`. A requester's follow-up
+reopened it only from `resolved` or `closed` — so answering an answer left the
+ticket labelled as somebody else's turn. The nav badge counts only `open`, so
+the console was never told at all. Someone who replied within a minute became
+invisible in a queue sorted oldest-first.
+
+Two changes: a follow-up now reopens from any state, and `list_tickets` returns
+`awaiting_us` — who spoke last, ignoring internal notes, so a colleague writing
+"checking the GPS trail" does not count as having answered the customer.
+
+### 16.4 Priority could be filtered but never set
+
+`Support_Tickets.priority` had a default of `normal`, four documented values, a
+filter on the queue endpoint, a `/support/meta` endpoint serving the list, and a
+coloured badge on two screens. Nothing on the platform could write it. Every
+ticket ever raised was `normal` for life, and the filter could only return
+everything or nothing.
+
+It is an administrator's judgement rather than a field on the intake form —
+a form that lets you tick "urgent" is a form where everything is urgent — and
+setting it is audited, because moving one ticket up an oldest-first queue moves
+every other one down.
+
+### 16.5 Three screens asked for less than they could have
+
+| Screen | Already supported by the endpoint | Sent |
+|---|---|---|
+| `/platform/audit` | `action`, `target_id`, keyset `cursor` | nothing |
+| `/platform/notifications` | `days`, `audience` | nothing |
+| `/support` | `category`, `requester_type` | nothing |
+
+The audit one mattered most. It is the compliance screen — "every time someone
+opened a person's identity documents" — and it was capped at the newest fifty
+rows of *everything*, with `next_cursor` fetched and dropped on the floor. There
+was no way to ask the question the page exists to answer.
+
+### 16.6 A link that discarded the id it was holding
+
+The ticket sidebar's "Related order" linked to `/operations/orders` — the bare
+board — while holding the order id and rendering the first eight characters of
+it. An agent answering "where is my order" landed on an unfiltered queue with
+the answer on the screen behind them. It now carries `?view=all&q=<id>`;
+`view=all` because the default board is "needs attention" and a delivered order
+is not on it.
+
+### 16.7 Access control over the new surface
+
+Everything above was checked against the capability model rather than assumed
+into it.
+
+**The one new endpoint.** `POST /support/tickets/{id}/priority` holds
+`support.respond`, alongside reply, status and assign — never `support.read`.
+Escalation reorders an oldest-first queue, which is a change to somebody else's
+workload, so it is a write and it is audited (`support.priority`) with the
+administrator's email on it.
+
+**Read and write stay separate.** A test now walks the support router's AST and
+fails on any `POST`/`PATCH`/`DELETE` handler gated on a read capability — the
+platform's existing `test_every_admin_route_declares_a_permission` proves a gate
+*exists*, and this proves it is the right *kind*.
+
+**The console mirrors, it does not decide.** `PriorityControl` renders nothing
+without `support.respond`, and a Server Action is a public endpoint regardless —
+so the refusal is proven at the backend, not at the button. A `support.read`
+caller invoking the action directly gets a typed `permission_required` 403.
+
+**A link that would refuse you is not offered.** The ticket sidebar's
+related-order link is gated on `orders.read`, matching the requester-name link
+beside it. Both stock presets that reach this screen happen to carry it, but
+*roles are presets, not authority* — permissions are edited per administrator,
+and the id still renders, just not as a link into a refusal.
+
+**No new filter widened anybody's reach.** The audit, notification and support
+filters all narrow queries behind gates that were already there
+(`admins.manage`, `analytics.read`, `support.read`). The administrators summary
+band counts rows the caller had already been served — someone with
+`admins.manage` can edit those very capabilities, so counting who holds
+`pii.view` reveals nothing to them.
+
+**Pushing to store staff is not an expansion.** `support_routes._resolve_account`
+resolves a vendor through `_resolve_access(..., owner_only=False)`, so every live
+staff member could already read the store's whole support thread in the app. The
+push reaches people who already had the read; it does not create one. That is
+also why it carries no staff-capability filter — support is not one of the four,
+and gating on one would silence whoever holds none.
+
+### 16.8 What these have in common
+
+Different from §15.9. Those were screens that did not exist. These all existed,
+looked complete, and were complete on both sides of a boundary that nothing
+carried across — a capability the server offered and no caller used, a column
+every layer read and no layer wrote, a URL that was valid in the wrong
+application. None would appear in a typecheck, a build, or a walk of the UI,
+because at every single point the code is doing something reasonable.

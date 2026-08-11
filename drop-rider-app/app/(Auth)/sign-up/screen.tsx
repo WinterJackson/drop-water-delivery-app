@@ -10,13 +10,12 @@ import {
     Dimensions,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
     KeyboardAvoidingView,
     Platform,
-    Image
+    Image,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { LinearGradient } from "expo-linear-gradient";
@@ -133,7 +132,6 @@ export default function SignUp() {
                 await setActive({ session: sessionId });
             }
 
-
             const payload = {
                 clerk_id: userId,
                 email: emailAddress,
@@ -185,7 +183,7 @@ export default function SignUp() {
             
             <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 40, paddingBottom: 100 }}>
                 <View className="mb-8">
-                    <Text className={`text-3xl font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                    <Text className={`text-3xl font-heading-semibold mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
                         {step === 1 ? "Create Rider Account" : step === 2 ? "Verify Email" : "Rider Details"}
                     </Text>
                     <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -198,7 +196,7 @@ export default function SignUp() {
                 {step === 1 && (
                     <View className="gap-4">
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Full Name</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Full Name</Text>
                             <TextInput
                                 className={`w-full p-4 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black"}`}
                                 placeholder="E.g., John Doe"
@@ -208,7 +206,7 @@ export default function SignUp() {
                             />
                         </View>
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Email</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Email</Text>
                             <TextInput
                                 className={`w-full p-4 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black"}`}
                                 placeholder="Enter your email"
@@ -220,7 +218,7 @@ export default function SignUp() {
                             />
                         </View>
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Password</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Password</Text>
                             <View className="relative justify-center">
                                 <TextInput
                                     className={`w-full p-4 pr-12 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black"}`}
@@ -231,7 +229,7 @@ export default function SignUp() {
                                     onChangeText={setPassword}
                                 />
                                 <View className="absolute right-2 top-0 bottom-0 justify-center">
-                                    <PressableScale onPress={() => setShowPassword(!showPassword)} className="p-2">
+                                    <PressableScale accessibilityLabel={showPassword ? "Hide password" : "Show password"} onPress={() => setShowPassword(!showPassword)} className="p-2">
                                         {showPassword ? (
                                             <Ionicons name="eye-off" size={20} color={BRAND.primary} />
                                         ) : (
@@ -243,13 +241,13 @@ export default function SignUp() {
                         </View>
 
                         <PressableScale activeOpacity={0.8} disabled={loading} onPress={onSignUpPress} className={`w-full mt-4 py-4 rounded-2xl items-center ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}>
-                            <Text className="text-white font-bold text-lg">{loading ? "Processing..." : "Sign Up"}</Text>
+                            <Text className="text-white font-sans-bold text-lg">{loading ? "Processing..." : "Sign Up"}</Text>
                         </PressableScale>
 
                         <View className="flex-row items-center justify-center mt-6">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Already have an account? </Text>
                             <PressableScale onPress={() => router.push("/(Auth)/sign-in/screen")}>
-                                <Text className="text-accentbg font-semibold">Log In</Text>
+                                <Text className="text-accentbg font-sans-semibold">Log In</Text>
                             </PressableScale>
                         </View>
                     </View>
@@ -258,7 +256,7 @@ export default function SignUp() {
                 {step === 2 && (
                     <View className="gap-4">
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>OTP Code</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>OTP Code</Text>
                             <TextInput
                                 className={`w-full p-4 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black text-center"}`}
                                 placeholder="123456"
@@ -270,7 +268,7 @@ export default function SignUp() {
                         </View>
 
                         <PressableScale activeOpacity={0.8} disabled={loading} onPress={onVerifyPress} className={`w-full mt-4 py-4 rounded-2xl items-center ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}>
-                            <Text className="text-white font-bold text-lg">{loading ? "Verifying..." : "Verify Code"}</Text>
+                            <Text className="text-white font-sans-bold text-lg">{loading ? "Verifying..." : "Verify Code"}</Text>
                         </PressableScale>
                     </View>
                 )}
@@ -278,7 +276,7 @@ export default function SignUp() {
                 {step === 3 && (
                     <View className="gap-4">
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Phone Number</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Phone Number</Text>
                             <TextInput
                                 className={`w-full p-4 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black"}`}
                                 placeholder="+2547..."
@@ -297,7 +295,7 @@ export default function SignUp() {
                             />
                         </View>
                         <View>
-                            <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>National ID / Passport</Text>
+                            <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>National ID / Passport</Text>
                             <TextInput
                                 className={`w-full p-4 rounded-xl border ${darkTheme ? "border-gray-800 bg-gray-900 text-white" : "border-gray-200 bg-white text-black"}`}
                                 placeholder="ID Number"
@@ -308,7 +306,7 @@ export default function SignUp() {
                         </View>
 
                         <PressableScale activeOpacity={0.8} disabled={loading} onPress={completeRiderRegistration} className={`w-full mt-4 py-4 rounded-2xl items-center ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}>
-                            <Text className="text-white font-bold text-lg">{loading ? "Saving..." : "Finish Registration"}</Text>
+                            <Text className="text-white font-sans-bold text-lg">{loading ? "Saving..." : "Finish Registration"}</Text>
                         </PressableScale>
                     </View>
                 )}

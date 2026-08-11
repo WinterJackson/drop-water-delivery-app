@@ -1,5 +1,6 @@
 import React, { useEffect, useContext } from 'react';
-import { View, Text, Platform, useWindowDimensions } from 'react-native';
+import { View, Platform, useWindowDimensions } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -159,7 +160,7 @@ export default function ModernToast() {
               numberOfLines={1}
               style={{
                 fontSize: 15,
-                fontWeight: '600',
+                fontFamily: 'Karla_600SemiBold',
                 color: textColor,
                 marginBottom: message ? 2 : 0,
               }}
@@ -171,7 +172,7 @@ export default function ModernToast() {
                 numberOfLines={2}
                 style={{
                   fontSize: 13,
-                  fontWeight: '400',
+                  fontFamily: 'Karla_400Regular',
                   color: subTextColor,
                 }}
               >

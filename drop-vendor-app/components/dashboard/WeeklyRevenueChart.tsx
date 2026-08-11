@@ -1,5 +1,6 @@
 import React, { useContext, useEffect } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { Ionicons } from '@expo/vector-icons';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { BRAND } from '@/constants/brandColors';
@@ -21,13 +22,13 @@ export default function WeeklyRevenueChart({ data }: { data?: number[] }) {
           ...(darkTheme ? { boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)" } : { boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05)" }) 
         }}
       >
-        <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>Revenue Overview</Text>
+        <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>Revenue Overview</Text>
         <Text className={`text-sm mt-1 mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Weekly Snapshot</Text>
         
         {isAllZeros ? (
           <View className="h-32 items-center justify-center bg-accentbg/5 rounded-xl border border-accentbg/10 border-dashed">
               <Ionicons name="bar-chart-outline" size={32} color={BRAND.primary} className="mb-2" />
-              <Text className={`text-center font-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>No revenue yet</Text>
+              <Text className={`text-center font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>No revenue yet</Text>
               <Text className={`text-center text-xs mt-1 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Start receiving orders to see your breakdown</Text>
           </View>
         ) : (
@@ -37,7 +38,7 @@ export default function WeeklyRevenueChart({ data }: { data?: number[] }) {
                return (
                  <View key={i} className="items-center flex-1">
                     <AnimatedBar percentage={percentage} />
-                    <Text className={`mt-2 text-xs font-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{days[i]}</Text>
+                    <Text className={`mt-2 text-xs font-sans-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{days[i]}</Text>
                  </View>
                );
             })}

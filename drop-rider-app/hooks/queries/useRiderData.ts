@@ -9,30 +9,41 @@ import { saveOrdersLocal, getOrdersLocal } from '../../config/database';
 export interface RiderOrder {
     id: string;
     order_status: string;
-    total_amount?: number;
+    total_amount?: string;
     delivery_address: string;
     customer?: { full_name: string; phone_number: string };
     vendor?: { business_name: string; location_address: string; lat?: number; lng?: number };
     order_item?: { id: string; quantity: number; product?: { name: string } }[];
-    rider_net?: number;
-    rider_commission?: number;
-    payload_surcharge?: number;
-    staircase_surcharge?: number;
-    vendor_net?: number;
-    platform_total?: number;
+    rider_net?: string;
+    rider_commission?: string;
+    payload_surcharge?: string;
+    staircase_surcharge?: string;
+    vendor_net?: string;
+    platform_total?: string;
     distance_km?: number;
-    delivery_fee?: number;
+    delivery_fee?: string;
     created_at?: string;
 }
 
 export interface RiderEarnings {
     total_earned: number;
-    total_earnings: number;
+    total_earnings: string;
     today_earned: number;
     week_earned: number;
     deliveries_count: number;
     total_deliveries: number;
+    /** @deprecated Counted over `platinum_window_days`, which defaults to 7. Use `deliveries_in_window`. */
     deliveries_last_7_days?: number;
+    /** Deliveries inside the trailing Platinum window. */
+    deliveries_in_window?: number;
+    /**
+     * What Platinum takes, from `Platform_Settings` — the same two rows the
+     * nightly `rider_tier_job` evaluates against. Both were literals in this
+     * app (20 deliveries, 7 days), so raising the bar on the console would have
+     * kept telling riders the old number while demoting them against the new.
+     */
+    platinum_target?: number;
+    platinum_window_days?: number;
     rating?: number;
     acceptance_rate?: number;
     is_platinum?: boolean;
@@ -61,7 +72,7 @@ export interface RiderProfile {
     preferences?: any;
     employer_vendor_id?: string;
     kyc_status?: string;
-    wallet_balance?: number;
+    wallet_balance?: string;
 }
 
 /**

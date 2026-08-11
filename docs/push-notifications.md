@@ -29,6 +29,38 @@ Two properties matter and are easy to lose:
 - The in-app row is written regardless of preferences; only the push is muted.
   Muting "Promotions" must not lose the record.
 
+## `action_url` is an app route, never a console one
+
+Every notification may carry an `action_url`. It is read by three Expo Router
+apps and by nothing else, so it must be an Expo Router path — `/(screens)/…`.
+
+Support replies wrote `/support/{ticket_id}`, which is the **admin console's**
+URL. The three apps failed at it in three different ways, none of them loud:
+
+| App | What a tap did |
+|---|---|
+| Customer | Nothing. `safeNavigate` whitelists `/(screens)`, `/product-details` and `/vendor`, so it was blocked and logged in dev only. |
+| Rider | Unmatched route. |
+| Vendor | Unmatched route. |
+
+`test_support_reachability.py` now walks every `action_url=` keyword argument in
+`services/`, `routes/` and `jobs/` and fails the build on any absolute path that
+does not begin `/(screens)`. It checks the literal prefix of an f-string too,
+since that is the form the offending one took.
+
+## Support replies push like everything else
+
+For a long time they did not. `support_service.reply` wrote a `Notification`
+row and the route sent an email, and no push was sent at all — the one message
+on this platform a person is actively *waiting* for was the only one that never
+interrupted them. The console's own compose box said "Sent to their app".
+
+`_notify_requester` is now the single fan-out, and a structural test asserts
+`reply` calls it rather than reaching for `create_notification` directly. A
+ticket raised against a store reaches the store's **staff** as well as its
+owner, with no capability filter: support is not one of the four staff
+permissions, and gating on one would silence whoever holds none of them.
+
 ## Android needs `google-services.json`
 
 Expo's push service hands FCM v1 the actual delivery on Android, so a

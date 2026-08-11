@@ -1,7 +1,8 @@
 import React, { useContext, useCallback, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, StatusBar, RefreshControl, Dimensions, Image } from "react-native";
+import { View, StatusBar, RefreshControl, Dimensions, Image } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -31,7 +32,7 @@ export default function Offers() {
         if (isLoading) return null;
         return (
             <View className="flex-1 items-center justify-center pt-20">
-                <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>No Active Deals</Text>
+                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>No Active Deals</Text>
                 <Text className={`text-sm text-center mt-2 px-10 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Check back later for exclusive multivendor water drops and special bulk refills.</Text>
             </View>
         );
@@ -45,7 +46,7 @@ export default function Offers() {
                     <View className={`rounded overflow-hidden relative ${darkTheme?"bg-black":"bg-white "} w-full`}>
                         {/* Offer Badge */}
                         <View className={`absolute w-[60px] bg-red-500 z-20 right-0 items-center justify-center rotate-45 translate-x-4 translate-y-2`}>
-                            <Text className={`text-white font-semibold text-xs`}>{percentageOffer}%</Text>
+                            <Text className={`text-white font-sans-semibold text-xs`}>{percentageOffer}%</Text>
                         </View>
                         {/* image */}
                         <View className={`w-full`} style={{ height: width * 0.3 }}>
@@ -59,7 +60,7 @@ export default function Offers() {
                             <View className={`flex-row justify-between items-center`}>
                                 {/* price and discount */}
                                 <View className={`flex-row gap-2`}>
-                                    <Text className={`font-semibold ${darkTheme ? "text-white" : " text-black"}`}>
+                                    <Text className={`font-sans-semibold ${darkTheme ? "text-white" : " text-black"}`}>
                                         KSH {Math.round((item.price - item.discount) * 100) / 100}
                                     </Text>
                                     <Text style={{ textDecorationLine: "line-through" }} className={`${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
@@ -97,7 +98,7 @@ export default function Offers() {
                 <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Offers & Deals
                 </Text>
             </View>

@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
-import { View, Text, ScrollView, StatusBar, TouchableOpacity } from "react-native";
+import { View, ScrollView, StatusBar, TouchableOpacity } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -17,8 +18,17 @@ export default function Performance() {
   const { data: earnings, isLoading } = useRiderEarnings();
 
   const isPlatinum = profile?.is_platinum || earnings?.is_platinum;
-  const deliveriesLast7Days = earnings?.deliveries_last_7_days || 0;
-  const progressToPlatinum = Math.min((deliveriesLast7Days / 20) * 100, 100);
+  const deliveriesInWindow = earnings?.deliveries_in_window ?? earnings?.deliveries_last_7_days ?? 0;
+  // The target and the window come from the server, which reads the same two
+  // `Platform_Settings` rows the nightly job evaluates against. They were a
+  // literal `20` and a literal "7 days" here, so raising the bar on the console
+  // would have kept telling every rider the old number while demoting them
+  // against the new one.
+  const platinumTarget = earnings?.platinum_target ?? 20;
+  const platinumWindowDays = earnings?.platinum_window_days ?? 7;
+  const progressToPlatinum =
+    platinumTarget > 0 ? Math.min((deliveriesInWindow / platinumTarget) * 100, 100) : 100;
+  const deliveriesRemaining = Math.max(0, platinumTarget - deliveriesInWindow);
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -38,7 +48,7 @@ export default function Performance() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Performance & Tier
               </Text>
           </View>
@@ -53,10 +63,10 @@ export default function Performance() {
             <View className={`w-full rounded-2xl p-5 border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
               <View className="flex-row items-center justify-between mb-4">
                 <View>
-                  <Text className={`text-base font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Current Tier</Text>
+                  <Text className={`text-base font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Current Tier</Text>
                   <View className="flex-row items-center gap-2 mt-1">
                     <Ionicons name={isPlatinum ? "ribbon" : "star"} size={24} color={isPlatinum ? "#A855F7" : BRAND.primary} />
-                    <Text className={`text-3xl font-bold ${isPlatinum ? 'text-purple-500' : ''}`} style={!isPlatinum ? { color: BRAND.primary } : {}}>
+                    <Text className={`text-3xl font-heading-semibold ${isPlatinum ? 'text-purple-500' : ''}`} style={!isPlatinum ? { color: BRAND.primary } : {}}>
                       {isPlatinum ? "Platinum" : "Standard"}
                     </Text>
                   </View>
@@ -67,15 +77,17 @@ export default function Performance() {
               </View>
               
               <View className="flex-row justify-between mb-2">
-                  <Text className={`text-sm font-bold ${darkTheme ? "text-white" : "text-black"}`}>Weekly Deliveries</Text>
-                  <Text className={`text-sm font-bold ${darkTheme ? "text-white" : "text-black"}`}>{deliveriesLast7Days} / 20</Text>
+                  <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Weekly Deliveries</Text>
+                  <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{deliveriesInWindow} / {platinumTarget}</Text>
               </View>
               <View className="w-full h-3 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
                 <View className={`h-full ${isPlatinum ? 'bg-purple-500' : ''} rounded-full`} style={[{ width: `${progressToPlatinum}%` }, !isPlatinum ? { backgroundColor: BRAND.primary } : {}]} />
               </View>
               
               <Text className={`text-xs mt-3 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                {isPlatinum ? "You've maintained Platinum tier this week! Keep it up." : `Complete ${Math.max(0, 20 - deliveriesLast7Days)} more deliveries in the last 7 days to unlock Platinum.`}
+                {isPlatinum
+                  ? `You're on Platinum — stay above ${platinumTarget} deliveries in ${platinumWindowDays} days to keep it.`
+                  : `${deliveriesRemaining} more ${deliveriesRemaining === 1 ? "delivery" : "deliveries"} in the last ${platinumWindowDays} days unlocks Platinum and a lower commission.`}
               </Text>
             </View>
 
@@ -83,9 +95,9 @@ export default function Performance() {
             <View className="flex-row justify-between mt-6 gap-3">
               <View className={`flex-1 p-4 rounded-2xl items-center border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-100"}`}>
                 <View className="w-16 h-16 rounded-full border-4 border-green-500 items-center justify-center mb-2">
-                  <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>{earnings?.acceptance_rate?.toFixed(0) || 100}%</Text>
+                  <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{earnings?.acceptance_rate?.toFixed(0) || 100}%</Text>
                 </View>
-                <Text className={`text-sm text-center font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Acceptance Rate</Text>
+                <Text className={`text-sm text-center font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Acceptance Rate</Text>
               </View>
 
               <TouchableOpacity 
@@ -93,22 +105,22 @@ export default function Performance() {
                   className={`flex-1 p-4 rounded-2xl items-center border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-100"}`}
               >
                 <View className="w-16 h-16 rounded-full border-4 border-blue-500 items-center justify-center mb-2">
-                  <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>{earnings?.rating?.toFixed(1) || "5.0"}</Text>
+                  <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{earnings?.rating?.toFixed(1) || "5.0"}</Text>
                 </View>
-                <Text className={`text-sm text-center font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Customer Rating</Text>
-                <Text className={`text-xs mt-1 text-blue-500 font-bold`}>View Reviews →</Text>
+                <Text className={`text-sm text-center font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Customer Rating</Text>
+                <Text className={`text-xs mt-1 text-blue-500 font-sans-bold`}>View Reviews →</Text>
               </TouchableOpacity>
             </View>
 
             {/* Benefits Section */}
-            <Text className={`text-xl font-bold mt-8 mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
+            <Text className={`text-xl font-sans-bold mt-8 mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
               {isPlatinum ? "Platinum Tier Benefits" : "Standard Tier Benefits"}
             </Text>
             
             <View className={`p-4 rounded-xl mb-3 flex-row items-center gap-3 border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-100"}`}>
               <Ionicons name="flash-outline" size={24} color={BRAND.primary} />
               <View className="flex-1">
-                <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Priority Pings (Level 2)</Text>
+                <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Priority Pings (Level 2)</Text>
                 <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>You see Trip Radar requests 5 seconds earlier than Bronze riders.</Text>
               </View>
             </View>
@@ -116,7 +128,7 @@ export default function Performance() {
             <View className={`p-4 rounded-xl mb-3 flex-row items-center gap-3 border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-100"}`}>
               <Ionicons name="cash-outline" size={24} color={TOAST.success} />
               <View className="flex-1">
-                <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Flat Commission</Text>
+                <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Flat Commission</Text>
                 <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Drop Service Fee is a flat {isPlatinum ? '7%' : '10%'} on all deliveries.</Text>
               </View>
             </View>

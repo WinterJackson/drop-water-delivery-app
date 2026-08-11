@@ -11,11 +11,10 @@ import {
     RefreshControl,
     ScrollView,
     StatusBar,
-    Text,
     View,
-    TextInput,
-    Switch
+    Switch,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -29,6 +28,7 @@ import SearchBar from "@/components/common/Search";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useVendorProducts } from "@/hooks/queries/useVendorProducts";
 import { useDebounce } from "@/hooks/useDebounce";
+import { formatMoney } from "@/utils/money";
 
 const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggleAvailability, onUpdateStock }: { item: any, darkTheme: boolean, canEdit: boolean, onDelete: (id: string) => void, onEdit: (id: string) => void, onToggleAvailability: (id: string, isAvailable: boolean) => void, onUpdateStock: (id: string, newStock: number) => void }) => {
   return (
@@ -38,7 +38,7 @@ const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggle
     >
       <View className="flex-1">
         <View className="flex-row items-center gap-2 mb-2">
-          <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>
+          <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>
             {item.name}
           </Text>
           {/* Against this product's own threshold, not a hardcoded 5. A vendor
@@ -46,27 +46,27 @@ const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggle
               cannot share a definition of "low". */}
           {item.stock === 0 ? (
             <View className="bg-red-500/10 border border-red-500/20 px-2 py-1 rounded-md">
-              <Text className="text-red-600 text-[10px] font-bold uppercase">Out of Stock</Text>
+              <Text className="text-red-600 text-[10px] font-sans-bold uppercase">Out of Stock</Text>
             </View>
           ) : item.low_stock_threshold > 0 && item.stock <= item.low_stock_threshold ? (
             <View className="bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-md">
-              <Text className="text-amber-600 text-[10px] font-bold uppercase">Low Stock</Text>
+              <Text className="text-amber-600 text-[10px] font-sans-bold uppercase">Low Stock</Text>
             </View>
           ) : null}
         </View>
         <View className="flex-row items-center gap-4">
-          <Text className={`text-base font-semibold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
-            KSH {item.price}
+          <Text className={`text-base font-sans-semibold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
+            {formatMoney(item.price)}
           </Text>
           <View className="w-1 h-1 rounded-full bg-slate-300" />
           <View className="flex-row items-center gap-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg p-1">
-            <PressableScale disabled={!canEdit} onPress={() => onUpdateStock(item.id, Math.max(0, item.stock - 1))} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
+            <PressableScale accessibilityLabel={`One fewer ${item.name} in stock`} disabled={!canEdit} onPress={() => onUpdateStock(item.id, Math.max(0, item.stock - 1))} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
               <Ionicons name="remove" size={14} color={darkTheme ? "white" : "black"} />
             </PressableScale>
-            <Text className={`text-sm font-bold ${item.low_stock_threshold > 0 && item.stock <= item.low_stock_threshold ? "text-red-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
+            <Text className={`text-sm font-sans-bold ${item.low_stock_threshold > 0 && item.stock <= item.low_stock_threshold ? "text-red-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
               {item.stock}
             </Text>
-            <PressableScale disabled={!canEdit} onPress={() => onUpdateStock(item.id, item.stock + 1)} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
+            <PressableScale accessibilityLabel={`One more ${item.name} in stock`} disabled={!canEdit} onPress={() => onUpdateStock(item.id, item.stock + 1)} className={`w-6 h-6 rounded-md items-center justify-center ${!canEdit ? "opacity-40" : ""} ${darkTheme ? "bg-slate-700" : "bg-white shadow-sm"}`}>
               <Ionicons name="add" size={14} color={darkTheme ? "white" : "black"} />
             </PressableScale>
           </View>
@@ -84,13 +84,13 @@ const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggle
         />
         {canEdit && (
           <>
-            <PressableScale
+            <PressableScale accessibilityLabel={`Edit ${item.name}`}
               onPress={() => onEdit(item.id)}
               className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-blue-900/20" : "bg-blue-50"}`}
             >
               <Ionicons name="pencil-outline" size={18} color="#3b82f6" />
             </PressableScale>
-            <PressableScale
+            <PressableScale accessibilityLabel={`Withdraw ${item.name} from your catalogue`}
               onPress={() => onDelete(item.id)}
               className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-red-900/20" : "bg-red-50"}`}
             >
@@ -251,7 +251,7 @@ export default function Products() {
                   className={`px-4 py-2 rounded-full border ${filter === f.id ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
                   style={filter !== f.id ? { ...(darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : {}}
                 >
-                  <Text className={`font-semibold text-sm ${filter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                  <Text className={`font-sans-semibold text-sm ${filter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                     {f.label}
                   </Text>
                 </PressableScale>
@@ -296,7 +296,7 @@ export default function Products() {
 
       {/* Floating Action Button (FAB) — only for someone who may use it. */}
       {canEdit && (
-        <PressableScale
+        <PressableScale accessibilityLabel="Add a product"
           activeOpacity={0.8}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

@@ -115,7 +115,7 @@ Surge is +KSH 10 in the peak windows (06:00–08:00 and 17:00–19:00 EAT).
 | Max delivery distance | 2 km | 15 km |
 | Max items per order | 4 × 20L | 200 bottles |
 | Minimum order weight | none | 100 kg |
-| Rider search radius | 2 km from the store | 15 km |
+| Rider search radius | 2.5 km from the store | 15 km |
 | Vehicle classes | motorbike | motorbike / tuktuk / truck |
 
 Discovery uses **H3 hex indexing at resolution 8** with PostGIS `ST_DWithin` for

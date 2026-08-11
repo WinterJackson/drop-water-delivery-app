@@ -91,86 +91,6 @@ def _base_template(content: str, preheader: str = "") -> str:
     </html>
     """
 
-def welcome_customer(name: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">Welcome to Drop, {name}! 💧</h2>
-        <p>We're thrilled to have you here. Drop makes it incredibly easy to get water delivered straight to your door from trusted vendors.</p>
-        <p>Ready to place your first order?</p>
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="#" class="btn">Order Water Now</a>
-        </div>
-        <p>If you have any questions, feel free to reply to this email.</p>
-    """
-    return _base_template(content, preheader="Welcome to the Drop community!")
-
-def welcome_vendor(name: str, business: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">Welcome aboard, {name}! 🤝</h2>
-        <p>Thank you for registering <strong>{business}</strong> with Drop.</p>
-        <p>We are currently reviewing your business details and license. Once approved, you'll be able to start receiving orders from our wide network of customers.</p>
-        <p>We'll notify you as soon as your account is verified.</p>
-    """
-    return _base_template(content, preheader="Your Drop Vendor application is under review.")
-
-def welcome_rider(name: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">Welcome to the Drop Delivery Network, {name}! 🚲</h2>
-        <p>Thanks for signing up to deliver with Drop.</p>
-        <p>We're reviewing your vehicle specific details and license. Once approved, you'll be able to go online and start earning money with flexible deliveries.</p>
-        <p>We'll notify you as soon as your account is verified.</p>
-    """
-    return _base_template(content, preheader="Your Drop Rider application is under review.")
-
-def password_reset(name: str, code: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">Password Reset Request</h2>
-        <p>Hi {name},</p>
-        <p>We received a request to reset your password. Here is your verification code:</p>
-        <div style="text-align: center; margin: 30px 0;">
-            <div style="display:inline-block; font-size:32px; letter-spacing:8px; font-weight:bold; background:#f4f4f4; padding:15px 30px; border-radius:8px;">{code}</div>
-        </div>
-        <p>Enter this code in the app to reset your password. If you didn't request this, you can safely ignore this email.</p>
-    """
-    return _base_template(content, preheader=f"Your Drop reset code is {code}")
-
-def order_confirmation(name: str, order: Dict[str, Any]) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">Order Confirmed! 🎉</h2>
-        <p>Hi {name},</p>
-        <p>Your order <strong>#{order.get('id', '')}</strong> has been confirmed and is being processed by the vendor.</p>
-        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 6px; margin: 20px 0;">
-            <p style="margin: 0 0 10px 0;"><strong>Total:</strong> KES {order.get('total_amount', '0.00')}</p>
-            <p style="margin: 0;"><strong>Status:</strong> Processing</p>
-        </div>
-        <p>You can track the status of your order in the Drop Customer App.</p>
-    """
-    return _base_template(content, preheader="Your Drop order has been confirmed.")
-
-def vendor_approved(name: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">You're approved! 🎊</h2>
-        <p>Hi {name},</p>
-        <p>Great news! Your vendor account has been verified and approved.</p>
-        <p>You can now log into the Drop Vendor app, list your products, and start receiving orders today.</p>
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="#" class="btn">Open Vendor App</a>
-        </div>
-    """
-    return _base_template(content, preheader="Your Drop Vendor account has been approved.")
-
-def rider_approved(name: str) -> str:
-    content = f"""
-        <h2 style="margin-top:0;">You're approved to ride! 🛵</h2>
-        <p>Hi {name},</p>
-        <p>Great news! Your rider account has been verified and approved.</p>
-        <p>You can now log into the Drop Rider app, go online, and start accepting delivery requests.</p>
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="#" class="btn">Open Rider App</a>
-        </div>
-    """
-    return _base_template(content, preheader="Your Drop Rider account has been approved.")
-
-
 def _escape(value: str) -> str:
     """HTML-escape untrusted text before it goes into an email body.
 
@@ -186,6 +106,86 @@ def _escape(value: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def welcome_customer(name: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">Welcome to Drop, {_escape(name)}! 💧</h2>
+        <p>We're thrilled to have you here. Drop makes it incredibly easy to get water delivered straight to your door from trusted vendors.</p>
+        <p>Ready to place your first order?</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="#" class="btn">Order Water Now</a>
+        </div>
+        <p>If you have any questions, feel free to reply to this email.</p>
+    """
+    return _base_template(content, preheader="Welcome to the Drop community!")
+
+def welcome_vendor(name: str, business: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">Welcome aboard, {_escape(name)}! 🤝</h2>
+        <p>Thank you for registering <strong>{_escape(business)}</strong> with Drop.</p>
+        <p>We are currently reviewing your business details and license. Once approved, you'll be able to start receiving orders from our wide network of customers.</p>
+        <p>We'll notify you as soon as your account is verified.</p>
+    """
+    return _base_template(content, preheader="Your Drop Vendor application is under review.")
+
+def welcome_rider(name: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">Welcome to the Drop Delivery Network, {_escape(name)}! 🚲</h2>
+        <p>Thanks for signing up to deliver with Drop.</p>
+        <p>We're reviewing your vehicle specific details and license. Once approved, you'll be able to go online and start earning money with flexible deliveries.</p>
+        <p>We'll notify you as soon as your account is verified.</p>
+    """
+    return _base_template(content, preheader="Your Drop Rider application is under review.")
+
+def password_reset(name: str, code: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">Password Reset Request</h2>
+        <p>Hi {_escape(name)},</p>
+        <p>We received a request to reset your password. Here is your verification code:</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <div style="display:inline-block; font-size:32px; letter-spacing:8px; font-weight:bold; background:#f4f4f4; padding:15px 30px; border-radius:8px;">{code}</div>
+        </div>
+        <p>Enter this code in the app to reset your password. If you didn't request this, you can safely ignore this email.</p>
+    """
+    return _base_template(content, preheader=f"Your Drop reset code is {code}")
+
+def order_confirmation(name: str, order: Dict[str, Any]) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">Order Confirmed! 🎉</h2>
+        <p>Hi {_escape(name)},</p>
+        <p>Your order <strong>#{order.get('id', '')}</strong> has been confirmed and is being processed by the vendor.</p>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 6px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>Total:</strong> KES {order.get('total_amount', '0.00')}</p>
+            <p style="margin: 0;"><strong>Status:</strong> Processing</p>
+        </div>
+        <p>You can track the status of your order in the Drop Customer App.</p>
+    """
+    return _base_template(content, preheader="Your Drop order has been confirmed.")
+
+def vendor_approved(name: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">You're approved! 🎊</h2>
+        <p>Hi {_escape(name)},</p>
+        <p>Great news! Your vendor account has been verified and approved.</p>
+        <p>You can now log into the Drop Vendor app, list your products, and start receiving orders today.</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="#" class="btn">Open Vendor App</a>
+        </div>
+    """
+    return _base_template(content, preheader="Your Drop Vendor account has been approved.")
+
+def rider_approved(name: str) -> str:
+    content = f"""
+        <h2 style="margin-top:0;">You're approved to ride! 🛵</h2>
+        <p>Hi {_escape(name)},</p>
+        <p>Great news! Your rider account has been verified and approved.</p>
+        <p>You can now log into the Drop Rider app, go online, and start accepting delivery requests.</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="#" class="btn">Open Rider App</a>
+        </div>
+    """
+    return _base_template(content, preheader="Your Drop Rider account has been approved.")
 
 
 def broadcast(name: str, subject: str, body: str) -> str:

@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect } from "react";
-import { View, Text, ScrollView, StatusBar, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity, KeyboardTypeOptions } from "react-native";
+import { View, ScrollView, StatusBar, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity, KeyboardTypeOptions } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Image } from "expo-image";
@@ -170,11 +171,11 @@ export default function OwnerProfile() {
                         placeholder={placeholder || `Enter ${label}`}
                         placeholderTextColor={darkTheme ? "#666" : "#999"}
                         keyboardType={keyboardType as KeyboardTypeOptions}
-                        className={`flex-1 text-sm font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}
+                        className={`flex-1 text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}
                     />
                 </View>
             ) : (
-                <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>{value || "—"}</Text>
+                <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>{value || "—"}</Text>
             )}
         </View>
     );
@@ -202,7 +203,7 @@ export default function OwnerProfile() {
 
       return (
           <View className={`px-3 py-1 rounded-full ${bgColor}`}>
-              <Text className={`font-bold text-xs uppercase ${textColor}`}>{text}</Text>
+              <Text className={`font-sans-bold text-xs uppercase ${textColor}`}>{text}</Text>
           </View>
       );
   };
@@ -224,7 +225,7 @@ export default function OwnerProfile() {
           <PressableScale onPress={() => router.back()} className="mr-4">
             <BackButtonMinimal />
           </PressableScale>
-          <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Owner Profile</Text>
+          <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Owner Profile</Text>
         </View>
       </View>
 
@@ -250,7 +251,7 @@ export default function OwnerProfile() {
                       </View>
                   )}
                 </View>
-                <TouchableOpacity 
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change your profile photo" 
                   onPress={pickImage}
                   disabled={imageUploading}
                   className="absolute bottom-1 right-1 rounded-full items-center justify-center border-[2.5px]"
@@ -260,16 +261,16 @@ export default function OwnerProfile() {
                 </TouchableOpacity>
             </View>
 
-            <Text className={`text-2xl font-bold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
+            <Text className={`text-2xl font-heading-semibold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
               {user?.fullName || vendorProfile?.owners_name || "Vendor Owner"}
             </Text>
-            <Text className={`text-sm mt-1 font-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+            <Text className={`text-sm mt-1 font-sans-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
               {user?.primaryEmailAddress?.emailAddress}
             </Text>
           </View>
 
           <View className="flex-row justify-between items-center mb-2 px-1">
-              <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Identity Details</Text>
+              <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Identity Details</Text>
               <PressableScale onPress={() => {
                   if (isEditing) {
                       const names = extractNames();
@@ -281,7 +282,7 @@ export default function OwnerProfile() {
                   }
                   setIsEditing(!isEditing);
               }} className="px-3 py-1 bg-accentbg/10 rounded-full">
-                <Text className="text-accentbg font-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
+                <Text className="text-accentbg font-sans-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
               </PressableScale>
           </View>
 
@@ -301,7 +302,7 @@ export default function OwnerProfile() {
               <>
                 <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-slate-100"}`}>
                     <Text className={`w-1/3 text-sm ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Auth Method</Text>
-                    <Text className={`flex-1 font-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>
+                    <Text className={`flex-1 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>
                         {user?.externalAccounts?.length ? user.externalAccounts[0].provider.charAt(0).toUpperCase() + user.externalAccounts[0].provider.slice(1) : "Email / Password"}
                     </Text>
                 </View>
@@ -322,14 +323,14 @@ export default function OwnerProfile() {
               {saving ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-lg">Save Profile</Text>
+                <Text className="text-white font-sans-bold text-lg">Save Profile</Text>
               )}
             </PressableScale>
           )}
 
           {!isEditing && (
               <PressableScale activeOpacity={0.8} onPress={handleSignOut} className="mt-2 mb-4 bg-red-50 py-4 rounded-2xl items-center border border-red-100 dark:bg-red-900/20 dark:border-red-900/30">
-                <Text className="text-red-600 font-bold text-lg">Sign Out</Text>
+                <Text className="text-red-600 font-sans-bold text-lg">Sign Out</Text>
               </PressableScale>
           )}
         </ScrollView>

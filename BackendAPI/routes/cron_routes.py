@@ -165,6 +165,9 @@ def _job_table() -> dict:
         "evaluate-platinum-riders": worker.evaluate_platinum_riders_task,
         "check-push-receipts": worker.check_push_receipts_task,
         "stale-asset-monitor": worker.stale_asset_monitor_task,
+        "deposit-maintenance": worker.deposit_maintenance_task,
+        "release-unclaimed-cash": worker.release_unclaimed_cash_task,
+        "resume-paused-stores": worker.resume_paused_stores_task,
     }
 
 

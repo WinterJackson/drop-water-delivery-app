@@ -1,4 +1,6 @@
 import { errorMessage } from "@/API/errors";
+import CapabilityGate from "@/components/common/CapabilityGate";
+import { PERMISSIONS } from "@/hooks/queries/useVendorProfile";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -9,10 +11,13 @@ import { Toast } from "@/lib/toast";
 import * as Haptics from "expo-haptics";
 import {
     ActivityIndicator,
-    KeyboardAvoidingView, Platform,
-    ScrollView, StatusBar,
-    Text, TextInput, View,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StatusBar,
+    View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Image } from "expo-image";
 import { BRAND } from "@/constants/brandColors";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -22,7 +27,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { useQueryClient } from "@tanstack/react-query";
 import { VendorEditProductSkeleton } from "@/components/skeletons/ContextualSkeletons";
 
-export default function EditProduct() {
+function EditProductForm() {
   const { id } = useLocalSearchParams();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -137,8 +142,8 @@ export default function EditProduct() {
     }
   };
 
-  const inputStyle = `px-5 py-4 rounded-[16px] text-base font-bold border ${darkTheme ? "bg-surface-container text-white border-outline-variant focus:border-accentbg" : "bg-white text-slate-900 border-slate-200 focus:border-accentbg"}`;
-  const labelStyle = `text-xs font-bold mb-2 ml-1 uppercase tracking-wider ${darkTheme ? "text-slate-400" : "text-slate-500"}`;
+  const inputStyle = `px-5 py-4 rounded-[16px] text-base font-sans-bold border ${darkTheme ? "bg-surface-container text-white border-outline-variant focus:border-accentbg" : "bg-white text-slate-900 border-slate-200 focus:border-accentbg"}`;
+  const labelStyle = `text-xs font-sans-bold mb-2 ml-1 uppercase tracking-wider ${darkTheme ? "text-slate-400" : "text-slate-500"}`;
 
   if (loadingData) {
     return (
@@ -148,7 +153,7 @@ export default function EditProduct() {
             <PressableScale onPress={() => router.back()} className="mr-4">
               <BackButtonMinimal />
             </PressableScale>
-            <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Edit Product</Text>
+            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Edit Product</Text>
           </View>
           <VendorEditProductSkeleton />
       </SafeAreaView>
@@ -160,16 +165,16 @@ export default function EditProduct() {
       <SafeAreaView className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-black" : ""}`}>
         <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
         <Ionicons name="cloud-offline-outline" size={44} color={darkTheme ? BRAND.gray400 : BRAND.gray500} />
-        <Text className={`text-lg font-bold mt-4 mb-2 text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
+        <Text className={`text-lg font-sans-bold mt-4 mb-2 text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
           Couldn&apos;t load this product
         </Text>
         <Text className={`text-center mb-6 ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>{loadError}</Text>
         <View className="flex-row gap-3">
           <PressableScale onPress={() => { setLoadingData(true); fetchProduct(); }} className="bg-accentbg px-6 py-3 rounded-xl">
-            <Text className="text-white font-bold">Try again</Text>
+            <Text className="text-white font-sans-bold">Try again</Text>
           </PressableScale>
           <PressableScale onPress={() => router.back()} className={`px-6 py-3 rounded-xl border ${darkTheme ? "border-slate-700" : "border-slate-200"}`}>
-            <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Go back</Text>
+            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Go back</Text>
           </PressableScale>
         </View>
       </SafeAreaView>
@@ -193,7 +198,7 @@ export default function EditProduct() {
           <PressableScale onPress={() => router.back()} className="mr-4">
             <BackButtonMinimal />
           </PressableScale>
-          <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Edit Product</Text>
+          <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Edit Product</Text>
         </View>
       </View>
 
@@ -217,14 +222,14 @@ export default function EditProduct() {
                     <View className="aspect-[4/3] w-full bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
                       <Image source={{ uri: imageUri || imageUrl }} style={{ width: '100%', height: '100%' }} contentFit="cover" cachePolicy="disk" transition={200} />
                     </View>
-                    {error ? <Text className="text-sm text-red-500 font-medium">{error}</Text> : null}
+                    {error ? <Text className="text-sm text-red-500 font-sans-medium">{error}</Text> : null}
                     <PressableScale 
                       activeOpacity={0.8}
                       onPress={pickImage}
                       className={`py-3 px-4 rounded-xl items-center ${imageUploading ? "bg-slate-200 dark:bg-slate-800" : "bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"}`}
                       disabled={imageUploading}
                     >
-                      <Text className={`font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{imageUploading ? "Uploading..." : "Change Image"}</Text>
+                      <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{imageUploading ? "Uploading..." : "Change Image"}</Text>
                     </PressableScale>
                   </View>
                 ) : (
@@ -236,14 +241,14 @@ export default function EditProduct() {
                       disabled={imageUploading}
                     >
                       <Ionicons name="cloud-upload-outline" size={32} color={BRAND.primary} className="mb-2" />
-                      <Text className={`font-semibold ${darkTheme ? "text-slate-300" : "text-slate-600"}`}>
+                      <Text className={`font-sans-semibold ${darkTheme ? "text-slate-300" : "text-slate-600"}`}>
                         {imageUploading ? "Uploading..." : "Tap to upload image"}
                       </Text>
                     </PressableScale>
                     
                     <View className="flex-row items-center gap-4">
                       <View className={`flex-1 h-[1px] ${darkTheme ? "bg-slate-800" : "bg-slate-200"}`} />
-                      <Text className={`text-xs font-semibold uppercase ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>OR</Text>
+                      <Text className={`text-xs font-sans-semibold uppercase ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>OR</Text>
                       <View className={`flex-1 h-[1px] ${darkTheme ? "bg-slate-800" : "bg-slate-200"}`} />
                     </View>
 
@@ -313,11 +318,20 @@ export default function EditProduct() {
               disabled={loading}
               className={`py-4 rounded-2xl items-center mt-6 shadow-sm ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}
             >
-              <Text className="text-white font-bold text-lg">{loading ? "Saving..." : "Save Changes"}</Text>
+              <Text className="text-white font-sans-bold text-lg">{loading ? "Saving..." : "Save Changes"}</Text>
             </PressableScale>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/** `PUT`/`DELETE /api/vendor/products/{id}` both require `manage_products`. */
+export default function EditProduct() {
+  return (
+    <CapabilityGate permission={PERMISSIONS.manageProducts} title="Edit Product">
+      <EditProductForm />
+    </CapabilityGate>
   );
 }

@@ -1,4 +1,3 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import Optional
@@ -10,6 +9,7 @@ from utils.s3_utils import upload_file_to_s3
 
 import logging
 import imghdr
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 
 logger = logging.getLogger(__name__)
 

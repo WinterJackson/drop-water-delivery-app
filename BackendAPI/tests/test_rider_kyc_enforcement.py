@@ -130,6 +130,13 @@ MAY_BE_UNVERIFIED = {
     ("GET", "/bottle-debt"),
     ("GET", "/bottle-ledger"),
     ("GET", "/wallet-summary"),
+    # Why cash orders are closed to this rider, and how far off they are.
+    # Deliberately readable *before* verification: an unverified rider is
+    # exactly the person who needs to read it, and "your account is not
+    # verified yet" is the first line of the answer. Gating the explanation
+    # behind the thing being explained is how a rider ends up watching orders
+    # they cannot accept with no idea why.
+    ("GET", "/cash-eligibility"),
 }
 
 

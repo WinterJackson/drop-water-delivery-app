@@ -5,12 +5,14 @@ import { useAuth } from "@clerk/clerk-expo";
 import * as Haptics from 'expo-haptics';
 import { Image } from "expo-image";
 import React, { useContext, useState, useEffect, memo } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useChangeCartQty, useDeleteCartItem } from "@/hooks/queries/useCart";
 import { Toast } from "@/lib/toast";
 import { Ionicons } from "@expo/vector-icons";
 import { BRAND } from "../../constants/brandColors";
+import { formatMoney } from "@/utils/money";
 
 type Props = {
 	data?: any;
@@ -77,15 +79,15 @@ const CartItem = ({ data, func }: Props) => {
 				{/* <--------------------<middle>--------------------> */}
 				<View className="gap-1.5 flex-1 pr-2">
 					<Text
-						className={`font-semibold text-base ${
+						className={`font-sans-semibold text-base ${
 							darkTheme ? "text-white" : "text-black"
 						}`}
 						numberOfLines={2}
 					>
 						{data?.product?.name || "Unknown Product"}
 					</Text>
-					<Text className={`font-bold text-lg ${darkTheme ? "text-accentbg" : "text-primary"}`}>
-						KSH {data?.price}
+					<Text className={`font-sans-bold text-lg ${darkTheme ? "text-accentbg" : "text-primary"}`}>
+						{formatMoney(data?.price)}
 					</Text>
 
 					{/* <--------<QUANTITY SECTION>--------> */}
@@ -110,7 +112,7 @@ const CartItem = ({ data, func }: Props) => {
 								</View>
 							</PressableScale>
 
-							<Text className={`font-semibold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
+							<Text className={`font-sans-semibold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
 								{NewQuantity}
 							</Text>
 
@@ -147,7 +149,7 @@ const CartItem = ({ data, func }: Props) => {
 									}}
 								>
 									<View className={`py-1.5 px-3 rounded-full ${darkTheme ? "bg-accentbg" : "bg-primary"}`}>
-										<Text className={`font-semibold text-xs text-white`}>
+										<Text className={`font-sans-semibold text-xs text-white`}>
 											{QuantityLoading ? "Saving" : "Update"}
 										</Text>
 									</View>
@@ -160,11 +162,11 @@ const CartItem = ({ data, func }: Props) => {
 				{/* <--------------------<right>--------------------> */}
 				<View className="gap-4 items-end justify-between py-1">
 					{/* subtotal */}
-					<Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
+					<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
 						KSH {Math.round((data?.price * data?.quantity) * 100) / 100}
 					</Text>
 					{/* <--------<REMOVE BUTTON>--------> */}
-					<PressableScale
+					<PressableScale accessibilityLabel="Remove this item from your cart"
 						activeOpacity={0.6}
 						onPress={() => {
 							Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);

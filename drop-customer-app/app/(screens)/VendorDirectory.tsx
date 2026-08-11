@@ -1,5 +1,6 @@
 import React, { useContext, useState, useMemo } from 'react';
-import { View, Text, ScrollView, StatusBar, Image, Platform } from 'react-native';
+import { View, ScrollView, StatusBar, Image, Platform } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UIThemeContext } from '@/context/ThemeContext';
@@ -17,6 +18,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, UrlTile, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from "@expo/vector-icons";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 
 const VENDOR_FILTERS = [
     { id: 'all', label: 'All Vendors' },
@@ -74,22 +76,30 @@ export default function VendorDirectory() {
                         <Image source={{ uri: item.profile_pic }} style={{ width: '100%', height: '100%' }} />
                     </View>
                     <View className="flex-1 justify-center gap-1">
-                        <Text className={`text-lg font-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`} numberOfLines={1}>
+                        <Text className={`text-lg font-sans-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`} numberOfLines={1}>
                             {item.business_name}
                         </Text>
+                        {/* The rating still stands when a shop is shut; the
+                            delivery estimate does not. Same component and same
+                            server field as the store page, so the directory and
+                            the page cannot say different things. */}
                         <View className="flex-row items-center gap-2">
-                            <Text className={`${darkTheme ? 'text-gray-400' : 'text-gray-600'} font-medium`}>
+                            <Text className={`${darkTheme ? 'text-gray-400' : 'text-gray-600'} font-sans-medium`}>
                                 ⭐ {Number(item.rating).toFixed(1)}
                             </Text>
                             <Text className={`${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>•</Text>
+                            {item.is_accepting_orders === false ? (
+                                <StoreClosedNotice store={item} compact />
+                            ) : (
                             <View className="flex-row items-center gap-1">
                                 <Ionicons name="bicycle" size={24} color={BRAND.primary} />
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
                             </View>
+                            )}
                         </View>
                         <View className="flex-row flex-wrap gap-2 mt-1">
                             <View className={`px-2 py-1 rounded-md ${isWholesale ? 'bg-blue-100' : 'bg-green-100'}`}>
-                                <Text className={`text-xs font-bold ${isWholesale ? 'text-blue-800' : 'text-green-800'}`}>
+                                <Text className={`text-xs font-sans-bold ${isWholesale ? 'text-blue-800' : 'text-green-800'}`}>
                                     {isWholesale ? 'Wholesale' : 'Retail'}
                                 </Text>
                             </View>
@@ -192,7 +202,7 @@ export default function VendorDirectory() {
                             className={`px-4 py-2 rounded-full border ${filter === f.id ? 'bg-accentbg border-accentbg' : darkTheme ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200'}`}
 							style={darkTheme || filter === f.id ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
                         >
-                            <Text className={`font-semibold ${filter === f.id ? 'text-white' : darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
+                            <Text className={`font-sans-semibold ${filter === f.id ? 'text-white' : darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
                                 {f.label}
                             </Text>
                         </PressableScale>

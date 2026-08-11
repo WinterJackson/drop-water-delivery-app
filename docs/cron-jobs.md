@@ -69,8 +69,11 @@ On [cron-job.org](https://cron-job.org) → **Create cronjob**, once per row:
 | `process-refunds` | every 2 min | A customer waiting on money back is the most latency-sensitive sweep. |
 | `reassign-unassigned-orders` | every 3 min | Re-offers orders the 20-second tiered dispatch failed to place. |
 | `cancel-pending-orders` | every 5 min | Expires unpaid orders and releases their stock. |
+| `resume-paused-stores` | every 5 min | Clears pauses that have expired and tells the store it is open again. The state is already correct without this — `store_state` compares the expiry against the clock — so a missed run costs a notification, not a closed shop. Five minutes because the shortest pause the app offers is fifteen, and a resume message an hour late is worse than none: the vendor has already assumed it failed and paused a second time. |
 | `check-push-receipts` | every 10 min | Receipts are only queued 15 minutes after a send, so anything faster mostly finds nothing due. |
+| `release-unclaimed-cash` | every 10 min | Frees float locked to cash orders nobody delivered and returns the order to the pool. Both halves are time-sensitive: a rider whose money is locked cannot accept work, and a customer has not been told their delivery is not coming. |
 | `stale-asset-monitor` | daily, 03:00 | Housekeeping; deliberately off-peak. |
+| `deposit-maintenance` | daily, 03:30 | The deposit book's nightly upkeep: collection expiry, one-sided settlement, dormancy conversion, then the three-way reconciliation. **One slug rather than four** — the order matters, because the reconciliation has to read a book the sweeps have already brought up to date. Split apart they would race, and the reconciliation would report drift that the settlement due a minute later was about to remove. |
 | `evaluate-platinum-riders` | daily, 00:00 | Tier evaluation is a day-boundary calculation. |
 
 For each job:

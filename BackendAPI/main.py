@@ -5,22 +5,17 @@ load_dotenv()
 
 import os
 import logging
-from typing import Union
 from fastapi import FastAPI
-from pydantic import BaseModel
 from routes import (
     vendor_routes, auth_routes, product_routes, cart_routes,
     query_routes, vendor_management_routes, deliverer_routes,
-    websocket_routes, review_routes, sync_routes, sms_routes,
+    websocket_routes, review_routes, sms_routes,
     favorites_routes, notification_routes, delivery_fee_routes, refund_routes,
     vendor_favorites_routes, saved_location_routes, wallet_routes
 )
-import models
-from db.session import create_table
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -310,7 +305,7 @@ from routes import support_routes
 app.include_router(support_routes.router, prefix="/api", tags=["Support"])
 
 # --- Rider-facing Routes ---
-from routes import deliverer_routes, rider_vendor_routes, deliverer_kyc_routes
+from routes import rider_vendor_routes, deliverer_kyc_routes
 app.include_router(deliverer_routes.router, prefix="/api/rider", tags=["Rider"])
 app.include_router(rider_vendor_routes.router, prefix="/api/rider", tags=["Rider Vendor Reg"])
 app.include_router(deliverer_kyc_routes.router)
@@ -326,11 +321,16 @@ app.include_router(notification_routes.router, prefix="/api/notifications", tags
 from routes import payout_routes
 app.include_router(payout_routes.callback_router, prefix="/api/payouts", tags=["Payout Callbacks"])
 app.include_router(refund_routes.router, prefix="/api/refunds", tags=["Refunds"])
-app.include_router(sync_routes.router, prefix="/api/sync", tags=["Sync"])
 app.include_router(sms_routes.router, prefix="/api/sms", tags=["SMS Fallback"])
 app.include_router(wallet_routes.router)
 from routes import contact_routes
 app.include_router(contact_routes.router, prefix="/api", tags=["Contacts"])
+# Returning a bottle deposit. One module, two surfaces — the customer books and
+# confirms, the rider claims and confirms — because the money only moves when
+# the two counts agree, and splitting that across two routers is how they come
+# to disagree about what the flow is.
+from routes import bottle_return_routes
+app.include_router(bottle_return_routes.router, prefix="/api", tags=["Bottle Returns"])
 from routes import payment_routes
 app.include_router(payment_routes.router, prefix="/api/payments", tags=["Payments"])
 from routes import maps_routes

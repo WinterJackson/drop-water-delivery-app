@@ -21,6 +21,7 @@ from models.order_model import Order
 from models.payment_model import Payment
 from models.vendor_model import Vendor
 from services.user_service import get_user
+from utils.money import money_str
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ async def payment_history(
             "order_id": str(order.id),
             "order_reference": str(order.id)[:8].upper(),
             "vendor_name": _vendor_name(order.vendor),
-            "amount": float(payment.amount or 0),
+            "amount": money_str(payment.amount),
             "status": payment.status,
             "payment_method": order.payment_method or "mpesa",
             "mpesa_receipt": payment.mpesa_receipt,
@@ -93,7 +94,7 @@ async def payment_history(
             "order_id": str(order.id),
             "order_reference": str(order.id)[:8].upper(),
             "vendor_name": _vendor_name(order.vendor),
-            "amount": float(order.total_amount or 0),
+            "amount": money_str(order.total_amount),
             "status": "paid" if order.order_status == "delivered" else "pending",
             "payment_method": "cash",
             "mpesa_receipt": None,

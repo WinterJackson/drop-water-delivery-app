@@ -1,4 +1,5 @@
-import { View, Text, Image } from "react-native";
+import { View, Image } from "react-native";
+import { Text } from '@/components/ui/Text';
 import React from "react";
 import { useRouter } from "expo-router";
 import { PressableScale } from "@/components/ui/PressableScale";

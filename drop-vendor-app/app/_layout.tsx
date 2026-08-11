@@ -85,11 +85,48 @@ export default function Layout() {
   const darkTheme = colorScheme === "dark";
 
   // ── Font loading ──
+  /**
+   * Karla for body and UI, Fredoka for headings, JetBrains Mono for figures.
+   *
+   * Every weight is its own file: React Native has no variable-font weight
+   * axis and no `font-synthesis-weight`, so the only way to avoid the OS
+   * faking a weight is to load the real face and name it. That is why the
+   * Tailwind tokens in `tailwind.config.js` are per weight rather than one
+   * family plus `font-sans-bold`.
+   *
+   * Fredoka stops at 600 deliberately — its heavier weights read as a
+   * children's brand, and this app handles people's money. 600 is the
+   * heaviest heading weight the platform uses anywhere.
+   *
+   * Inter is gone. Nothing names it any more — the last references were the
+   * `StyleSheet` scale in `constants/typography.ts` and the avatar's initials.
+   * A registered face nothing asks for is dead weight in the bundle, and a
+   * second body font is how two screens quietly stop matching.
+   */
   const [fontsLoaded] = useFonts({
-    'Inter_400Regular': require('../assets/fonts/Inter-Regular.ttf'),
-    'Inter_500Medium': require('../assets/fonts/Inter-Medium.ttf'),
-    'Inter_600SemiBold': require('../assets/fonts/Inter-SemiBold.ttf'),
-    'Inter_700Bold': require('../assets/fonts/Inter-Bold.ttf'),
+    // Karla
+    'Karla_200ExtraLight': require('../assets/fonts/Karla_200ExtraLight.ttf'),
+    'Karla_300Light': require('../assets/fonts/Karla_300Light.ttf'),
+    'Karla_400Regular': require('../assets/fonts/Karla_400Regular.ttf'),
+    'Karla_500Medium': require('../assets/fonts/Karla_500Medium.ttf'),
+    'Karla_600SemiBold': require('../assets/fonts/Karla_600SemiBold.ttf'),
+    'Karla_700Bold': require('../assets/fonts/Karla_700Bold.ttf'),
+    'Karla_800ExtraBold': require('../assets/fonts/Karla_800ExtraBold.ttf'),
+
+    // Fredoka
+    'Fredoka_400Regular': require('../assets/fonts/Fredoka_400Regular.ttf'),
+    'Fredoka_500Medium': require('../assets/fonts/Fredoka_500Medium.ttf'),
+    'Fredoka_600SemiBold': require('../assets/fonts/Fredoka_600SemiBold.ttf'),
+
+    // JetBrainsMono
+    'JetBrainsMono_100Thin': require('../assets/fonts/JetBrainsMono_100Thin.ttf'),
+    'JetBrainsMono_200ExtraLight': require('../assets/fonts/JetBrainsMono_200ExtraLight.ttf'),
+    'JetBrainsMono_300Light': require('../assets/fonts/JetBrainsMono_300Light.ttf'),
+    'JetBrainsMono_400Regular': require('../assets/fonts/JetBrainsMono_400Regular.ttf'),
+    'JetBrainsMono_500Medium': require('../assets/fonts/JetBrainsMono_500Medium.ttf'),
+    'JetBrainsMono_600SemiBold': require('../assets/fonts/JetBrainsMono_600SemiBold.ttf'),
+    'JetBrainsMono_700Bold': require('../assets/fonts/JetBrainsMono_700Bold.ttf'),
+    'JetBrainsMono_800ExtraBold': require('../assets/fonts/JetBrainsMono_800ExtraBold.ttf'),
   });
 
   // ── AppState Focus Manager for React Query ──

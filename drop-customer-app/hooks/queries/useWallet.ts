@@ -6,7 +6,8 @@ export interface WalletTransaction {
   id: string;
   user_type: string;
   transaction_type: string;
-  amount: number;
+  /** Decimal string — the ledger's own figure. */
+  amount: string;
   status: string;
   reference_id: string | null;
   mpesa_receipt_number: string | null;

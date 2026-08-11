@@ -1,8 +1,11 @@
+import asyncio
 import base64
 import os
 import datetime
 import hmac
 import logging
+from decimal import Decimal, ROUND_HALF_UP
+
 import httpx
 from dotenv import load_dotenv
 from services.order_service import update_orders_payment_status_by_checkout_id
@@ -15,54 +18,154 @@ logger = logging.getLogger(__name__)
 # F-008 FIX: M-Pesa base URL configurable via env (sandbox vs production)
 MPESA_BASE_URL = os.getenv("MPESA_BASE_URL", "https://sandbox.safaricom.co.ke")
 
+#: East Africa Time. Safaricom validates the STK `Timestamp` against its own
+#: clock, and the password is the base64 of `shortcode + passkey + timestamp` —
+#: so the two must be generated from the same instant *in EAT*. `datetime.now()`
+#: is naive local time, which on Render (and in every container that does not set
+#: TZ) is UTC: three hours behind, every request.
+EAT = datetime.timezone(datetime.timedelta(hours=3))
 
-async def get_access_token():
-    consumer_key = os.getenv("MPESA_CONSUMER_KEY")
-    consumer_secret = os.getenv("MPESA_CONSUMER_SECRET")
-    credentials = f"{consumer_key}:{consumer_secret}"
-    encoded = base64.b64encode(credentials.encode()).decode()
 
-    headers = {
-        "Authorization": f"Basic {encoded}"
-    }
+class MpesaError(RuntimeError):
+    """Safaricom could not be reached, or refused before a transaction existed.
 
-    url = f"{MPESA_BASE_URL}/oauth/v1/generate?grant_type=client_credentials"
+    Distinct from a *declined* transaction, which arrives as a result code on a
+    successful HTTP call. This is the case where no money can possibly have moved
+    — the caller must surface it rather than proceed as though a push went out.
+    """
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers)
-        data = response.json()
-        return data.get("access_token")
+
+# ── Access token ──────────────────────────────────────────────────────────
+# Daraja tokens live an hour and Safaricom throttles the generate endpoint.
+# Minting a fresh one per call meant two round trips for every payment, every
+# status poll and every disbursement, and a throttled mint returned `None`
+# silently — which then went out on the wire as the literal header
+# `Authorization: Bearer None` and failed as an opaque Safaricom error.
+_token_cache: dict[str, object] = {"value": None, "expires_at": 0.0}
+_token_lock = asyncio.Lock()
+
+#: Refreshed this far before the stated expiry, so a token cannot lapse
+#: mid-flight on a request that has already been accepted.
+_TOKEN_SKEW_SECONDS = 120
+
+
+async def get_access_token(*, force_refresh: bool = False) -> str:
+    """A valid Daraja OAuth token, cached until shortly before it expires.
+
+    Raises `MpesaError` rather than returning `None`: a caller that cannot
+    authenticate has not failed to *charge* anybody, and must say so.
+    """
+    loop = asyncio.get_event_loop()
+
+    if not force_refresh:
+        cached = _token_cache["value"]
+        if cached and loop.time() < float(_token_cache["expires_at"]):
+            return str(cached)
+
+    async with _token_lock:
+        # Another coroutine may have refreshed it while we waited for the lock.
+        cached = _token_cache["value"]
+        if not force_refresh and cached and loop.time() < float(_token_cache["expires_at"]):
+            return str(cached)
+
+        consumer_key = os.getenv("MPESA_CONSUMER_KEY")
+        consumer_secret = os.getenv("MPESA_CONSUMER_SECRET")
+        if not consumer_key or not consumer_secret:
+            raise MpesaError("M-Pesa credentials are not configured.")
+
+        encoded = base64.b64encode(f"{consumer_key}:{consumer_secret}".encode()).decode()
+        url = f"{MPESA_BASE_URL}/oauth/v1/generate?grant_type=client_credentials"
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.get(url, headers={"Authorization": f"Basic {encoded}"})
+        except httpx.HTTPError as exc:
+            raise MpesaError(f"Could not reach M-Pesa: {exc}") from exc
+
+        if response.status_code != 200:
+            # Never log the body — it echoes the credentials on some errors.
+            raise MpesaError(f"M-Pesa rejected our credentials (HTTP {response.status_code}).")
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise MpesaError("M-Pesa returned an unreadable token response.") from exc
+
+        token = data.get("access_token")
+        if not token:
+            raise MpesaError("M-Pesa returned no access token.")
+
+        # `expires_in` is seconds, as a string on sandbox and an int on
+        # production. Treat anything unparseable as the documented hour.
+        try:
+            ttl = int(float(data.get("expires_in", 3599)))
+        except (TypeError, ValueError):
+            ttl = 3599
+
+        _token_cache["value"] = token
+        _token_cache["expires_at"] = loop.time() + max(60, ttl - _TOKEN_SKEW_SECONDS)
+        logger.info("M-PESA access token refreshed, valid for %ss.", ttl)
+        return str(token)
+
 
 def generate_password():
     shortcode = os.getenv("MPESA_SHORTCODE")
     passkey = os.getenv("MPESA_PASSKEY")
-    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    raw_password = shortcode + passkey + timestamp
+    timestamp = datetime.datetime.now(EAT).strftime('%Y%m%d%H%M%S')
+    raw_password = f"{shortcode}{passkey}{timestamp}"
     password = base64.b64encode(raw_password.encode()).decode()
     return password, timestamp
 
+
+def whole_shillings(amount, *, label: str) -> int:
+    """The integer M-Pesa will actually move, or a refusal.
+
+    Every Daraja amount field is whole shillings. `int(amount)` **truncates**,
+    so a disbursement of 984.50 left the wallet debited for the full withdrawal
+    and put 984 on the phone — the missing 50 cents recorded nowhere and
+    explained to nobody. The withdrawal fee is a `Platform_Settings` row an
+    administrator may set to 15.50 at any time, which is all it takes.
+
+    Refusing is right rather than rounding: the caller has already decided what
+    to debit, and a silent adjustment here would put the two out of step again.
+    """
+    value = Decimal(str(amount))
+    if value != value.to_integral_value(rounding=ROUND_HALF_UP) or value <= 0:
+        raise MpesaError(
+            f"{label} must be a positive whole number of shillings, got {value}."
+        )
+    return int(value)
+
 async def initiate_stk_push(phone: str, amount: int):
-    token = await get_access_token()
-    password, timestamp = generate_password()
+    """Ask Safaricom to prompt `phone` for `amount`.
+
+    Returns Safaricom's body on success, or `{"error": …}` — never raises. The
+    checkout route reads the absence of a `CheckoutRequestID` as "nothing was
+    charged", which is only safe if every failure that happens *before* the push
+    comes back the same shape as one during it.
+    """
+    try:
+        token = await get_access_token()
+        payload = {
+            "BusinessShortCode": os.getenv("MPESA_SHORTCODE"),
+            "TransactionType": "CustomerPayBillOnline",
+            "Amount": whole_shillings(amount, label="Order amount"),
+            "PartyA": phone,
+            "PartyB": os.getenv("MPESA_SHORTCODE"),
+            "PhoneNumber": phone,
+            "CallBackURL": os.getenv("MPESA_CALLBACK_URL"),
+            "AccountReference": os.getenv("PLATFORM_NAME", "Drop"),
+            "TransactionDesc": "Payment",
+        }
+        password, timestamp = generate_password()
+        payload["Password"], payload["Timestamp"] = password, timestamp
+    except MpesaError as e:
+        logger.error("M-PESA STK could not be prepared: %s", e)
+        return {"error": str(e)}
 
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
-    }
-
-    platform_name = os.getenv("PLATFORM_NAME", "Drop")
-    payload = {
-        "BusinessShortCode": os.getenv("MPESA_SHORTCODE"),
-        "Password": password,
-        "Timestamp": timestamp,
-        "TransactionType": "CustomerPayBillOnline",
-        "Amount": amount,
-        "PartyA": phone,
-        "PartyB": os.getenv("MPESA_SHORTCODE"),
-        "PhoneNumber": phone,
-        "CallBackURL": os.getenv("MPESA_CALLBACK_URL"),
-        "AccountReference": platform_name,
-        "TransactionDesc": "Payment"
     }
 
     try:
@@ -152,8 +255,16 @@ def reject_mpesa_callback(request, supplied_secret, label: str):
     return None
 
 
-async def check_payment(checkout_request_id: str, session: AsyncSession): 
-    access_token = await get_access_token()
+async def check_payment(checkout_request_id: str, session: AsyncSession):
+    try:
+        access_token = await get_access_token()
+    except MpesaError as e:
+        # The client polls this while watching a spinner. "Still processing" is
+        # the honest answer: we could not ask, so we do not know, and the
+        # callback remains the authority either way.
+        logger.error("M-PESA query could not authenticate: %s", e)
+        return {"message": "The transaction is being processed", "code": "pending"}
+
     password, timestamp = generate_password()
     business_short_code = os.getenv("MPESA_SHORTCODE")
     
@@ -234,25 +345,32 @@ async def initiate_b2c_payout(phone: str, amount: float, payout_id: str) -> dict
     Returns:
         dict with ConversationID and OriginatorConversationID on success
     """
-    token = await get_access_token()
+    try:
+        token = await get_access_token()
+        platform_name = os.getenv("PLATFORM_NAME", "Drop")
+        payload = {
+            "InitiatorName": os.getenv("MPESA_B2C_INITIATOR", "testapi"),
+            "SecurityCredential": os.getenv("MPESA_B2C_PASSWORD", ""),
+            "CommandID": "BusinessPayment",
+            # Whole shillings, or refuse. See `whole_shillings` — truncating here
+            # is how a debited balance and a disbursed amount came to disagree.
+            "Amount": whole_shillings(amount, label="Disbursement amount"),
+            "PartyA": os.getenv("MPESA_B2C_SHORTCODE", os.getenv("MPESA_SHORTCODE")),
+            "PartyB": phone,
+            "Remarks": f"{platform_name} Payout {payout_id[:8]}",
+            "QueueTimeOutURL": os.getenv("MPESA_B2C_TIMEOUT_URL", ""),
+            "ResultURL": os.getenv("MPESA_B2C_RESULT_URL", ""),
+            "Occasion": f"payout_{payout_id}",
+        }
+    except MpesaError as e:
+        # The caller has already debited the balance and refunds on a falsy
+        # `success`, so this must never propagate as an exception.
+        logger.error("M-PESA B2C could not be prepared: %s", e)
+        return {"success": False, "error": str(e)}
 
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-    }
-
-    platform_name = os.getenv("PLATFORM_NAME", "Drop")
-    payload = {
-        "InitiatorName": os.getenv("MPESA_B2C_INITIATOR", "testapi"),
-        "SecurityCredential": os.getenv("MPESA_B2C_PASSWORD", ""),
-        "CommandID": "BusinessPayment",
-        "Amount": int(amount),
-        "PartyA": os.getenv("MPESA_B2C_SHORTCODE", os.getenv("MPESA_SHORTCODE")),
-        "PartyB": phone,
-        "Remarks": f"{platform_name} Payout {payout_id[:8]}",
-        "QueueTimeOutURL": os.getenv("MPESA_B2C_TIMEOUT_URL", ""),
-        "ResultURL": os.getenv("MPESA_B2C_RESULT_URL", ""),
-        "Occasion": f"payout_{payout_id}",
     }
 
     try:
@@ -301,8 +419,14 @@ async def initiate_mpesa_reversal(
     Returns:
         dict with success status and ConversationID
     """
-    token = await get_access_token()
     shortcode = receiver_party or os.getenv("MPESA_SHORTCODE")
+
+    try:
+        token = await get_access_token()
+        reversal_amount = whole_shillings(amount, label="Reversal amount")
+    except MpesaError as e:
+        logger.error("M-PESA reversal could not be prepared: %s", e)
+        return {"success": False, "error": str(e)}
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -314,7 +438,7 @@ async def initiate_mpesa_reversal(
         "SecurityCredential": os.getenv("MPESA_B2C_PASSWORD", ""),
         "CommandID": "TransactionReversal",
         "TransactionID": transaction_id,
-        "Amount": int(amount),
+        "Amount": reversal_amount,
         "ReceiverParty": shortcode,
         "RecieverIdentifierType": "11",  # Shortcode identifier
         "Remarks": f"Drop refund for {transaction_id}",

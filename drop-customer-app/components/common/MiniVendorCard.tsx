@@ -1,7 +1,8 @@
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useRouter } from "expo-router";
 import React, { useContext } from "react";
-import { Dimensions, Image, Text, View } from "react-native";
+import { Dimensions, Image, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import DropButton from "../ui/DropButton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,7 +17,6 @@ type Vendor = {
 	location_address: string;
 	lat: number;
 	lng: number;
-	delivery_radius: number;
 	shift_start: string; // e.g. "07:00:00"
 	shift_end: string; // e.g. "19:00:00"
 	verification_status: "pending" | "verified" | "rejected"; // enum-like union
@@ -39,7 +39,6 @@ const MiniVendorCard = ({ data, FullMap }: Props) => {
 	const darkTheme = currentTheme === "dark";
 	// console.log(data)
 
-
   if(data === undefined){
     return
   }
@@ -56,19 +55,19 @@ const MiniVendorCard = ({ data, FullMap }: Props) => {
         </View>
         {/* details */}
         <View className={`gap-1 flex-1 `}>
-          <Text className={`font-bold text-lg ${darkTheme?"text-white":"text-black"}`} numberOfLines={1} ellipsizeMode="tail">{data.title}</Text>
+          <Text className={`font-sans-bold text-lg ${darkTheme?"text-white":"text-black"}`} numberOfLines={1} ellipsizeMode="tail">{data.title}</Text>
 
           {/* <------------------NAME-------------------> */}
           <View className="gap-1 flex-row items-center">
-            <Text className={`font-bold ${darkTheme? "text-white":"text-black"}`}>Vendor: </Text>
-            <Text className={`${darkTheme?"text-gray-300":"text-gray-700"} flex-1 font-semibold`} numberOfLines={1} ellipsizeMode="tail">
+            <Text className={`font-sans-bold ${darkTheme? "text-white":"text-black"}`}>Vendor: </Text>
+            <Text className={`${darkTheme?"text-gray-300":"text-gray-700"} flex-1 font-sans-semibold`} numberOfLines={1} ellipsizeMode="tail">
               {data?.owners_name}
             </Text>
           </View>
 
           {/* <-----------------RATING------------------> */}
           <View className="flex-row items-center gap-3">
-            <Text className={`font-bold ${darkTheme? "text-white":"text-black"}`}>Rating:</Text>
+            <Text className={`font-sans-bold ${darkTheme? "text-white":"text-black"}`}>Rating:</Text>
             <View className="flex-row gap-1">
               {data != undefined &&
                 [...Array(Math.round(data?.rating))].map((i, index) => {
@@ -85,7 +84,7 @@ const MiniVendorCard = ({ data, FullMap }: Props) => {
           
           {/* <--------------EST DISTANCE---------------> */}
           {/* <View className=" flex-row gap-2 items-end">
-            <Text className={`font-bold ${darkTheme? "text-white":"text-black"}`}>Delivery Time:</Text>
+            <Text className={`font-sans-bold ${darkTheme? "text-white":"text-black"}`}>Delivery Time:</Text>
             <Text className={`${darkTheme?"text-white":"text-black"}>{`${"45min"}</Text>
           </View> */}
         </View>
@@ -106,8 +105,6 @@ const MiniVendorCard = ({ data, FullMap }: Props) => {
 
 export default MiniVendorCard;
 
-
-
 // {!FullMap && (
 // 	<View>
 // 		{/* one star */}
@@ -118,7 +115,7 @@ export default MiniVendorCard;
 // 			}}
 // 		>
 // 			<View className=" py-1">
-// 				<Text className={`font-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
+// 				<Text className={`font-sans-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
 // 					1 star :{"  "}
 // 				</Text>
 // 			</View>
@@ -138,7 +135,7 @@ export default MiniVendorCard;
 // 			}}
 // 		>
 // 			<View className=" py-1">
-// 				<Text className={`font-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
+// 				<Text className={`font-sans-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
 // 					2 stars :
 // 				</Text>
 // 			</View>
@@ -158,7 +155,7 @@ export default MiniVendorCard;
 // 			}}
 // 		>
 // 			<View className=" py-1">
-// 				<Text className={`font-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
+// 				<Text className={`font-sans-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
 // 					3 stars :
 // 				</Text>
 // 			</View>
@@ -178,7 +175,7 @@ export default MiniVendorCard;
 // 			}}
 // 		>
 // 			<View className=" py-1">
-// 				<Text className={`font-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
+// 				<Text className={`font-sans-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
 // 					4 stars :
 // 				</Text>
 // 			</View>
@@ -198,7 +195,7 @@ export default MiniVendorCard;
 // 			}}
 // 		>
 // 			<View className=" py-1">
-// 				<Text className={`font-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
+// 				<Text className={`font-sans-bold text-lg ${darkTheme? "text-white":"text-black"}`}>
 // 					5 stars :
 // 				</Text>
 // 			</View>
@@ -212,22 +209,6 @@ export default MiniVendorCard;
 // 	</View>
 // )}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     // return (
     // 	<View
     // 		className={`bg-white gap-5 p-4 mx-3 rounded-3xl  ${
@@ -239,7 +220,7 @@ export default MiniVendorCard;
     //     <View className="gap-3">
     //       {/* <------------------NAME-------------------> */}
     //       <View className="gap-3 flex-row items-end">
-    //         {/* <Text className="font-bold">Vendor Name: </Text> */}
+    //         {/* <Text className="font-sans-bold">Vendor Name: </Text> */}
     //         <View className="bg-gray-200 h-3 w-[100px] rounded-full" />
     //         <View className="bg-gray-200 h-3 w-[70px] rounded-full" />
     //       </View>
@@ -335,7 +316,7 @@ export default MiniVendorCard;
     // 		)}
     // 		{/* <--------------EST DISTANCE---------------> */}
     // 		<View className=" flex-row gap-2 items-end">
-    // 			{/* <Text className="font-bold">Delivery Time:</Text> */}
+    // 			{/* <Text className="font-sans-bold">Delivery Time:</Text> */}
     // 						<View className="bg-gray-200 h-3 w-[60px] rounded-full" />
     // 						<View className="bg-gray-200 h-3 w-[60px] rounded-full" />
   

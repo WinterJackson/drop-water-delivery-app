@@ -20,7 +20,7 @@ export interface VendorDashboard {
     vendor_type: string | null;
     is_online: boolean;
     total_orders: number;
-    total_revenue: number;
+    total_revenue: string;
     pending_orders: number;
     product_count: number;
     rating: number;

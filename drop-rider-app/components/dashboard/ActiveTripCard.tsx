@@ -1,11 +1,13 @@
 import React, { useContext } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { RiderOrder } from '@/hooks/queries/useRiderData';
+import { formatMoney } from "@/utils/money";
 
 interface ActiveTripCardProps {
   order: RiderOrder;
@@ -20,7 +22,7 @@ export default function ActiveTripCard({ order }: ActiveTripCardProps) {
 
   return (
     <View className="px-5 mb-4 mt-2">
-      <Text className={`font-bold mb-2 ml-1 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Current Delivery</Text>
+      <Text className={`font-sans-bold mb-2 ml-1 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Current Delivery</Text>
       <PressableScale 
         onPress={() => router.push(`/(screens)/ActiveDelivery` as any)}
       >
@@ -30,18 +32,18 @@ export default function ActiveTripCard({ order }: ActiveTripCardProps) {
         >
           <View className="flex-row justify-between items-center mb-3">
             <View className={`px-2 py-1 rounded-full ${darkTheme ? "bg-green-800" : "bg-green-200"}`}>
-              <Text className={`text-xs font-bold ${darkTheme ? "text-green-100" : "text-green-800"}`}>
+              <Text className={`text-xs font-sans-bold ${darkTheme ? "text-green-100" : "text-green-800"}`}>
                 {order.order_status.replace(/_/g, ' ').toUpperCase()}
               </Text>
             </View>
-            <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>
-              KSH {Number(order?.total_amount ?? 0).toString()}
+            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              {formatMoney(order?.total_amount)}
             </Text>
           </View>
           
           <View className="flex-row items-center mb-3">
             <Ionicons name="storefront-outline" size={20} color={BRAND.primary} />
-            <Text className={`ml-2 font-medium ${darkTheme ? "text-gray-200" : "text-gray-800"}`} numberOfLines={1}>
+            <Text className={`ml-2 font-sans-medium ${darkTheme ? "text-gray-200" : "text-gray-800"}`} numberOfLines={1}>
               {order.vendor?.business_name || "Vendor"}
             </Text>
           </View>
@@ -54,7 +56,7 @@ export default function ActiveTripCard({ order }: ActiveTripCardProps) {
           </View>
 
           <View className={`w-full py-3 rounded-xl items-center flex-row justify-center ${darkTheme ? "bg-green-600" : "bg-green-500"}`}>
-            <Text className="text-white font-bold mr-2">View Delivery Details</Text>
+            <Text className="text-white font-sans-bold mr-2">View Delivery Details</Text>
             <Ionicons name="arrow-forward" size={18} color={BRAND.white} />
           </View>
         </View>

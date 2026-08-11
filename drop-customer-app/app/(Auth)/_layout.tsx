@@ -15,16 +15,12 @@ import {
     Image,
     Modal,
     StatusBar,
-    Text,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 // import Modal from "react-native-modal";
 
-
-
-
 const { width, height } = Dimensions.get("window");
-
 
 export const useWarmUpBrowser = () => {
   useEffect(() => {
@@ -41,9 +37,6 @@ export const useWarmUpBrowser = () => {
 // Handle any pending authentication sessions
 WebBrowser.maybeCompleteAuthSession()
 
-
-
-
 const Layout = () => {
   // <------------------------HOOKES------------------------->
   const { isSignedIn , getToken } = useAuth()
@@ -51,12 +44,10 @@ const Layout = () => {
   const { currentTheme } = useContext(UIThemeContext);
 	const { user } = useUser()
 
-
   // <------------------------STATES------------------------->
 	const { location, showPrompt, requestLocation, loading: locLoading } = useLocation();
     const apiClient = useApiClient();
 	const [AuthLoading, setAuthLoading] = useState(false);
-
 
 	const darkTheme = currentTheme === "dark";
 
@@ -105,7 +96,7 @@ const Layout = () => {
 							>
 								<View className={`flex-row gap-3 `}>
 									<Ionicons name="locate" size={24} color={BRAND.primary} />
-									<Text className="font-semibold text-2xl text-blue-500">
+									<Text className="font-heading-semibold text-2xl text-blue-500">
 										Location Access
 									</Text>
 								</View>
@@ -139,7 +130,7 @@ const Layout = () => {
 										className={`bg-blue-500 p-3 px-6 rounded-xl items-center `}
 									>
 										<Text
-											className={`text-white font-bold`}
+											className={`text-white font-sans-bold`}
 										>
 											Allow Location Access
 										</Text>

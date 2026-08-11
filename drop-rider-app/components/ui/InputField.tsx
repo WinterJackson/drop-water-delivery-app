@@ -1,11 +1,10 @@
 import {
-  Image,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  TextInputProps
+    Image,
+    StyleSheet,
+    View,
+    TextInputProps,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import React, { useContext } from "react";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -28,7 +27,6 @@ const InputField = ({ label, style, type, placeholder, set, iconleft, ...rest }:
 
   //   STATES
   const [showPassword, setShowPassword] = React.useState(false);
-
 
   return (
     <View
@@ -54,7 +52,7 @@ const InputField = ({ label, style, type, placeholder, set, iconleft, ...rest }:
         {...rest}
       />
       {type === "password" && (
-        <PressableScale 
+        <PressableScale accessibilityLabel={showPassword ? "Hide password" : "Show password"} 
           className="justify-center items-center"
           activeOpacity={0.7}
           onPress={() => {

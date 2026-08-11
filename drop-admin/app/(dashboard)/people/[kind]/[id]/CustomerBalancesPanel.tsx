@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Banknote, Droplets, Loader2 } from "lucide-react";
+import { AlertTriangle, Banknote, Building2, Droplets, Loader2 } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 
 import {
@@ -15,6 +15,7 @@ import { formatMoney } from "@/lib/utils/format";
 import {
   fetchCustomerBalances,
   returnDeposit,
+  setAccountKind,
   writeOffDebt,
   type CustomerBalances,
 } from "../actions";
@@ -49,6 +50,9 @@ export function CustomerBalancesPanel({
   // ── Deposit return state ──
   const [depositOpen, setDepositOpen] = useState(false);
   const [depositBottles, setDepositBottles] = useState("");
+  const [kindOpen, setKindOpen] = useState(false);
+  const [kindReason, setKindReason] = useState("");
+  const [kindMessage, setKindMessage] = useState<string | null>(null);
   const [depositReason, setDepositReason] = useState("");
   const [depositError, setDepositError] = useState<string | null>(null);
   const [depositSuccess, setDepositSuccess] = useState<string | null>(null);
@@ -367,6 +371,95 @@ export function CustomerBalancesPanel({
               </Button>
             )
           ) : null}
+
+          {/* ── Which ceiling this account is held to ──────────────────
+              `max_bottles_held_commercial` existed, was validated, and could
+              never apply: nothing could set the column deciding it. Every
+              account was a household, so an office ordering water was refused
+              at six bottles with nothing anybody could do about it. */}
+          <div className="mt-4 border-t border-default pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {balances.is_commercial ? "Commercial account" : "Household account"}
+                </p>
+                <p className="mt-0.5 text-xs text-muted">
+                  May hold up to {balances.bottle_limit} bottle
+                  {balances.bottle_limit === 1 ? "" : "s"} on deposit at once.
+                </p>
+              </div>
+              {canAdjust && !kindOpen ? (
+                <Button variant="ghost" onClick={() => setKindOpen(true)}>
+                  <Building2 className="h-4 w-4" aria-hidden />
+                  {balances.is_commercial ? "Make household" : "Make commercial"}
+                </Button>
+              ) : null}
+            </div>
+
+            {kindMessage ? (
+              <p role="status" className="mt-2 text-sm text-[var(--success)]">
+                {kindMessage}
+              </p>
+            ) : null}
+
+            {kindOpen ? (
+              <div className="mt-3 space-y-3">
+                <Field
+                  label="Why"
+                  hint="Recorded against your account. A commercial ceiling raises the platform's exposure to this one customer."
+                >
+                  <input
+                    className={inputClass}
+                    value={kindReason}
+                    onChange={(event) => setKindReason(event.target.value)}
+                    placeholder="Registered office, verified by…"
+                  />
+                </Field>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() =>
+                      startTransition(async () => {
+                        setError(null);
+                        const result = await setAccountKind(
+                          id,
+                          !balances.is_commercial,
+                          kindReason,
+                        );
+                        if (result.ok) {
+                          setBalances({
+                            ...balances,
+                            is_commercial: result.data.is_commercial,
+                            bottle_limit: result.data.bottle_limit,
+                          });
+                          setKindMessage(
+                            result.data.message ??
+                              `Now a ${result.data.is_commercial ? "commercial" : "household"} account, limit ${result.data.bottle_limit}.`,
+                          );
+                          setKindOpen(false);
+                          setKindReason("");
+                        } else {
+                          setError(result.error);
+                        }
+                      })
+                    }
+                    disabled={pending || kindReason.trim().length < 10}
+                  >
+                    {pending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : null}
+                    Make {balances.is_commercial ? "household" : "commercial"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setKindOpen(false)}
+                    disabled={pending}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </Card>
     </div>

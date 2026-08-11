@@ -5,7 +5,8 @@ import { RiderNotificationItemSkeleton } from "@/components/skeletons/Contextual
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useContext } from "react";
-import { RefreshControl, StatusBar, Text, View, TouchableOpacity } from "react-native";
+import { RefreshControl, StatusBar, View, TouchableOpacity } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NotificationItem } from "@/hooks/queries/useNotifications";
@@ -113,16 +114,16 @@ const Notifications = () => {
                         <TouchableOpacity onPress={() => router.back()} className="mr-4">
                             <BackButtonMinimal />
                         </TouchableOpacity>
-                        <Text className={`font-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`font-sans-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
                             Notifications
                             {unreadCount > 0 && (
-                                <Text className="text-blue-500 text-base"> ({unreadCount} new)</Text>
+                                <Text className="font-sans-bold text-blue-500 text-base"> ({unreadCount} new)</Text>
                             )}
                         </Text>
                     </View>
                     {unreadCount > 0 && (
                         <PressableScale onPress={markAllAsRead} activeOpacity={0.7}>
-                            <Text className="text-blue-500 font-semibold text-sm">Mark all read</Text>
+                            <Text className="text-blue-500 font-sans-semibold text-sm">Mark all read</Text>
                         </PressableScale>
                     )}
                 </View>
@@ -163,7 +164,7 @@ const Notifications = () => {
                     renderItem={({ item }: { item: any }) => {
                         if (item.isHeader) {
                             return (
-                                <Text className={`font-bold text-lg mt-4 mb-2 ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                                <Text className={`font-sans-bold text-lg mt-4 mb-2 ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                                     {item.title}
                                 </Text>
                             );
@@ -196,7 +197,7 @@ const Notifications = () => {
                                         </View>
                                         <View className="flex-1">
                                             <View className="flex-row justify-between items-center mb-1">
-                                                <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
+                                                <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
                                                     {item.title}
                                                 </Text>
                                                 {!item.is_read && (

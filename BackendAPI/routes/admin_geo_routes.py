@@ -10,7 +10,7 @@ and only ever H3 cells with at least two orders in them.
 day are different grants, and the second is not needed to approve a document.
 """
 import logging
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,17 +127,3 @@ async def map_orders(
     return await geo.live_orders(
         db, viewport=_viewport(min_lat, min_lng, max_lat, max_lng)
     )
-
-
-@router.get("/map/coverage", summary="Stores with no rider who could serve them")
-async def map_coverage(
-    db: AsyncSession = Depends(get_db),
-    access: AdminAccess = Depends(require_admin(PERM_GEO_VIEW)),
-):
-    """The actionable number on this screen.
-
-    Not "how many riders" — a fleet of forty all parked in one suburb is a
-    coverage failure every headline count hides. Each uncovered store is one
-    taking orders that nobody within the delivery radius can pick up.
-    """
-    return await geo.coverage_report(db)

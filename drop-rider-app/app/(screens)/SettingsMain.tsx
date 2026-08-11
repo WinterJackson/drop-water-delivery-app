@@ -3,15 +3,15 @@ import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { 
-    View, 
-    Text, 
-    ScrollView, 
-    StatusBar, 
+import {
+    View,
+    ScrollView,
+    StatusBar,
     Dimensions,
     TouchableOpacity,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
@@ -157,7 +157,7 @@ export default function SettingsMain() {
                 <View className={`w-10 h-10 items-center justify-center rounded-full ${danger ? "bg-red-500/10" : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
                     <Ionicons name={iconName} size={20} color={danger ? "#ef4444" : BRAND.primary} />
                 </View>
-                <Text className={`text-lg font-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
+                <Text className={`text-lg font-sans-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
                     {title}
                 </Text>
             </View>
@@ -187,7 +187,7 @@ export default function SettingsMain() {
                     <TouchableOpacity onPress={() => router.back()} className="mr-4">
                         <BackButtonMinimal />
                     </TouchableOpacity>
-                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         Rider Settings
                     </Text>
                 </View>
@@ -221,7 +221,7 @@ export default function SettingsMain() {
                                 </View>
                             )}
                         </View>
-                        <TouchableOpacity 
+                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change your profile photo" 
                             onPress={handleUpdateProfilePic}
                             disabled={isUploadingPic}
                             activeOpacity={0.8}
@@ -237,7 +237,7 @@ export default function SettingsMain() {
                             <Ionicons name="camera" size={16} color={BRAND.white} />
                         </TouchableOpacity>
                     </View>
-                    <Text className={`text-2xl font-bold mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-2xl font-heading-semibold mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
                         {RiderData?.name || user?.fullName || "Verified Rider"}
                     </Text>
                     <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -246,7 +246,7 @@ export default function SettingsMain() {
                 </View>
 
                 {/* Settings Groups */}
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Vendors
                 </Text>
                 <View className="mb-8">
@@ -257,7 +257,7 @@ export default function SettingsMain() {
                     />
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Verification & Vehicle
                 </Text>
                 <View className="mb-8">
@@ -268,7 +268,7 @@ export default function SettingsMain() {
                     />
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Financials
                 </Text>
                 <View className="mb-8">
@@ -279,7 +279,7 @@ export default function SettingsMain() {
                     />
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Sync
                 </Text>
                 <View className="mb-8">
@@ -293,7 +293,7 @@ export default function SettingsMain() {
                     />
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Help
                 </Text>
                 <View className="mb-8">
@@ -304,7 +304,7 @@ export default function SettingsMain() {
                     />
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Preferences
                 </Text>
                 <View className="mb-8">
@@ -326,7 +326,7 @@ export default function SettingsMain() {
                             <View className={`w-10 h-10 items-center justify-center rounded-full ${darkTheme ? "bg-blue-900/40" : "bg-blue-50"}`}>
                                 <Ionicons name={darkTheme ? "moon-outline" : "sunny-outline"} size={20} color={BRAND.primary} />
                             </View>
-                            <Text className={`text-lg font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                            <Text className={`text-lg font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                                 Dark Mode
                             </Text>
                         </View>
@@ -339,7 +339,7 @@ export default function SettingsMain() {
                     </TouchableOpacity>
                 </View>
 
-                <Text className={`text-sm font-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-2 uppercase tracking-widest ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     System
                 </Text>
                 <View className="mb-8">

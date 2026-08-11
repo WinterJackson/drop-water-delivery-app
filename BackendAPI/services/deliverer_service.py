@@ -15,9 +15,10 @@ from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification, push_allowed
-import asyncio
+from services.settlement_service import cash_float_required
 import h3
 from decimal import Decimal
+from services.order_service import apply_status_transition
 
 
 def _money(value) -> Decimal:
@@ -252,7 +253,7 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
     if new_status == "delivered" and order.order_status not in ("pending", "accepted", "preparing", "ready", "picked_up"):
         raise HTTPException(status_code=409, detail=f"Order is already in a terminal state ('{order.order_status}') and cannot be marked delivered again.")
 
-    order.order_status = new_status
+    apply_status_transition(order, new_status)
     if proof_url:
         from utils.image_utils import validate_proof_url
         if not validate_proof_url(proof_url):
@@ -264,6 +265,24 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
         
     # --- Delivery Completion Logic ---
     if new_status == "delivered":
+        # A cash delivery needs a photo, whatever the bottle count says.
+        #
+        # The existing guardrail below demands one only on a bottle *shortfall*.
+        # On a cash order there is no M-Pesa receipt to point at, so the photo is
+        # the only thing that makes "he never delivered it" a decidable question
+        # — and it is asked before any money moves, because settlement is what
+        # this transition triggers.
+        from services import cod_policy
+
+        if await cod_policy.photo_required(session, order) and not (proof_url or order.proof_url):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A delivery photo is required on cash orders. "
+                    "Take one at the door and complete the delivery again."
+                ),
+            )
+
         deliverer.is_available = True # F-030: Free the rider for the next order
         
         # --- Wallet settlement ---
@@ -303,7 +322,7 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
                         owner=deliverer,
                         clerk_id=deliverer.clerk_id,
                         user_type="rider",
-                        amount=-(_money(order.vendor_net) + _money(order.platform_total)),
+                        amount=-cash_float_required(order),
                         transaction_type=TransactionType.order_payment,
                         description=f"Cash order {short_id} settled from float",
                         reference_id=str(order.id),
@@ -343,6 +362,18 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
                     description=f"Delivery earnings for order {short_id}",
                     reference_id=str(order.id),
                 )
+        else:
+            # Every other combination pays nobody. That is correct for an order
+            # whose M-Pesa payment never settled — but it used to happen in
+            # silence, so the vendor and the rider simply never saw the money and
+            # nothing anywhere recorded that a delivered order had gone
+            # unsettled. Loud, and reconcilable from the logs.
+            logger.error(
+                "Order %s delivered but not settled: payment_method=%s payment_status=%s. "
+                "vendor_net=%s rider_net=%s platform_total=%s remain unpaid.",
+                order.id, order.payment_method, order.payment_status,
+                order.vendor_net, order.rider_net, order.platform_total,
+            )
 
         # --- Bottle Inventory Debt Tracking (quick_swap) ---
         if order.delivery_type == "quick_swap":
@@ -384,17 +415,21 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
                 customer.bottle_refill_count = (customer.bottle_refill_count or 0) + 1
             customer.last_order_date = func.now()
 
-            # --- Anti-Poaching Loyalty Cashback ---
-            # Through `apply_wallet_delta`, like every other balance movement on
-            # the platform. This was a bare `customer.wallet_balance += 10.0`: a
-            # float added to a `Numeric` column, with no `WalletTransaction`
-            # behind it, so the customer's own Transactions screen could not
-            # explain where the money came from and summing their ledger no
-            # longer reproduced their balance — the exact invariant
-            # `apply_wallet_delta` exists to hold.
+            # --- Loyalty cashback: withdrawn, default 0 ---
             #
-            # The amount is a setting rather than a literal, so it can be tuned
-            # or switched off from the console like every other business figure.
+            # Kept as a switched-off setting rather than deleted, because the
+            # mechanism is sound and the *rate* was the problem: KSH 10 on every
+            # delivery against a platform cut of about KSH 37 returned a quarter
+            # of the platform's revenue, unconditionally, to customers who were
+            # buying water anyway. Paying on every order buys nothing. If it
+            # comes back it should sit at a retention cliff — a fourth order
+            # inside thirty days — not on each delivery.
+            #
+            # Moves through `apply_wallet_delta` when non-zero, like every other
+            # balance movement. It was a bare `customer.wallet_balance += 10.0`:
+            # a float added to a `Numeric` column with no `WalletTransaction`
+            # behind it, so summing the customer's ledger no longer reproduced
+            # their balance.
             await config.ensure_fresh(session)
             cashback = config.get_decimal("loyalty_cashback_per_delivery")
             if cashback > 0 and customer.clerk_id:
@@ -474,7 +509,15 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
     if not deliverer:
         raise HTTPException(status_code=404, detail="Rider not found")
 
-    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    # The same trailing window the Platinum job evaluates over. Counting the
+    # rider's progress over a different period from the one that decides their
+    # tier is how a rider reaches the target on screen and is demoted anyway.
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(session)
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(
+        days=config.get_int("platinum_window_days")
+    )
 
     from models.vendor_model import Vendor, VendorType
     paid_rider_filter = and_(
@@ -516,11 +559,26 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
     total_payload_bonus = float(surcharges_result.total_payload_bonus or 0.0) if surcharges_result else 0.0
     total_staircase_bonus = float(surcharges_result.total_staircase_bonus or 0.0) if surcharges_result else 0.0
 
+    # What Platinum actually takes, from the same two rows the nightly job reads.
+    # The app stated "complete 20 more deliveries" from a literal of its own, so
+    # a business that raised the bar would have told every rider the old number
+    # while demoting them against the new one.
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(session)
+    platinum_target = config.get_int("platinum_min_deliveries")
+    platinum_window_days = config.get_int("platinum_window_days")
+
     return {
         "rider_id": str(deliverer.id),
         "name": deliverer.name,
         "total_deliveries": total_deliveries,
+        # Kept under its original name because the app reads it; the window it
+        # is counted over is `platinum_window_days`, which defaults to 7.
         "deliveries_last_7_days": deliveries_last_7_days,
+        "deliveries_in_window": deliveries_last_7_days,
+        "platinum_target": platinum_target,
+        "platinum_window_days": platinum_window_days,
         "total_earnings": total_earnings,
         "is_available": deliverer.is_available,
         "rating": deliverer.rating or 5.0,
@@ -559,7 +617,7 @@ async def reject_delivery(session: AsyncSession, clerk_id: str, order_id: UUID):
     # Unassign rider and transition to unassigned
     previous_rider_id = order.deliverer_id
     order.deliverer_id = None
-    order.order_status = "unassigned"
+    apply_status_transition(order, "unassigned")
     
     # F-030: Free the rider since they rejected it
     deliverer.is_available = True
@@ -681,9 +739,22 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # --- Cash Order Float Check (Zero-Fraud) ---
+        # --- Cash Order: trust, then float ---
+        # Two different questions, and the float check only ever asked the
+        # second. "Can this rider cover it" says nothing about whether they
+        # should be carrying somebody else's money at all — a four-day-old
+        # account with a large balance passed, every time, for any number of
+        # orders at once.
         if order.payment_method == "cash":
+            from services import cod_policy
             from services.settlement_service import committed_cash_float
+
+            # Raises 403 on trust and 409 on a limit. Deliberately before the
+            # float check: "you need 25 deliveries" is a truer answer than
+            # "insufficient balance" to a rider who could never take this order.
+            await cod_policy.assert_rider_may_accept_cash(
+                session, rider=deliverer, order=order
+            )
 
             # Lock the rider's row: the check below is read-then-decide, and the
             # deliverer row was previously loaded with a plain SELECT. Two cash
@@ -697,7 +768,7 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
             if locked_rider is not None:
                 deliverer = locked_rider
 
-            required_float = _money(order.vendor_net) + _money(order.platform_total)
+            required_float = cash_float_required(order)
             # Float already promised to other cash orders this rider is carrying is
             # not spendable here either — otherwise one balance backs every order.
             already_committed = await committed_cash_float(session, deliverer.id)
@@ -756,7 +827,7 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
 
         # Success: Claim the order
         order.deliverer_id = deliverer.id
-        order.order_status = "pending"
+        apply_status_transition(order, "pending")
         deliverer.is_available = False # F-030 Single-Client Constraint Enforcement
 
         # --- Gamification Ledger Recalculation ---
@@ -868,7 +939,7 @@ async def report_address_mismatch(session: AsyncSession, clerk_id: str, order_id
     if order.order_status == "delivered":
         raise HTTPException(status_code=400, detail="Order is already delivered")
 
-    order.order_status = "mismatch_pending"
+    apply_status_transition(order, "mismatch_pending")
     
     # Store the actual floor level reported by the rider for surcharge recalculation
     if actual_floor_level is not None and hasattr(order, 'actual_floor_level'):
@@ -945,7 +1016,7 @@ async def report_bottle_rejection(session: AsyncSession, clerk_id: str, order_id
     )
     session.add(rejection)
     
-    order.order_status = "pending_review"
+    apply_status_transition(order, "pending_review")
     await session.commit()
     await session.refresh(rejection)
 
@@ -1037,20 +1108,37 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
     if not order or order.deliverer_id != deliverer.id:
         raise HTTPException(status_code=404, detail="This order is not assigned to you.")
 
-    # Matrix of reasons
+    # Matrix of reasons. These three lists are the two menus the rider app
+    # actually offers — and only the first was ever consulted, so any string at
+    # all was accepted as a reason. A post-pickup drop could be recorded as
+    # `out_of_stock`, which is not a thing that can happen to an order already
+    # on the bike and counts against the store in every vendor-fault figure
+    # that reads `cancellation_reason`.
     vendor_fault_reasons = ["vendor_closed", "out_of_stock"]
     rider_fault_reasons = ["vehicle_issue", "accident", "other"]
-    post_pickup_reasons = ["vehicle_issue", "accident", "customer_unreachable", "customer_refused", "other"]
+    post_pickup_reasons = [
+        "vehicle_issue", "accident", "customer_unreachable", "customer_refused", "other",
+    ]
 
     previous_rider_id = order.deliverer_id
     action_taken = ""
 
     if order.order_status in ["pending", "accepted", "preparing", "ready"]:
-        if reason in vendor_fault_reasons:
-            action_taken = "cancelled"
-        else:
-            action_taken = "unassigned"
+        if reason not in vendor_fault_reasons + rider_fault_reasons:
+            raise HTTPException(
+                status_code=400,
+                detail="That is not a reason this order can be dropped for.",
+            )
+        # Whose fault it was decides whether the customer still gets their
+        # water. A shut store means nobody can fulfil it; a rider's own problem
+        # means the order goes back on the radar for somebody else.
+        action_taken = "cancelled" if reason in vendor_fault_reasons else "unassigned"
     elif order.order_status == "picked_up":
+        if reason not in post_pickup_reasons:
+            raise HTTPException(
+                status_code=400,
+                detail="That is not a reason this order can be dropped for.",
+            )
         action_taken = "cancelled"
     else:
         raise HTTPException(status_code=400, detail=f"Cannot cancel order in state {order.order_status}")
@@ -1062,13 +1150,13 @@ async def cancel_delivery(session: AsyncSession, clerk_id: str, order_id: str, r
         # the customer still wants it and the stock is still committed to them.
         order.cancellation_reason = detailed_reason
         order.deliverer_id = None
-        order.order_status = "unassigned"
+        apply_status_transition(order, "unassigned")
         deliverer.is_available = True
     else:
         # action_taken == "cancelled"
         from services.order_service import revert_order_side_effects
 
-        order.order_status = "cancelled"
+        apply_status_transition(order, "cancelled")
         deliverer.is_available = True
         await revert_order_side_effects(session, order, reason=detailed_reason)
 
@@ -1167,7 +1255,6 @@ async def flush_tracking_logs():
 
     from dependencies.dependencies import get_db_session
     from models.order_tracking_log_model import OrderTrackingLog
-    from sqlalchemy import update
     import uuid
     
     # Process batch

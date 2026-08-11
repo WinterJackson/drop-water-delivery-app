@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
 from pydantic import BaseModel
 from services.auth_service import  createUser
 from services.user_service import  update_user_location, update_user_profile_pic
@@ -112,6 +111,7 @@ def sanitize_phone_number(phone: str) -> str:
 
 # Import limiter from main app
 from core.redis_client import redis_limiter as limiter
+from sqlalchemy import select, or_
 
 # CREATE USER 
 @router.post("/create_user")

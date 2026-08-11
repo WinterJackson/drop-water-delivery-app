@@ -10,7 +10,7 @@ export interface BasicUser {
   location_address: string | null;
   bottle_purchased_at: string | null;
   bottle_refill_count: number;
-  wallet_balance: number;
+  wallet_balance: string;
   floor_level: number;
   has_elevator: boolean;
   preferences: Record<string, unknown> | null;
@@ -28,7 +28,6 @@ export interface Vendor {
   location_address: string | null;
   lat: number | null;
   lng: number | null;
-  delivery_radius: number | null;
   shift_start: string;
   shift_end: string;
   verification_status: string;
@@ -39,7 +38,7 @@ export interface Vendor {
 export interface Product {
   id: string;
   name: string;
-  price: number;
+  price: string;
   description: string | null;
   image: string | null;
   stock_quantity: number;
@@ -57,8 +56,8 @@ export interface OrderItem {
   product_id: string;
   product_name: string;
   quantity: number;
-  unit_price: number;
-  total_price: number;
+  unit_price: string;
+  total_price: string;
   image: string | null;
 }
 
@@ -66,9 +65,9 @@ export interface Order {
   id: string;
   order_id: string;
   order_status: OrderStatus;
-  total_amount: number;
-  delivery_fee: number;
-  service_fee: number;
+  total_amount: string;
+  delivery_fee: string;
+  service_fee: string;
   items: OrderItem[];
   vendor_id: string;
   customer_id: string;
@@ -140,7 +139,7 @@ export interface Coordinates {
 
 export interface PaymentRecord {
   id: string;
-  amount: number;
+  amount: string;
   method: string;
   status: string;
   created_at: string;

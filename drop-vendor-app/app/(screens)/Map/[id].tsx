@@ -5,10 +5,10 @@ import {
     Platform,
     StatusBar,
     StyleSheet,
-    Text,
     View,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +20,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { darkMapStyle, standardMapStyle } from "@/constants/mapStyles";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
+import { useOrderTracking } from "@/hooks/useOrderTracking";
 
 // Safe Map Imports
 let MapView: any = null;
@@ -56,70 +57,33 @@ export default function LiveMap() {
     const mapRef = useReactRef<any>(null);
     const trackingMarkerRef = useReactRef<any>(null);
 
-    // WebSocket connection for live rider tracking
+    /**
+     * Live rider position, from the one hook that knows how to open this socket.
+     *
+     * This screen used to build the connection inline and omit the `?token=`
+     * query parameter, so the server closed it with 1008 before the first
+     * frame — the map has never shown a moving rider to a vendor. It also
+     * derived the socket origin with an unanchored `.replace("http", "ws")` on
+     * a REST base URL.
+     */
+    const { location: riderLocation, isLive } = useOrderTracking(
+        activeOrder?.id,
+        !!activeOrder && ["accepted", "picked_up"].includes(activeOrder.order_status),
+    );
+
     useEffect(() => {
-        let ws: WebSocket | null = null;
-        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-        let failCount = 0;
-        const MAX_FAILURES = 5;
-
-        const connect = async () => {
-            if (!activeOrder || !["picked_up", "accepted"].includes(activeOrder.order_status)) return;
-
-            try {
-                const { getToken } = require("@clerk/clerk-expo").useAuth ? { getToken: null } : { getToken: null };
-                // Build WS URL from BASE_URL directly (not fragile path manipulation)
-                const baseUrl = process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "";
-                const wsBaseUrl = baseUrl.replace("http", "ws");
-                const wsUrl = `${wsBaseUrl}/ws/track/${activeOrder.id}`;
-                
-                ws = new WebSocket(wsUrl);
-                ws.onopen = () => { failCount = 0; };
-                ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.action === "heartbeat") return;
-                        // Support both {lat, lng} and {location: {lat, lng}} formats
-                        const location = data.location || data;
-                        if (location.lat && location.lng) {
-                            setRiderCoordinates({ lat: location.lat, lng: location.lng });
-                            if (Platform.OS !== 'web') {
-                                if (mapRef.current) {
-                                    mapRef.current.animateCamera({
-                                        center: { latitude: location.lat, longitude: location.lng },
-                                        pitch: 45,
-                                        heading: 0,
-                                        altitude: 1000,
-                                        zoom: 16
-                                    }, { duration: 1500 });
-                                }
-                                if (trackingMarkerRef.current?.animateMarkerToCoordinate) {
-                                    trackingMarkerRef.current.animateMarkerToCoordinate(
-                                        { latitude: location.lat, longitude: location.lng },
-                                        1500
-                                    );
-                                }
-                            }
-                        }
-                    } catch (e) { if (__DEV__) console.error("WS Parse Error", e); }
-                };
-                ws.onerror = (e) => { if (__DEV__) console.error("WS Error", e); };
-                ws.onclose = () => {
-                    failCount++;
-                    if (failCount < MAX_FAILURES) {
-                        const delay = Math.min(1000 * Math.pow(2, failCount), 10000);
-                        reconnectTimer = setTimeout(connect, delay);
-                    }
-                };
-            } catch (e) { if (__DEV__) console.error("WS Setup Error", e); }
-        };
-
-        connect();
-        return () => {
-            if (ws) ws.close();
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-        };
-    }, [activeOrder]);
+        if (!riderLocation) return;
+        setRiderCoordinates(riderLocation);
+        if (Platform.OS === 'web') return;
+        mapRef.current?.animateCamera({
+            center: { latitude: riderLocation.lat, longitude: riderLocation.lng },
+            pitch: 45,
+        }, { duration: 1000 });
+        trackingMarkerRef.current?.animateMarkerToCoordinate?.(
+            { latitude: riderLocation.lat, longitude: riderLocation.lng },
+            1500,
+        );
+    }, [riderLocation]);
 
     const handleZoom = async (zoomIn: boolean) => {
         if (!mapRef.current || Platform.OS === 'web') return;
@@ -145,9 +109,9 @@ export default function LiveMap() {
     if (!activeOrder) {
         return (
             <SafeAreaView className={`flex-1 items-center justify-center ${darkTheme ? "bg-black" : "bg-white"}`}>
-                <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>Order not found</Text>
+                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Order not found</Text>
                 <PressableScale onPress={() => router.back()} className="mt-4 bg-accentbg px-6 py-2 rounded-lg">
-                    <Text className="text-white font-bold">Go Back</Text>
+                    <Text className="text-white font-sans-bold">Go Back</Text>
                 </PressableScale>
             </SafeAreaView>
         );
@@ -224,10 +188,10 @@ export default function LiveMap() {
                         </View>
                         <View className="flex-row gap-2 pointer-events-auto">
                             <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
+                                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
                             </PressableScale>
                             <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
+                                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
                             </PressableScale>
                         </View>
                     </View>
@@ -240,21 +204,30 @@ export default function LiveMap() {
                     <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-slate-700" : "bg-slate-300"}`} />
                 </View>
                 
-                <Text className={`text-xl font-black mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Live Tracking</Text>
-                <Text className={`text-sm font-semibold mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Order #{activeOrder.id.substring(0,8)}</Text>
+                <Text className={`text-xl font-sans-extrabold mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Live Tracking</Text>
+                <Text className={`text-sm font-sans-semibold mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Order #{activeOrder.id.substring(0,8)}</Text>
                 
                 <View className={`flex-row items-center justify-between p-4 rounded-2xl border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-slate-50 border-gray-100"}`}>
                     <View className="flex-row items-center">
                         <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
-                            {riderCoordinates ? (
+                            {isLive ? (
                                 <Ionicons name="pulse" size={24} color={BRAND.primary} />
                             ) : (
                                 <ActivityIndicator size="small" color={BRAND.primary} />
                             )}
                         </View>
                         <View>
-                            <Text className={`text-sm font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
-                                {riderCoordinates ? "Rider is moving" : "Waiting for rider location..."}
+                            {/* Three states, not two. A position with a dead
+                                socket is the last one we were told, not a rider
+                                who is moving — and saying "moving" over a frozen
+                                marker is the version of this a vendor calls
+                                support about. */}
+                            <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                                {isLive
+                                    ? "Rider is moving"
+                                    : riderCoordinates
+                                        ? "Reconnecting — showing last position"
+                                        : "Waiting for rider location..."}
                             </Text>
                             <Text className={`text-xs mt-0.5 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
                                 {activeOrder.order_status.replace("_", " ")}

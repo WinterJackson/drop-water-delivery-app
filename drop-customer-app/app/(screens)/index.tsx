@@ -20,23 +20,24 @@ import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useCallback, useContext, useEffect, useState } from "react";
 import {
-	Dimensions,
-	Keyboard,
-	RefreshControl,
-	StatusBar,
-	Text,
-	TouchableWithoutFeedback,
-	View,
-	Image,
-	Modal,
-	Linking
+    Dimensions,
+    Keyboard,
+    RefreshControl,
+    StatusBar,
+    TouchableWithoutFeedback,
+    View,
+    Image,
+    Modal,
+    Linking,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { FlashList, ListRenderItem } from "@shopify/flash-list";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND, TOAST } from "@/constants/brandColors";
 
 import { useWindowDimensions } from "react-native";
+import { formatMoneyShort, isZeroMoney } from "@/utils/money";
 
 const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { item: any; darkTheme: boolean; width: number; router: any }) => {
 	return (
@@ -66,7 +67,7 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 						{/* Offer Badge */}
 						{item?.discount > 0 && (
 							<View className="absolute w-[60px] bg-red-500 z-20 right-0 items-center justify-center rotate-45 translate-x-4 translate-y-2">
-								<Text className="text-white font-semibold">
+								<Text className="text-white font-sans-semibold">
 									{Math.ceil((item?.discount / item?.price) * 100)}%
 								</Text>
 							</View>
@@ -83,13 +84,13 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 						</View>
 						{/* Name, pricing and delivery time  */}
 						<View className="flex-1 px-3 py-2 justify-center w-full">
-							<Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+							<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
 								{item?.name}
 							</Text>
 							<View className="flex-row justify-between items-center mt-0.5">
 								{/* price and discount */}
 								<View className="flex-row gap-2 items-center">
-									<Text className={`font-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+									<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 										KSH {Math.round((item?.price - item?.discount) * 100) / 100}
 									</Text>
 									{item?.discount > 0 && (
@@ -155,7 +156,6 @@ export default function Home() {
 
 	const { data: Offers = [], isLoading: offersLoad, refetch: r7 } = useProductsWithOffer();
 	const OffersLoaded = !offersLoad;
-
 
 	// Random products (pagination)
 	const [page, setPage] = useState(1);
@@ -250,10 +250,10 @@ export default function Home() {
 								<Ionicons name="location" size={24} color={BRAND.primary} />
 								<View className="flex-col justify-center">
 									<View className="flex-row items-center gap-1">
-										<Text className={`text-xs font-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Deliver to</Text>
+										<Text className={`text-xs font-sans-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Deliver to</Text>
 										<Ionicons name="chevron-down" size={16} color={BRAND.primary} />
 									</View>
-									<Text numberOfLines={1} className={`text-sm font-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+									<Text numberOfLines={1} className={`text-sm font-sans-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
 										{User?.location_address || "Set Location"}
 									</Text>
 								</View>
@@ -262,15 +262,15 @@ export default function Home() {
 
 						<View className="flex-row items-center gap-3">
 							{/* Drop Cashback Pill */}
-							{User?.wallet_balance !== undefined && User?.wallet_balance > 0 && (
+							{!isZeroMoney(User?.wallet_balance) && (
 								<PressableScale
 									activeOpacity={0.6}
 									onPress={() => router.push("/(screens)/Profile")}
 								>
 									<View className={`flex-row items-center px-2.5 py-1.5 rounded-full border ${darkTheme ? "bg-blue-500/20 border-blue-500/30" : "bg-blue-50 border-blue-200"}`}>
 										<Ionicons name="wallet-outline" size={14} color={BRAND.primary} />
-										<Text className="ml-1 font-bold text-xs" style={{ color: BRAND.primary }}>
-											KSh {(User.wallet_balance || 0).toLocaleString()}
+										<Text className="ml-1 font-sans-bold text-xs" style={{ color: BRAND.primary }}>
+											{formatMoneyShort(User?.wallet_balance, 'KSh')}
 										</Text>
 									</View>
 								</PressableScale>
@@ -283,7 +283,7 @@ export default function Home() {
 								<View className="relative w-10 h-10 items-center justify-center">
 									{unreadCount > 0 && (
 										<View className="absolute z-10 top-0 right-0 bg-red-500 items-center justify-center min-w-[18px] h-[18px] rounded-full px-1">
-											<Text className="text-white font-bold text-[10px]">
+											<Text className="text-white font-sans-bold text-[10px]">
 												{unreadCount > 99 ? "99+" : unreadCount}
 											</Text>
 										</View>
@@ -312,7 +312,7 @@ export default function Home() {
 						<View className={`mx-5 mb-2 p-4 rounded-2xl flex-row items-center gap-3 ${darkTheme ? "bg-yellow-500/10 border border-yellow-500/20" : "bg-yellow-50 border border-yellow-200"}`}>
 							<Text style={{ fontSize: 22 }}>⚠️</Text>
 							<View className="flex-1">
-								<Text className={`font-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
+								<Text className={`font-sans-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
 									Limited Coverage Area
 								</Text>
 								<Text className={`text-xs mt-0.5 ${darkTheme ? "text-yellow-400/70" : "text-yellow-600"}`}>
@@ -350,7 +350,7 @@ export default function Home() {
 														<Ionicons name="bicycle" size={20} color={BRAND.primary} />
 													</View>
 													<View>
-														<Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-gray-900"}`}>
+														<Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-gray-900"}`}>
 															Active Order
 														</Text>
 														<Text className={`text-xs ${darkTheme ? "text-blue-300" : "text-blue-600"}`}>
@@ -459,7 +459,7 @@ export default function Home() {
 									<View className="w-16 h-16 rounded-full bg-primary/20 items-center justify-center mb-4">
 										<Ionicons name="location" size={24} color={BRAND.primary} />
 									</View>
-									<Text className={`text-xl font-bold text-center mb-2 ${darkTheme ? "text-white" : "text-black"}`}>
+									<Text className={`text-xl font-sans-bold text-center mb-2 ${darkTheme ? "text-white" : "text-black"}`}>
 										Location Required
 									</Text>
 									<Text className={`text-center text-sm ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
@@ -471,21 +471,21 @@ export default function Home() {
 									onPress={() => Linking.openSettings()}
 									className="bg-primary py-3 rounded-xl items-center mb-3"
 								>
-									<Text className="text-white font-bold">Open Settings</Text>
+									<Text className="text-white font-sans-bold">Open Settings</Text>
 								</PressableScale>
 
 								<PressableScale
 									onPress={() => requestLocation()}
 									className={`py-3 rounded-xl items-center mb-3 ${darkTheme ? "bg-gray-800" : "bg-gray-100"}`}
 								>
-									<Text className={`font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>I've enabled it, try again</Text>
+									<Text className={`font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>I've enabled it, try again</Text>
 								</PressableScale>
 
 								<PressableScale
 									onPress={() => router.push("/(screens)/LocationSearch" as any)}
 									className="py-3 rounded-xl items-center"
 								>
-									<Text className={`font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Enter address manually</Text>
+									<Text className={`font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Enter address manually</Text>
 								</PressableScale>
 							</View>
 						</View>

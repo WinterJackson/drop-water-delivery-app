@@ -8,9 +8,9 @@ import {
     RefreshControl,
     ScrollView,
     StatusBar,
-    Text,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { useUnreadNotificationCount } from "@/hooks/queries/useNotifications";
@@ -26,6 +26,7 @@ import RecentOrdersFeed from "@/components/dashboard/RecentOrdersFeed";
 import SwipeToGoOnline from "@/components/ui/SwipeToGoOnline";
 import StoreSwitcherSheet, { type StoreSwitcherSheetRef } from "@/components/dashboard/StoreSwitcherSheet";
 import LowStockCard from "@/components/dashboard/LowStockCard";
+import StorePauseCard from "@/components/dashboard/StorePauseCard";
 import { useActiveStore } from "@/stores/activeStoreStore";
 
 export default function Dashboard() {
@@ -39,6 +40,11 @@ export default function Dashboard() {
   const updateProfile = useUpdateVendorProfile();
   
   const isOnline = vendorProfileData?.is_online ?? dashboard?.is_online ?? true;
+  // The open/closed swipe is owner-only on the server. Absent while the profile
+  // loads means *not* staff, so an owner on a slow connection still gets their
+  // control — this decides whether to show a button, not whether to permit
+  // anything, and the server refuses regardless.
+  const isStaff = vendorProfileData?.role === "staff";
   const isToggling = updateProfile.isPending;
 
   // Store switcher. The selection lives in a persisted store rather than in
@@ -78,9 +84,9 @@ export default function Dashboard() {
     return (
       <SafeAreaView className={`flex-1 justify-center items-center ${darkTheme ? "bg-black" : ""}`}>
         <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
-        <Text className={`text-lg font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>Failed to load dashboard</Text>
+        <Text className={`text-lg font-sans-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>Failed to load dashboard</Text>
         <PressableScale onPress={() => refetch()} className="bg-accentbg px-6 py-2 rounded-lg">
-          <Text className="text-white font-bold">Retry</Text>
+          <Text className="text-white font-sans-bold">Retry</Text>
         </PressableScale>
       </SafeAreaView>
     );
@@ -117,10 +123,10 @@ export default function Dashboard() {
               <Ionicons name="storefront" size={24} color={BRAND.primary} />
               <View className="flex-col justify-center">
                 <View className="flex-row items-center gap-1">
-                  <Text className={`text-xs font-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Active Store</Text>
+                  <Text className={`text-xs font-sans-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Active Store</Text>
                   <Ionicons name="chevron-down" size={16} color={BRAND.primary} />
                 </View>
-                <Text numberOfLines={1} className={`text-sm font-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                <Text numberOfLines={1} className={`text-sm font-sans-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
                   {dashboard?.business_name || "Your Store"}
                 </Text>
               </View>
@@ -135,7 +141,7 @@ export default function Dashboard() {
               <View className="relative w-10 h-10 items-center justify-center">
                 {unreadCount > 0 && (
                   <View className="absolute z-10 top-0 right-0 bg-red-500 items-center justify-center min-w-[18px] h-[18px] rounded-full px-1">
-                    <Text className="text-white font-bold text-[10px]">
+                    <Text className="text-white font-sans-bold text-[10px]">
                       {unreadCount > 99 ? "99+" : unreadCount}
                     </Text>
                   </View>
@@ -167,17 +173,32 @@ export default function Dashboard() {
         showsVerticalScrollIndicator={false}
       >
         
-        {/* Toggle Store Status */}
-        <View className="pt-2 px-2">
-           <SwipeToGoOnline isOnline={isOnline} onToggle={toggleStoreStatus} isLoading={isToggling} />
-        </View>
+        {/* Toggle Store Status — owners only.
+            `PUT /profile` is `get_owned_store`, so a staff member swiping this
+            got `owner_only` every time: a full-width control on the busiest
+            screen in the app that could not work for the person most likely to
+            reach for it. Hiding it is the same decision the profile menu
+            already makes about the owner-only screens — and the pause below is
+            what that person actually needs. */}
+        {!isStaff && (
+          <View className="pt-2 px-2">
+             <SwipeToGoOnline isOnline={isOnline} onToggle={toggleStoreStatus} isLoading={isToggling} />
+          </View>
+        )}
+
+        {/* Pause — the timed sibling of the swipe above, and the one a staff
+            member can actually use. The swipe writes `is_online` through
+            `PUT /profile`, which is owner-only, so whoever is behind the
+            counter when the 20 L bottles run out could not stop orders at all.
+            This card renders nothing without `manage_orders`. */}
+        <StorePauseCard />
 
         {/* If Offline, show warning */}
         {!isOnline && (
           <View className={`mx-5 mb-4 mt-2 p-4 rounded-2xl flex-row items-center gap-3 ${darkTheme ? "bg-yellow-500/10 border border-yellow-500/20" : "bg-yellow-50 border border-yellow-200"}`}>
             <Text style={{ fontSize: 22 }}>⚠️</Text>
             <View className="flex-1">
-              <Text className={`font-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
+              <Text className={`font-sans-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
                 Your store is Closed
               </Text>
               <Text className={`text-xs mt-0.5 ${darkTheme ? "text-yellow-400/70" : "text-yellow-600"}`}>

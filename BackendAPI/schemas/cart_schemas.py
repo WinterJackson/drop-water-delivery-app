@@ -3,13 +3,14 @@ from uuid import UUID
 from decimal import Decimal
 from schemas.product_schemas import ProductFull
 from typing import List, Optional
+from utils.money import MoneyField
 
 
 class CartBase(BaseModel):
   id : UUID
   customer_id: UUID
   items_count: int
-  total_amount: float 
+  total_amount: MoneyField
   
   model_config = {"from_attributes": True}
 
@@ -19,17 +20,17 @@ class CartItemBase(BaseModel):
   vendor_id: UUID 
   product_id: UUID 
   quantity: int 
-  price: float 
+  price: MoneyField
   product: Optional[ProductFull] 
   
   model_config = {"from_attributes": True}
 
 class CartDetailed(CartBase):
   cart_item: List[CartItemBase]
-  welcome_discount_amount: Optional[float] = 0.0
-  service_fee: Optional[float] = 0.0
-  delivery_fee_quick_swap: Optional[float] = 0.0
-  delivery_fee_keep_my_bottle: Optional[float] = 0.0
+  welcome_discount_amount: MoneyField = Decimal("0")
+  service_fee: MoneyField = Decimal("0")
+  delivery_fee_quick_swap: MoneyField = Decimal("0")
+  delivery_fee_keep_my_bottle: MoneyField = Decimal("0")
 
   # ── Rule metadata, so the cart screen can show limits instead of surfacing
   # them for the first time as a checkout error ──

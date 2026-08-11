@@ -2,7 +2,8 @@ import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 
-import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
+import { View, ScrollView, ActivityIndicator } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -91,7 +92,7 @@ export default function PaymentMethods() {
                     <Text style={{ fontSize: 24 }}>{item.type === "mpesa" ? "📱" : "💳"}</Text>
                 </View>
                 <View>
-                    <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         {item.type === "mpesa" ? "M-Pesa" : "Card"}
                     </Text>
                     <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{item.phone}</Text>
@@ -100,7 +101,7 @@ export default function PaymentMethods() {
             <View className="flex-row items-center gap-2">
                 {item.isDefault && (
                     <View className="bg-blue-500/10 px-2 py-1 rounded-md">
-                        <Text className="text-blue-500 font-bold text-xs">DEFAULT</Text>
+                        <Text className="text-blue-500 font-sans-bold text-xs">DEFAULT</Text>
                     </View>
                 )}
                 <PressableScale onPress={() => handleRemove(index)} className="ml-2">
@@ -126,7 +127,7 @@ export default function PaymentMethods() {
                 <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Payment Methods
                 </Text>
             </View>
@@ -138,7 +139,7 @@ export default function PaymentMethods() {
 
                 {isAdding ? (
                     <View className={`p-5 mb-4 rounded-2xl border ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
-                        <Text className={`font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Enter M-Pesa Number</Text>
+                        <Text className={`font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Enter M-Pesa Number</Text>
                         <TextInput
                             value={newPhone}
                             onChangeText={setNewPhone}
@@ -151,10 +152,10 @@ export default function PaymentMethods() {
                         />
                         <View className="flex-row gap-3">
                             <PressableScale onPress={() => setIsAdding(false)} className="flex-1 py-3 items-center rounded-xl border border-gray-400">
-                                <Text className={darkTheme ? "text-white font-bold" : "text-black font-bold"}>Cancel</Text>
+                                <Text className={darkTheme ? "text-white font-sans-bold" : "text-black font-sans-bold"}>Cancel</Text>
                             </PressableScale>
                             <PressableScale onPress={handleSaveNew} disabled={isSaving} className="flex-1 py-3 items-center rounded-xl" style={{ backgroundColor: BRAND.primary }}>
-                                {isSaving ? <ActivityIndicator color={BRAND.white} /> : <Text className="text-white font-bold">Save</Text>}
+                                {isSaving ? <ActivityIndicator color={BRAND.white} /> : <Text className="text-white font-sans-bold">Save</Text>}
                             </PressableScale>
                         </View>
                     </View>
@@ -165,7 +166,7 @@ export default function PaymentMethods() {
                         className="mt-6 py-4 rounded-xl items-center border-2 bg-transparent"
                         style={{ borderColor: BRAND.primary }}
                     >
-                        <Text className="text-lg font-bold" style={{ color: BRAND.primary }}>+ Add M-Pesa Number</Text>
+                        <Text className="text-lg font-sans-bold" style={{ color: BRAND.primary }}>+ Add M-Pesa Number</Text>
                     </PressableScale>
                 )}
             </ScrollView>

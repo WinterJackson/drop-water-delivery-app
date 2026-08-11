@@ -40,6 +40,48 @@ arithmetic is what made the M-Pesa callback's amount cross-check reject every
 retail payment. Fee constants (`RETAIL_SERVICE_FEE_KSH`, `SURGE_FEE_KSH`, …) live
 in `order_service.py` and are read through `pricing_service`; do not inline them.
 
+## 💷 How money leaves this API
+
+`Decimal` through the service layer, a **decimal string** on the wire. Never a
+JSON number: once a balance has been through a double it is no longer the figure
+the ledger holds, and every one of the four clients would have to parse it back.
+
+There is one converter, `utils/money.py`:
+
+- `money_str(value)` — a figure as the string a client renders. `None` → `"0.00"`.
+- `money_or_none(value)` — the same where absent and zero are different facts.
+- `MoneyField` / `OptionalMoneyField` — the Pydantic aliases. **Every** money
+  field on every schema is one of these two.
+- `MoneyIn` — a money *argument*. Pricing helpers take it and return `Decimal`.
+
+Two conventions ran side by side for a long time and the older one was in the
+places that mattered most: `pricing_service.as_dict` (the quote — the single
+most-read money payload on the platform), the wallet summaries shown to a rider
+and a vendor, `payment_routes` (the customer's own payment history), the wallet
+ledger, and `order_snapshot`, which is the frozen record a delivery dispute is
+settled from weeks later.
+
+A money field annotated `float` on a schema is the same defect with nothing to
+grep for — Pydantic does the coercion, so `wallet_balance: float | None = 0.0`
+survived on three schemas while the `float(...)` calls beside it were being
+found and argued about.
+
+`tests/test_money_serialisation.py` walks every schema and every response dict
+in `routes/`, `services/` and `jobs/`. `MONEY_FIELDS` in that file is the
+specification — adding a money field means adding it there, and a name in the
+list that no longer exists anywhere fails the build too, so it cannot rot into a
+list of fields nobody has.
+
+`calculate_revenue_splits` takes and returns `Decimal`. It took floats and
+returned floats, and every caller wrapped the result straight back into
+`Decimal(str(...))` — a float round trip in the middle of the one path that
+decides what a vendor, a rider and the platform are each owed.
+
+`dispatch_policy` still computes the *delivery fee schedule* in float
+(`base + per_km × distance`) and quantizes at the boundary. That is safe — the
+result is rounded to two places before anything is charged or persisted — but it
+is the one arithmetic path not yet `Decimal` end to end.
+
 ## 🔑 Authentication
 
 **Identity comes from the token, never from the request body.** `create_user`,
@@ -169,8 +211,42 @@ or a re-introduced literal.
 
 Move balances only through `wallet_service.apply_wallet_delta`, which mutates the
 balance and appends the signed `WalletTransaction` in one call. Money is `Decimal`,
-never `float`. A bare `wallet_balance +=` fails the build. See
-`docs/cash-settlement.md`.
+never `float`. A bare `wallet_balance +=` fails the build, and so does an assigned
+arithmetic expression — `tests/test_money_movement_integrity.py` walks every
+function in `services/` and `routes/`. See `docs/cash-settlement.md`.
+
+### Which balance, and how much actually leaves
+
+Two things a Clerk id cannot tell you, both discovered on the outbound path:
+
+- **Which row.** `WalletTransactions.user_id` is a Clerk id; one identity may own
+  several stores, each with its own `wallet_balance`. Every callback arrives
+  minutes after the request that raised it and re-resolved the owner by clerk id
+  with an unordered `.first()` — so a top-up paid into the second branch credited
+  the first, and a failed withdrawal from the second was refunded to the first.
+  Two real balances wrong by the same amount in opposite directions, with nothing
+  in either ledger to explain it. `wallet_owner_id` records the row the money
+  came off; resolve with `_locked_wallet_owner`, never by clerk id.
+- **How much.** Every Daraja amount field is whole shillings, and the code sent
+  `int(amount)`. `payout_transaction_fee` is a `Platform_Settings` row: set it to
+  15.50 and a KSH 1,000 withdrawal debited 1,000, recorded a fee of 15.50 and put
+  **984** on the phone — the missing 50 cents in no ledger and reported to
+  nobody. `payment_service.whole_shillings` refuses a fraction rather than
+  rounding one, and `initiate_wallet_withdrawal` re-derives the fee from the
+  rounded disbursement so `debited == disbursed + retained` exactly.
+
+`get_access_token` caches the Daraja token until shortly before it expires and
+raises `MpesaError` rather than returning `None`. It minted a fresh token per
+call — two round trips per payment — and a throttled mint returned `None`, which
+went on the wire as the literal header `Authorization: Bearer None`. Every
+initiator catches `MpesaError` and returns the same shape as an in-flight
+failure, because the checkout route reads a missing `CheckoutRequestID` as
+"nothing was charged" and the withdrawal path refunds on a falsy `success`.
+
+STK timestamps are **EAT**, not naive local time. Safaricom validates the
+timestamp against its own clock and the password is the base64 of
+`shortcode + passkey + timestamp`, so both must come from one instant in EAT;
+`datetime.now()` in a container is UTC, three hours behind.
 
 ## 🍶 Deposits, debt, and the three bottle relationships
 
@@ -195,6 +271,65 @@ cancellation path. Only a balance at or above `max_customer_debt_before_block`
 refuses checkout. It was previously incremented in two places and decremented
 nowhere while any positive value returned 402, so one late cancellation locked an
 account out of the platform permanently over KSH 50.
+
+## 🔀 An order's status moves through one function
+
+`order_service.apply_status_transition` is the only thing that assigns
+`order.order_status`. It refuses a move out of a terminal state with a 409 and a
+sentence about the order, refuses anything backwards, and treats a repeat of the
+current status as success — two staff on two devices is not a conflict.
+
+`VALID_TRANSITIONS` used to exist beside fifteen writers, two of which consulted
+it. Worse, it described an *idealised* flow this platform does not have: a rider
+marking pickup straight from `accepted` because the store handed the order over
+before tapping "ready", a post-pickup drop, the cash-float sweep releasing back
+to `unassigned`. All routine; none of them legal by the table.
+
+That is the worse of the two failure modes. A table nobody consults is dead
+code, and can be deleted. A table that contradicts the code is documentation
+that lies — the next person either trusts it about their own feature, or
+"corrects" the thirteen non-conforming paths to match it and breaks the rider
+flow. `tests/test_order_state_machine.py` walks `routes/`, `services/` and
+`jobs/` and fails the build on a direct assignment.
+
+## 📏 `DispatchPolicy`: accessors, never the dataclass defaults
+
+`RETAIL_MAX_DISTANCE_KM` is the shipped default. `retail_max_distance_km()`
+reads the `Platform_Settings` row. Reading the attribute is invisible — right
+value, right type, passing tests — right up until an administrator moves the
+setting, at which point two halves of the platform enforce different numbers for
+the same rule.
+
+Both halves existed. `vendor_service._search_bounds` used the shipped 2 km while
+checkout used the configured radius, so raising `retail_max_distance_km` widened
+what the platform would *deliver* and not what a customer could *find* — the
+store that had just come into range stayed invisible. `cart_routes` quoted the
+shipped wholesale minimum on the cart beside an enforcement of the configured
+one. `tests/test_delivery_fee.py` fails the build on a direct read from
+`routes/`, `services/` or `jobs/`.
+
+The registration radii are exempt and documented as such on the dataclass: where
+a rider registers to serve is a different question from how far one order may
+travel, and they have no settings row on purpose.
+
+### The radii themselves: 2.5 km retail, 15 km wholesale
+
+One figure per vendor type, and it is every use at once — what discovery
+searches, what checkout enforces, what the rider search covers, and what each
+app draws on a map. `retail_max_distance_km` moved from 2 to 2.5 in
+`c7d2e94a6f18`, which had to be a **retirement migration**: a stored row
+outranks a shipped default permanently and silently, so changing the source
+alone would have left every database holding a row at 2 with nothing to say why.
+The migration deletes rows still holding the superseded 2 and leaves any other
+value alone, exactly as `b2f9c14e7a35` established.
+
+Both are `decimal`, not `int`. `int` coerces with `int(value)` — a truncation,
+not a refusal — so 2.5 entered against an `int` spec would have been stored as
+2 without a word.
+
+`Vendor.delivery_radius` is gone in the same migration. It was vendor-writable,
+read by no dispatch path, and rendered on two screens as though it were the
+catchment.
 
 ## ↩️ Cancelling an order is seven things, not one
 
@@ -281,6 +416,79 @@ API — see `BackendAPI/README.md`. Every sweep must claim rows with
 `with_for_update(skip_locked=True)`, re-check state under the lock, and commit
 per item inside a `try/except`, so it stays correct with several workers running
 and one bad row cannot discard the batch.
+
+## 🏬 Is this store trading? — `vendor_availability`
+
+Five separate reasons a shop may not be taking orders, and `is_online` is one of
+them. It was the only one anything read, and **nothing on the ordering path read
+even that**: the vendor app shipped a swipe control wired to `is_online`, so a
+vendor could swipe their store closed, watch the toggle turn grey, and keep
+receiving orders. `shift_start`/`shift_end` were in the same position — on every
+store since the first migration, rendered on the console, enforced nowhere. A
+control that reaches the user but not the platform is worse than no control,
+because the person operating it believes it worked.
+
+`services/vendor_availability.py` is the single decision, in the same sense
+`pricing_service` owns the total and `cod_policy` owns the cash question.
+
+| Column | Who sets it | What it means |
+|---|---|---|
+| `is_active` | administrator | Suspended. Outranks everything below. |
+| `paused_until` / `pause_reason` | store (`manage_orders`) | A pause that ends by itself. |
+| `is_online` | store (owner) | The indefinite "we are shut" switch. |
+| `shift_start` / `shift_end` | store (owner) | Opening hours; enforced only when `vendor_hours_enforced` is on. |
+| `accepts_cash` | store (owner) | Read through `cod_policy`, never off the column. |
+| `min_order_value` | store (owner) | Checked on `product_subtotal`, inside `validate_quote`. |
+
+- **`evaluate` is synchronous** against the cached configuration snapshot;
+  `store_state` is the async wrapper that refreshes first. A discovery query
+  returning twenty stores evaluates twenty states and makes no extra round trips.
+- **`annotate` stamps, it never filters.** A closed store must appear and be
+  marked closed. All seven reads in `vendor_service` go through `_annotated`,
+  and a test walks them.
+- **The minimum lives in `validate_quote`**, so it reaches the quote, the
+  pre-push validation and `create_order`'s locked re-check from one call site.
+  Measured on the goods: a minimum counting delivery would move with the
+  customer's address.
+- **These controls fail open.** An unreadable `paused_until` or
+  `min_order_value` is no pause and no minimum. The platform's own gates fail
+  closed; a shop's optional courtesy must not be able to 500 a checkout.
+- **Every bound is a settings row** (`storefront` group), and
+  `vendor_may_decline_cash` / `vendor_hours_enforced` are live overrides — a
+  stored decline stops being honoured the moment the platform withdraws the
+  right to make it, rather than persisting with nothing on any screen to explain
+  it.
+- `Vendor.preferred_payment_method` is the **payout destination**, despite the
+  name. Not a payment method the store accepts.
+
+## 📈 Acquisition cost — `admin_growth_service`
+
+Two halves, and they never merge silently.
+
+`Order.welcome_discount` is real acquisition spend, recorded on every order,
+and it was summed nowhere. Posters, a branded boda, ads, referrals and an
+agent's weekend are equally real and are not in this database at all —
+`Acquisition_Spend` holds those, entered per (month, channel), upserted so a
+corrected invoice replaces rather than doubles, `settings.manage` to write, and
+audited both ways.
+
+`measured` / `entered` / `blended` come back separately with
+`has_entered_spend`. A CAC assembled from the measured half alone is precise,
+confident, and typically wrong by an order of magnitude **in the direction that
+makes acquisition look cheap** — every figure in it real, on a screen that
+looks authoritative, and somebody spends against it.
+
+- **`unattributed_spend`** is spend in months that acquired nobody. Summing per
+  cohort drops it entirely, because such a month has no cohort — and that is
+  the single most important month on the screen.
+- **A cohort is a first *delivered* order**, and the `MIN()` runs over all
+  history. Computed inside the window it would re-acquire a long-standing
+  customer into this month, inventing new customers out of loyal ones.
+- **Contribution is `platform_net`**, frozen on the order. Never re-derive it
+  from today's commission settings.
+- **Nothing is projected**, and `median_payback_month` counts only cohorts that
+  have actually paid back. Averaging in the young ones reports a payback faster
+  than any cohort has achieved.
 
 ## 📦 Stock
 

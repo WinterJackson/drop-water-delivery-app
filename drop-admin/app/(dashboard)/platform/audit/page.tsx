@@ -1,9 +1,12 @@
 import { ScrollText } from "lucide-react";
+import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDateTime, formatNumber } from "@/lib/utils/format";
 import type { QueueStats } from "@/lib/queue-stats";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Audit log" };
 
@@ -27,18 +30,68 @@ function toneFor(action: string): "danger" | "warning" | "neutral" {
   return "neutral";
 }
 
-export default async function AuditPage() {
+/**
+ * The action prefixes worth having as one click.
+ *
+ * `list_audit` matches on `startswith`, so "pii" catches `pii.view` and every
+ * future member of that family without this list needing to know them.
+ */
+const ACTION_FILTERS = [
+  { value: "", label: "Everything" },
+  { value: "pii", label: "Identity documents" },
+  { value: "payout", label: "Payouts" },
+  { value: "support", label: "Support" },
+  { value: "admin", label: "Administrator changes" },
+  { value: "config", label: "Pricing and settings" },
+  { value: "order", label: "Orders" },
+  { value: "vendor", label: "Stores" },
+  { value: "rider", label: "Riders" },
+  { value: "review", label: "Reviews" },
+] as const;
+
+const PAGE_SIZE = 50;
+
+export default async function AuditPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ action?: string; target?: string; cursor?: string }>;
+}) {
+  // Gated on the capability `nav-config` declares for `/platform/audit` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/platform/audit");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
+  const { action = "", target = "", cursor = "" } = await searchParams;
+
+  // Every one of these was already supported by the endpoint and none of them
+  // was ever sent. The screen that answers "who opened this person's national
+  // ID" was capped at the newest fifty rows of everything, with no way to ask.
+  const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (action) query.set("action", action);
+  if (target.trim()) query.set("target_id", target.trim());
+  if (cursor) query.set("cursor", cursor);
+
   let log: { items: Entry[]; next_cursor: string | null };
   let stats: QueueStats = {};
   try {
     [log, stats] = await Promise.all([
-      get<{ items: Entry[]; next_cursor: string | null }>("/api/admin/audit"),
+      get<{ items: Entry[]; next_cursor: string | null }>(
+        `/api/admin/audit?${query.toString()}`,
+      ),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the audit log" detail={message} />;
   }
+
+  const filtered = Boolean(action || target.trim());
+  const nextQuery = new URLSearchParams();
+  if (action) nextQuery.set("action", action);
+  if (target.trim()) nextQuery.set("target", target.trim());
+  if (log.next_cursor) nextQuery.set("cursor", log.next_cursor);
 
   return (
     <div className="space-y-6">
@@ -98,12 +151,58 @@ export default async function AuditPage() {
         </section>
       ) : null}
 
+      <form method="GET" className="flex flex-wrap gap-2">
+        <label htmlFor="audit-action" className="sr-only">
+          Filter by what was done
+        </label>
+        <select
+          id="audit-action"
+          name="action"
+          defaultValue={action}
+          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
+        >
+          {ACTION_FILTERS.map((option) => (
+            <option key={option.value || "all"} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="audit-target" className="sr-only">
+          Filter by what it was done to
+        </label>
+        <input
+          id="audit-target"
+          name="target"
+          defaultValue={target}
+          placeholder="Target id — a rider, an order, a ticket…"
+          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 font-mono text-sm"
+        />
+        <button
+          type="submit"
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
+        >
+          Search
+        </button>
+        {filtered ? (
+          <Link
+            href="/platform/audit"
+            className="inline-flex items-center rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-muted"
+          >
+            Clear
+          </Link>
+        ) : null}
+      </form>
+
       {log.items.length === 0 ? (
         <Card>
           <EmptyState
             icon={<ScrollText className="h-8 w-8" />}
-            title="Nothing recorded yet"
-            description="Approvals, rejections, payout decisions and document views all appear here as they happen."
+            title={filtered ? "Nothing matches that" : "Nothing recorded yet"}
+            description={
+              filtered
+                ? "No administrator has done this, to this, since the log began."
+                : "Approvals, rejections, payout decisions and document views all appear here as they happen."
+            }
           />
         </Card>
       ) : (
@@ -145,6 +244,27 @@ export default async function AuditPage() {
           </ul>
         </Card>
       )}
+
+      {log.next_cursor ? (
+        <div className="flex justify-center">
+          {/* Keyset, not offset — this table only grows, and the cursor is the
+              id of the last row on the page. Without this the log stopped at
+              the newest fifty entries and older ones were simply unreachable. */}
+          <Link
+            href={`/platform/audit?${nextQuery.toString()}`}
+            className="rounded-lg border border-default px-4 py-2 text-sm hover:bg-surface-muted"
+          >
+            Older entries
+          </Link>
+        </div>
+      ) : cursor ? (
+        <p className="text-center text-sm text-muted">
+          That is the end of the log.{" "}
+          <Link href="/platform/audit" className="underline underline-offset-4">
+            Back to the newest
+          </Link>
+        </p>
+      ) : null}
     </div>
   );
 }

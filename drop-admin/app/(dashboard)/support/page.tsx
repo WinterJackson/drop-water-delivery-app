@@ -6,6 +6,8 @@ import { ApiError, get } from "@/lib/api/server";
 import type { QueueStats } from "@/lib/queue-stats";
 import { cn } from "@/lib/utils/cn";
 import { formatDuration, formatNumber, timeAgo } from "@/lib/utils/format";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Support" };
 
@@ -23,6 +25,8 @@ type Ticket = {
   created_at: string | null;
   age_hours: number | null;
   awaiting_first_reply: boolean;
+  /** They spoke last on an unfinished ticket — it is our turn, whatever the status says. */
+  awaiting_us: boolean;
 };
 
 const VIEWS = [
@@ -46,23 +50,53 @@ const FIRST_REPLY_TARGET_HOURS = 4;
 export default async function SupportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string; priority?: string }>;
+  searchParams: Promise<{
+    view?: string;
+    q?: string;
+    priority?: string;
+    category?: string;
+    requester?: string;
+  }>;
 }) {
-  const { view = "open", q = "", priority = "" } = await searchParams;
+  // Gated on the capability `nav-config` declares for `/support` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/support");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
+  const {
+    view = "open",
+    q = "",
+    priority = "",
+    category = "",
+    requester = "",
+  } = await searchParams;
   const active = VIEWS.find((v) => v.key === view)?.key ?? "open";
 
   const query = new URLSearchParams({ status: active, limit: "100" });
   if (q.trim()) query.set("search", q.trim());
   if (priority) query.set("priority", priority);
+  if (category) query.set("category", category);
+  if (requester) query.set("requester_type", requester);
 
   let data: { items: Ticket[] };
   let counts: Record<string, number>;
   let stats: QueueStats = {};
+  // Categories come from the backend rather than a copy here, so the filter
+  // cannot offer one `create_ticket` would silently rewrite to "other".
+  let meta: { categories: string[]; priorities: string[] } = {
+    categories: [],
+    priorities: [],
+  };
   try {
-    [data, counts, stats] = await Promise.all([
+    [data, counts, stats, meta] = await Promise.all([
       get<{ items: Ticket[] }>(`/api/admin/support/tickets?${query.toString()}`),
       get<Record<string, number>>("/api/admin/support/counts"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
+      get<{ categories: string[]; priorities: string[] }>(
+        "/api/admin/support/meta",
+      ).catch(() => meta),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -133,10 +167,17 @@ export default async function SupportPage({
         <ul className="flex gap-1">
           {VIEWS.map((v) => {
             const count = v.key === "open" ? counts.open_total : counts[v.key];
+            // Carry the filters across. Switching tab used to reset them, so
+            // "urgent, from riders" became "everything" on the second click.
+            const href = new URLSearchParams({ view: v.key });
+            if (q.trim()) href.set("q", q.trim());
+            if (priority) href.set("priority", priority);
+            if (category) href.set("category", category);
+            if (requester) href.set("requester", requester);
             return (
               <li key={v.key}>
                 <Link
-                  href={`/support?view=${v.key}`}
+                  href={`/support?${href.toString()}`}
                   aria-current={v.key === active ? "page" : undefined}
                   className={
                     v.key === active
@@ -176,6 +217,30 @@ export default async function SupportPage({
           <option value="high">High</option>
           <option value="normal">Normal</option>
           <option value="low">Low</option>
+        </select>
+        <select
+          name="category"
+          defaultValue={category}
+          aria-label="Filter by category"
+          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
+        >
+          <option value="">Any subject</option>
+          {meta.categories.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="requester"
+          defaultValue={requester}
+          aria-label="Filter by who raised it"
+          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
+        >
+          <option value="">Anyone</option>
+          <option value="customer">Customers</option>
+          <option value="rider">Riders</option>
+          <option value="vendor">Stores</option>
         </select>
         <button
           type="submit"
@@ -221,6 +286,12 @@ export default async function SupportPage({
                         ) : null}
                         {ticket.awaiting_first_reply ? (
                           <Badge tone={overdue ? "danger" : "warning"}>no reply yet</Badge>
+                        ) : ticket.awaiting_us ? (
+                          // Distinct from "no reply yet": we answered, they came
+                          // back, and the ball is ours again. Without this a
+                          // ticket someone replied to a minute ago is
+                          // indistinguishable from one legitimately parked.
+                          <Badge tone="warning">they replied</Badge>
                         ) : null}
                         <Badge>{ticket.status}</Badge>
                       </div>

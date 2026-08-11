@@ -37,6 +37,11 @@ def _customer(**overrides):
     user.clerk_id = overrides.get("clerk_id", "user_clerk")
     user.debt_balance = Decimal(str(overrides.get("debt_balance", 0)))
     user.wallet_balance = Decimal(str(overrides.get("wallet_balance", 0)))
+    # Faithful to the model: a MagicMock answers every attribute, so leaving
+    # this one implicit hands `Decimal(str(...))` a mock to parse.
+    user.non_withdrawable_balance = Decimal(
+        str(overrides.get("non_withdrawable_balance", 0))
+    )
     user.has_used_welcome_offer = overrides.get("has_used_welcome_offer", True)
     user.floor_level = overrides.get("floor_level", 0)
     user.has_elevator = overrides.get("has_elevator", False)

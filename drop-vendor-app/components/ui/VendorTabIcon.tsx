@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Ionicons } from "@expo/vector-icons";
 import { BRAND } from "@/constants/brandColors";
 
@@ -32,7 +33,7 @@ export default function VendorTabIcon({ name, active, count }: VendorTabIconProp
       {/* Badge for pending order count */}
       {count != null && count > 0 && (
         <View className="absolute -top-2 -right-3 bg-red-500 rounded-full min-w-[20px] h-[20px] items-center justify-center px-1">
-          <Text className="text-white text-[10px] font-black">{count > 99 ? "99+" : count}</Text>
+          <Text className="text-white text-[10px] font-sans-extrabold">{count > 99 ? "99+" : count}</Text>
         </View>
       )}
     </View>

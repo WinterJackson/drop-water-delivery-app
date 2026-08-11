@@ -74,3 +74,50 @@ export async function reseatCounters(reason: string): Promise<ActionResult> {
     message: repaired === 0 ? "Nothing to repair." : `${repaired} counter(s) rewritten.`,
   };
 }
+
+/**
+ * Decide a bottle collection the two parties could not agree on.
+ *
+ * The rider and the customer each state a count and the deposit moves only when
+ * they match. When they differ, nothing moves and it waits here — deliberately,
+ * because a system that silently splits the difference teaches riders that
+ * understating a count is free.
+ *
+ * `bottles: 0` closes it without paying: the collection did not happen. Either
+ * way the reason is recorded against the administrator who decided it.
+ */
+export async function resolveBottleReturn(input: {
+  id: string;
+  bottles: number;
+  reason: string;
+}): Promise<ActionResult> {
+  const reason = input.reason.trim();
+  if (reason.length < 10) {
+    return {
+      ok: false,
+      error: "At least ten characters — this is recorded against your account.",
+    };
+  }
+  if (!Number.isInteger(input.bottles) || input.bottles < 0) {
+    return { ok: false, error: "Enter a whole number of bottles, or 0 to close it unpaid." };
+  }
+
+  try {
+    await post(`/api/admin/bottles/returns/${input.id}/resolve`, {
+      bottles: input.bottles,
+      reason,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) return { ok: false, error: error.message };
+    return { ok: false, error: "Something went wrong." };
+  }
+
+  revalidatePath("/operations/bottles");
+  return {
+    ok: true,
+    message:
+      input.bottles > 0
+        ? `Settled at ${input.bottles} bottle(s); the deposit has gone back.`
+        : "Closed without payment.",
+  };
+}

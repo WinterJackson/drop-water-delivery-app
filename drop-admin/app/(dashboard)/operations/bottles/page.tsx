@@ -6,6 +6,8 @@ import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import { AdjustButton } from "./AdjustButton";
+import { DepositLiabilityPanel, type DepositLiability } from "./DepositLiabilityPanel";
+import { DisputedCollections, type DisputedReturn } from "./DisputedCollections";
 import { ReseatButton } from "./ReseatButton";
 
 export const metadata = { title: "Bottle float" };
@@ -124,6 +126,27 @@ export default async function BottlesPage({
     return <ErrorState title="Couldn't load the bottle float" detail={message} />;
   }
 
+  // Customer deposits need `finance.read`, which this page does not. Fetched
+  // separately and allowed to come back empty: a caller who may see the float
+  // but not the money should get the float, not an error page. `null` means
+  // "not yours to see" and renders nothing — never a zero, which would read as
+  // "the platform owes its customers nothing".
+  let deposits: DepositLiability | null = null;
+  let disputes: DisputedReturn[] = [];
+  try {
+    const [liability, queue] = await Promise.all([
+      get<DepositLiability>("/api/admin/bottles/deposits"),
+      get<{ items: DisputedReturn[] }>("/api/admin/bottles/returns?status=disputed"),
+    ]);
+    deposits = liability;
+    disputes = queue.items;
+  } catch {
+    // Both need `finance.read`; neither is worth an error page to a caller who
+    // may see the float and not the money.
+    deposits = null;
+    disputes = [];
+  }
+
   const { summary, holders, drift, movements } = data;
   const mayAdjust = can(me, PERMISSIONS.financeAdjust);
 
@@ -183,6 +206,12 @@ export default async function BottlesPage({
           />
         </div>
       </section>
+
+      {/* Disputes first: they are the only thing on this page with a person
+          waiting on the other end of it. */}
+      <DisputedCollections items={disputes} canResolve={mayAdjust} />
+
+      {deposits ? <DepositLiabilityPanel data={deposits} /> : null}
 
       {drift.length > 0 ? (
         <Card className="border-[color-mix(in_oklch,var(--danger)_40%,transparent)] p-5">

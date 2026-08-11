@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.redis_client import redis_limiter as limiter
-from dependencies.admin_dependencies import AdminAccess, current_admin, require_admin
+from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import (
     PERM_FINANCE_ADJUST,
@@ -158,6 +158,28 @@ async def list_transactions(
         ],
         "next_cursor": str(rows[-1].id) if has_more and rows else None,
     }
+
+
+@router.get("/finance/cash-exposure", summary="Cash currently in riders' hands")
+async def cash_exposure(
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
+):
+    """How much of the platform's money is on a motorbike right now.
+
+    The one figure nobody could produce. Each rider sees their own committed
+    float on their own screen, and the platform's total existed only as a query
+    somebody would have had to write — so the limits that cap it
+    (`cod_max_daily_exposure`, `cod_max_concurrent_orders`) were being set
+    against a number nobody had ever looked at.
+
+    Age sits beside every amount, because the ten-minute release sweep acts on
+    it: a carrier at 110 minutes is about to have their float returned and their
+    order re-offered, and operations should see that before the rider calls.
+    """
+    from services import cod_policy
+
+    return await cod_policy.exposure_summary(db)
 
 
 @router.get("/finance/summary", summary="Money in, money out, money stuck")

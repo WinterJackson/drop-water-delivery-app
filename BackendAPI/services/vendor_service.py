@@ -1,4 +1,3 @@
-import os
 
 import h3
 from fastapi import HTTPException
@@ -7,7 +6,6 @@ from sqlalchemy.future import select
 from models.vendor_model import Vendor
 from schemas.vendor_schemas import BaseVendor, VendorWithProductsThin, VendorWithProductsFull
 from geoalchemy2.functions import ST_Distance, ST_DWithin
-from sqlalchemy import func , and_, or_
 from sqlalchemy.orm import joinedload
 from uuid import UUID
 from services import platform_config_service
@@ -60,6 +58,25 @@ def discoverable_vendor():
   return and_(*clauses)
 
 
+async def _annotated(session: AsyncSession, vendors):
+  """Stamp each row with whether that store is taking orders, then hand it back.
+
+  Every customer-facing read goes through this, for the same reason every one
+  of them carries `discoverable_vendor()`: seven functions each remembering to
+  do it is seven chances to forget, and the one that gets missed is invisible
+  until a customer orders from a shop that is shut.
+
+  It does not *filter*. A closed store must appear and be marked closed — the
+  customer looking for the shop they always use should not conclude it has left
+  the platform, and a store that paused for twenty minutes should lose those
+  twenty minutes of orders, not its place in everybody's list.
+  """
+  from services import vendor_availability
+
+  await vendor_availability.annotate(session, vendors)
+  return vendors
+
+
 async def get_all_vendors(session: AsyncSession, limit: int = 20, offset: int = 0):
   count_query = select(func.count()).select_from(Vendor).where(discoverable_vendor())
   count_result = await session.execute(count_query)
@@ -73,15 +90,19 @@ async def get_all_vendors(session: AsyncSession, limit: int = 20, offset: int = 
       .limit(limit)
   )
   result = await session.execute(query)
-  vendors = result.scalars().all()
+  vendors = await _annotated(session, result.scalars().all())
   return vendors, total
 
-# The H3 ring pre-filter is an index-friendly bounding box, not a radius. At
-# resolution 8 a k=5 disk reaches roughly 2.5–3 km, so on its own it happily
-# returned retail vendors beyond the 2 km limit — the customer could browse them,
-# fill a cart, and only discover the problem when checkout rejected the distance.
-# Every discovery query now pairs the H3 pre-filter with an exact ST_DWithin
-# clause so the documented radius is enforced where the customer first sees it.
+# The H3 ring pre-filter is an index-friendly bounding box, not a radius. A
+# res-8 disk always over-reaches the circle it approximates — `get_h3_k_ring`
+# rounds *up* on purpose, because a ring too small silently hides stores that
+# are genuinely in range. On its own it therefore returned retail vendors beyond
+# the configured limit: the customer could browse them, fill a cart, and only
+# discover the problem when checkout rejected the distance.
+#
+# So every discovery query pairs the pre-filter with an exact `ST_DWithin`, and
+# both the ring and the distance come from the same configured radius — which is
+# what stops the two from ever describing different areas.
 
 def _search_bounds(lat: float, lng: float, vendor_type: str):
   """Returns (user_point, neighbour_h3_cells, max_distance_m) for a discovery query."""
@@ -89,11 +110,12 @@ def _search_bounds(lat: float, lng: float, vendor_type: str):
   center_h3 = h3.latlng_to_cell(lat, lng, 8)
   k_ring = DispatchPolicy.get_h3_k_ring(vendor_type)
   neighbour_cells = [str(cell) for cell in h3.grid_disk(center_h3, k_ring)]
-  max_km = (
-      DispatchPolicy.WHOLESALE_MAX_DISTANCE_KM
-      if vendor_type == "wholesale_b2b"
-      else DispatchPolicy.RETAIL_MAX_DISTANCE_KM
-  )
+  # Through the accessor, never the dataclass default. Discovery read the
+  # shipped 2.0 while checkout read the configured row, so raising
+  # `retail_max_distance_km` on the console widened what the platform would
+  # deliver and not what a customer could find — the store that had just come
+  # into range stayed invisible, which reads as the platform being broken.
+  max_km = DispatchPolicy.max_distance_km(vendor_type)
   return user_point, neighbour_cells, max_km * 1000.0
 
 
@@ -116,8 +138,7 @@ async def get_nearby_vendors(session : AsyncSession, lat : float, lng : float ) 
       .limit(3)
   )
   result = await session.execute(query)
-  vendors = result.unique().scalars().all()
-  return vendors
+  return await _annotated(session, result.unique().scalars().all())
 
 async def get_top_rated_vendors(session: AsyncSession, lat : float, lng: float) -> list[BaseVendor]:
   user_point, neighbour_cells, max_distance_m = _search_bounds(lat, lng, "retail_refill")
@@ -138,8 +159,7 @@ async def get_top_rated_vendors(session: AsyncSession, lat : float, lng: float) 
       .limit(10)
   )
   result = await session.execute(query)
-  vendors = result.unique().scalars().all()
-  return vendors
+  return await _annotated(session, result.unique().scalars().all())
 
 async def get_vendors_by_type_service(session : AsyncSession, type: str, lng: float, lat: float) -> list[BaseVendor]:
   """Vendors of one type within that type's serviceable radius.
@@ -171,8 +191,7 @@ async def get_vendors_by_type_service(session : AsyncSession, type: str, lng: fl
       .limit(10)
   )
   result = await session.execute(query_with_location)
-  vendors = result.unique().scalars().all()
-  return vendors
+  return await _annotated(session, result.unique().scalars().all())
 
 async def get_vendor_by_id_service(session: AsyncSession, id: UUID) -> VendorWithProductsFull:
   # A direct link (a bookmark, a shared product) must not bypass what the
@@ -185,6 +204,7 @@ async def get_vendor_by_id_service(session: AsyncSession, id: UUID) -> VendorWit
   )
   result = await session.execute(query)
   vendor = result.unique().scalar_one_or_none()
+  await _annotated(session, [vendor] if vendor else [])
   return vendor
 
 async def get_top_brands_service(session : AsyncSession, lat : float, lng : float) -> list[BaseVendor]:
@@ -217,10 +237,11 @@ async def get_top_brands_service(session : AsyncSession, lat : float, lng : floa
       .limit(10)
   )
   result = await session.execute(query)
-  vendors = result.unique().scalars().all()
-  return vendors
+  return await _annotated(session, result.unique().scalars().all())
 
 from typing import Optional
+import os
+from sqlalchemy import func , and_, or_
 
 async def get_vendor_directory(
     session: AsyncSession, 
@@ -260,5 +281,4 @@ async def get_vendor_directory(
     query = query.order_by(ST_Distance(Vendor.location, user_point)).limit(limit)
     
     result = await session.execute(query)
-    vendors = result.unique().scalars().all()
-    return vendors
+    return await _annotated(session, result.unique().scalars().all())

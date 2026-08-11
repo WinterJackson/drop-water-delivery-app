@@ -31,7 +31,6 @@ async def trigger_refund_processing(
     Initiates M-Pesa Reversals for each and updates their status.
     SEC-06 FIX: Protected by admin guard — only admin Clerk IDs may trigger batch refunds.
     """
-    import os
     clerk_id = admin_id["sub"]
     allowed_ids = os.getenv("ADMIN_CLERK_IDS", "").split(",")
     if clerk_id not in [aid.strip() for aid in allowed_ids if aid.strip()]:
@@ -93,7 +92,6 @@ async def reversal_result_callback(request: Request, session: AsyncSession = Dep
             try:
                 from services.notification_service import create_notification, queue_push
                 from models.user_model import User
-                import asyncio
 
                 customer = await session.get(User, matched_order.customer_id)
                 if customer:
@@ -171,7 +169,7 @@ async def reversal_timeout_callback(request: Request, session: AsyncSession = De
                 
             await session.commit()
             logger.info(f"Reversal timeout: Order {payment.order_id} queued for retry")
-            return {"message": f"Timeout processed, refund queued for retry"}
+            return {"message": "Timeout processed, refund queued for retry"}
 
         return {"message": "Timeout processed, no matching active refund found"}
 

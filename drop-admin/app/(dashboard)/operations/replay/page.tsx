@@ -5,6 +5,8 @@ import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primi
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber, timeAgo } from "@/lib/utils/format";
 import { ReplayMap, type PathPoint } from "./ReplayMap";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Delivery replay" };
 
@@ -73,6 +75,13 @@ export default async function ReplayPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
+  // Gated on the capability `nav-config` declares for `/operations/replay` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/operations/replay");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   const { order: orderId } = await searchParams;
 
   let list: { items: ListItem[] };

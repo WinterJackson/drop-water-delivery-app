@@ -14,10 +14,32 @@ is a fact about motorbikes, and a console field that let someone set it to 40
 would produce orders no rider can physically accept.
 """
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import HTTPException
 
 from services import platform_config_service as config
+from utils.money import MoneyIn
+
+#: Money is quantized to two places, half-up, exactly as `utils.money.money_str`
+#: does on the way out — so a fee computed here and the same fee rendered on a
+#: screen can never differ by a cent.
+CENTS = Decimal("0.01")
+
+
+def _money(value: MoneyIn) -> Decimal:
+    return Decimal(str(value)).quantize(CENTS, rounding=ROUND_HALF_UP)
+
+
+def _km(distance_km: float) -> Decimal:
+    """A distance as `Decimal`, so it can be multiplied by a rate.
+
+    Distance stays a `float` everywhere else and should: it is a measurement off
+    PostGIS, not money, and no ledger holds it. It only becomes `Decimal` at the
+    moment it is multiplied by a shilling rate — which is the moment a float
+    would put binary error into a figure somebody is charged.
+    """
+    return Decimal(str(distance_km))
 
 
 @dataclass
@@ -25,7 +47,10 @@ class DispatchPolicy:
     # Defaults, mirrored in `platform_config_service.SPECS`. Read through the
     # accessors below, never directly — a direct read silently ignores whatever
     # the owners have configured.
-    RETAIL_MAX_DISTANCE_KM: float = 2.0
+    #: 2.5 km for retail refill, 15 km for wholesale. One figure each, set by
+    #: the platform: it is what discovery searches, what checkout enforces and
+    #: what the rider search covers. A store does not set its own.
+    RETAIL_MAX_DISTANCE_KM: float = 2.5
     WHOLESALE_MAX_DISTANCE_KM: float = 15.0
     WHOLESALE_MOQ_KG: float = 100.0
     RETAIL_FLAT_FEE_KSH: float = 50.0
@@ -65,12 +90,12 @@ class DispatchPolicy:
         )
 
     @classmethod
-    def vehicle_pricing(cls, vehicle_class: str) -> dict:
-        """Wholesale base and per-km rates for a vehicle class."""
+    def vehicle_pricing(cls, vehicle_class: str) -> dict[str, Decimal]:
+        """Wholesale base and per-km rates for a vehicle class, as `Decimal`."""
         known = vehicle_class if vehicle_class in cls.VEHICLE_CAPACITIES else "tuktuk"
         return {
-            "base": float(config.get(f"wholesale_{known}_base")),
-            "per_km": float(config.get(f"wholesale_{known}_per_km")),
+            "base": config.get_decimal(f"wholesale_{known}_base"),
+            "per_km": config.get_decimal(f"wholesale_{known}_per_km"),
         }
 
     # ── Policy ────────────────────────────────────────────────────────────
@@ -155,20 +180,60 @@ class DispatchPolicy:
         return True
 
     @classmethod
-    def get_delivery_fee(cls, distance_km: float, vendor_type: str, vehicle_class: str, wholesale_base: float = 0.0, wholesale_per_km: float = 0.0, delivery_type: str = "quick_swap") -> float:
-        """Returns the calculated delivery fee based on vendor type and vehicle."""
+    def get_delivery_fee(
+        cls,
+        distance_km: float,
+        vendor_type: str,
+        vehicle_class: str,
+        wholesale_base: MoneyIn = 0,
+        wholesale_per_km: MoneyIn = 0,
+        delivery_type: str = "quick_swap",
+    ) -> Decimal:
+        """The delivery fee for one trip, as `Decimal`.
+
+        Every rate here is a shilling figure off `Platform_Settings`, and the
+        result is written to a `Numeric(10, 2)` column and shown to a customer
+        before they pay. It used to be computed in `float` and rounded at the
+        end — safe in practice, because the rounding happened before anything
+        was charged, but it was the one arithmetic path on the platform that was
+        not `Decimal` end to end, and "safe because of where the rounding
+        happens" is a property somebody has to keep checking.
+        """
+        km = _km(distance_km)
+
         if vendor_type == "wholesale_b2b":
             # A vendor's own negotiated rate takes precedence over the platform's.
-            if wholesale_base > 0 or wholesale_per_km > 0:
-                return round(wholesale_base + (wholesale_per_km * distance_km), 2)
+            own_base = Decimal(str(wholesale_base or 0))
+            own_per_km = Decimal(str(wholesale_per_km or 0))
+            if own_base > 0 or own_per_km > 0:
+                return _money(own_base + own_per_km * km)
 
             pricing = cls.vehicle_pricing(vehicle_class)
-            return round(pricing["base"] + (pricing["per_km"] * distance_km), 2)
+            return _money(pricing["base"] + pricing["per_km"] * km)
 
-        base = float(config.get("retail_delivery_base_fee"))
-        if delivery_type == "keep_my_bottle":
-            premium = float(config.get("keep_my_bottle_base_premium"))
-            per_km = float(config.get("keep_my_bottle_per_km"))
-            return round(base + premium + (per_km * distance_km), 2)
+        # ── Short hop: one flat fee ───────────────────────────────────────
+        #
+        # Urban Kenya is dense. A flat base plus per-km overcharges the next
+        # street and undercharges the next estate, and the per-km component is
+        # noise over 400 m. Below the threshold there is one number, which is
+        # also the only delivery price most customers will ever see.
+        #
+        # `keep_my_bottle` is excluded deliberately: it is a **round trip** —
+        # collect the customer's own bottle, carry it to the station, bring it
+        # back — so distance is exactly what it costs, even over 400 m.
+        from services import delivery_types
 
-        return round(base + (float(config.get("retail_delivery_per_km")) * distance_km), 2)
+        round_trip = delivery_types.is_round_trip(delivery_type)
+
+        # A threshold in metres, compared against a distance in kilometres.
+        threshold_km = config.get_decimal("short_hop_threshold_m") / Decimal("1000")
+        if not round_trip and km <= threshold_km:
+            return _money(config.get_decimal("short_hop_delivery_fee"))
+
+        base = config.get_decimal("retail_delivery_base_fee")
+        if round_trip:
+            premium = config.get_decimal("refill_mine_base_premium")
+            per_km = config.get_decimal("refill_mine_per_km")
+            return _money(base + premium + per_km * km)
+
+        return _money(base + config.get_decimal("retail_delivery_per_km") * km)

@@ -22,11 +22,10 @@ import {
     Platform,
     RefreshControl,
     ScrollView,
-    Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 /**
@@ -123,7 +122,7 @@ const Support = () => {
                     <TouchableOpacity onPress={() => router.back()} className="mr-4">
                         <BackButtonMinimal />
                     </TouchableOpacity>
-                    <Text className={`font-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`font-sans-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
                         Help & support
                     </Text>
                 </View>
@@ -136,7 +135,7 @@ const Support = () => {
                     style={{ backgroundColor: BRAND.primary }}
                 >
                     <Ionicons name="add" size={16} color="#fff" />
-                    <Text className="text-white font-semibold text-sm">New</Text>
+                    <Text className="text-white font-sans-semibold text-sm">New</Text>
                 </PressableScale>
             </View>
 
@@ -161,7 +160,7 @@ const Support = () => {
                             className="mt-5 px-6 py-3 rounded-xl"
                             style={{ backgroundColor: BRAND.primary }}
                         >
-                            <Text className="text-white font-bold">Try again</Text>
+                            <Text className="text-white font-sans-bold">Try again</Text>
                         </PressableScale>
                     </View>
                 ) : tickets.length === 0 ? (
@@ -190,7 +189,7 @@ const Support = () => {
                                     <View className="flex-row items-start justify-between gap-3">
                                         <Text
                                             numberOfLines={2}
-                                            className={`flex-1 font-semibold text-base ${
+                                            className={`flex-1 font-sans-semibold text-base ${
                                                 darkTheme ? "text-white" : "text-gray-900"
                                             }`}
                                         >
@@ -202,7 +201,7 @@ const Support = () => {
                                             }`}
                                         >
                                             <Text
-                                                className={`text-xs font-semibold ${
+                                                className={`text-xs font-sans-semibold ${
                                                     darkTheme ? tone.dark.split(" ")[1] : tone.light.split(" ")[1]
                                                 }`}
                                             >
@@ -242,16 +241,16 @@ const Support = () => {
                         className="flex-row items-center justify-between px-4 py-4"
                         style={{ borderBottomWidth: 1, borderBottomColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
                     >
-                        <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
                             Ask for help
                         </Text>
-                        <TouchableOpacity onPress={() => setComposing(false)}>
+                        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close the help form" onPress={() => setComposing(false)}>
                             <Ionicons name="close" size={24} color={darkTheme ? "#fff" : "#000"} />
                         </TouchableOpacity>
                     </View>
 
                     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             What's it about?
                         </Text>
                         <View className="flex-row flex-wrap gap-2 mb-6">
@@ -279,7 +278,7 @@ const Support = () => {
                                         }
                                     >
                                         <Text
-                                            className={`text-sm font-medium ${
+                                            className={`text-sm font-sans-medium ${
                                                 selected ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-700"
                                             }`}
                                         >
@@ -290,7 +289,7 @@ const Support = () => {
                             })}
                         </View>
 
-                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             Subject
                         </Text>
                         <TextInput
@@ -306,7 +305,7 @@ const Support = () => {
                             }`}
                         />
 
-                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             What happened?
                         </Text>
                         <TextInput
@@ -338,7 +337,7 @@ const Support = () => {
                             {isPending ? (
                                 <ActivityIndicator size="small" color="#fff" />
                             ) : (
-                                <Text className="text-white font-bold text-base">Send to support</Text>
+                                <Text className="text-white font-sans-bold text-base">Send to support</Text>
                             )}
                         </PressableScale>
                     </ScrollView>

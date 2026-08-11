@@ -11,7 +11,8 @@
  * Respects reduced-motion accessibility setting.
  */
 import React, { useEffect, useState } from 'react';
-import { View, Text, Image, StyleSheet, AccessibilityInfo, Platform, ImageBackground, Dimensions } from 'react-native';
+import { View, Image, StyleSheet, AccessibilityInfo, Platform, ImageBackground, Dimensions } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
@@ -168,8 +169,12 @@ export function AnimatedSplash({ onComplete, variant, isDark = false }: Animated
         {/* Tagline */}
         <Animated.Text
           style={[
-            styles.tagline, 
-            typography.body, 
+            // `typography.body` first: it carries the shared line-height, and
+            // whatever comes last wins in a React Native style array. It used
+            // to sit after `styles.tagline` and quietly overrode the tagline's
+            // own size and face.
+            typography.body,
+            styles.tagline,
             taglineAnimatedStyle,
             { color: isDark ? BRAND.white : BRAND.textDark }
           ]}
@@ -270,7 +275,7 @@ const styles = StyleSheet.create({
   tagline: {
     marginTop: 24,
     fontSize: 18,
-    fontWeight: '500',
+    fontFamily: 'Fredoka_500Medium',
     color: BRAND.white,
     textAlign: 'center',
     paddingHorizontal: 32,

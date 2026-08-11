@@ -4,7 +4,8 @@ import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { TouchableOpacity } from "react-native";
-import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
+import { View, ScrollView, ActivityIndicator } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useQueryClient } from "@tanstack/react-query";
@@ -52,7 +53,7 @@ export default function VehicleDetails() {
 
     const InputField = ({ label, value, onChangeText, placeholder }: any) => (
         <View className="mb-6">
-            <Text className={`font-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+            <Text className={`font-sans-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                 {label}
             </Text>
             <View className={`px-4 py-4 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
@@ -84,7 +85,7 @@ export default function VehicleDetails() {
                     <TouchableOpacity onPress={() => router.back()} className="mr-4">
                         <BackButtonMinimal />
                     </TouchableOpacity>
-                    <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         Vehicle Details
                     </Text>
                 </View>
@@ -109,7 +110,7 @@ export default function VehicleDetails() {
                         {isSaving ? (
                             <ActivityIndicator color={BRAND.white} />
                         ) : (
-                            <Text className="text-white text-lg font-bold">Update Registration</Text>
+                            <Text className="text-white text-lg font-sans-bold">Update Registration</Text>
                         )}
                     </View>
                 </PressableScale>

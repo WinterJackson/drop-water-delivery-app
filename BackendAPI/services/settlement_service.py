@@ -96,14 +96,41 @@ async def committed_cash_float_for_vendor(session: AsyncSession, vendor_id: UUID
     return _money(result.scalar())
 
 
+async def restricted_customer_credit(session: AsyncSession, customer_id: UUID) -> Decimal:
+    """The part of a customer's wallet that buys water and not a withdrawal.
+
+    A returned bottle deposit. Fully spendable at checkout — the customer loses
+    nothing they would notice — but it cannot leave as cash, because a deposit
+    that can is a money-transfer service: pay KSH 300 by M-Pesa, hand the bottle
+    back, withdraw KSH 300 to a different phone. With the welcome discount
+    against the deposit that round trip cleared a profit, so it would have been
+    farmed rather than merely available.
+
+    Same shape as a rider's committed cash float, deliberately: one subtraction
+    from one balance, in one module, rather than a second balance column that
+    every screen would have to learn about.
+    """
+    from models.user_model import User
+
+    value = (
+        await session.execute(
+            select(func.coalesce(User.non_withdrawable_balance, 0)).where(User.id == customer_id)
+        )
+    ).scalar()
+    return _money(value)
+
+
 async def available_for_payout(
     session: AsyncSession, *, provider_id: UUID, provider_type: str, wallet_balance
 ) -> Decimal:
     """
-    Withdrawable amount: the balance minus obligations already committed to open
-    cash orders. Never negative — a rider who owes more than they hold has nothing
-    available, and the debt shows as a negative `wallet_balance` rather than as a
-    negative allowance.
+    Withdrawable amount: the balance minus what is already committed elsewhere.
+    Never negative — a rider who owes more than they hold has nothing available,
+    and the debt shows as a negative `wallet_balance` rather than as a negative
+    allowance.
+
+    What is committed depends on who is asking: a rider's open cash orders, a
+    wholesale vendor's, or a customer's returned deposits.
     """
     balance = _money(wallet_balance)
 
@@ -111,14 +138,27 @@ async def available_for_payout(
         committed = await committed_cash_float(session, provider_id)
     elif provider_type == "vendor":
         committed = await committed_cash_float_for_vendor(session, provider_id)
+    elif provider_type == "customer":
+        committed = await restricted_customer_credit(session, provider_id)
     else:
         committed = Decimal("0")
 
     return max(Decimal("0"), balance - committed)
 
 
-async def cash_float_required(order: Order) -> Decimal:
-    """Float a rider must hold to accept this cash order."""
+def cash_float_required(order: Order) -> Decimal:
+    """Float a rider must hold to accept this cash order.
+
+    The vendor's cut plus the platform's — the money the rider collects in cash
+    on somebody else's behalf, and settles on delivery. Their own `rider_net` is
+    not part of it: that is what they are being paid.
+
+    One definition, because `deliverer_service` decided it twice — once when
+    checking whether a rider could accept, once when debiting on delivery — and
+    two copies of an expression that decides whether money moves is how the
+    check and the charge come to disagree. Synchronous: it reads two columns off
+    a row that is already loaded.
+    """
     return _money(order.vendor_net) + _money(order.platform_total)
 
 
@@ -181,8 +221,78 @@ def fee_for(amount: Decimal, fee: Decimal, waiver_threshold: Decimal) -> Decimal
     balance rewards sitting on money rather than making a larger withdrawal,
     which is the opposite of what the waiver is for — the platform pays one
     M-Pesa B2C tariff per disbursement, so it wants fewer, bigger ones.
+
+    Deprecated in favour of `banded_fee_for`, which does not charge nothing
+    precisely where the disbursement costs the platform most. Retained because
+    the shape is still right for a flat-tariff provider.
     """
     return Decimal("0") if amount >= waiver_threshold else fee
+
+
+#: What Safaricom charges the business to disburse, by amount band.
+#:
+#: `(upper_bound_inclusive, cost_to_platform)`, ascending, the last band open
+#: ended. These are **costs**, not prices — the fee charged to the provider is
+#: derived from them below. Kept here rather than as 8 settings rows because it
+#: is a tariff sheet, not a business decision: it changes when Safaricom changes
+#: it, and a partially-edited tariff is worse than a stale one.
+#:
+#: Verify against your current Daraja B2C tariff before going live; the shape of
+#: the calculation is what matters and it is correct for any ascending schedule.
+B2C_TARIFF_BANDS: tuple[tuple[Decimal, Decimal], ...] = (
+    (Decimal("100"), Decimal("0")),
+    (Decimal("1500"), Decimal("15")),
+    (Decimal("5000"), Decimal("25")),
+    (Decimal("20000"), Decimal("40")),
+    (Decimal("50000"), Decimal("60")),
+    (Decimal("150000"), Decimal("100")),
+)
+
+
+def b2c_tariff(amount: Decimal) -> Decimal:
+    """What disbursing this amount costs the platform."""
+    for upper, cost in B2C_TARIFF_BANDS:
+        if amount <= upper:
+            return cost
+    return B2C_TARIFF_BANDS[-1][1]
+
+
+def banded_fee_for(
+    amount: Decimal, configured_fee: Decimal, waiver_threshold: Decimal
+) -> Decimal:
+    """The withdrawal fee, tracking what the disbursement actually costs.
+
+    The flat fee plus a low waiver was economically inverted: the platform
+    charged **nothing** at exactly the amounts where Safaricom's tariff is
+    highest, and charged a flat KSH 15 on small withdrawals where the tariff is
+    lowest or zero. The stated intent — encourage fewer, larger withdrawals —
+    was right; the execution paid for the privilege.
+
+    What this does instead:
+
+    **The platform is never out of pocket on a disbursement.** That is the rule,
+    and it is why the previous shape had to go: a flat KSH 15 waived above
+    KSH 1,000 charged *nothing* at exactly the amounts where Safaricom's tariff
+    is highest, so the platform paid KSH 40 to move KSH 20,000 and recovered
+    none of it. Every large withdrawal was a loss that grew with the amount.
+
+    So the fee is Safaricom's tariff, passed straight through:
+
+    * `configured_fee` is the platform's **margin on top of cost**, not the fee
+      itself, and it defaults to **zero** — the provider pays exactly what the
+      transfer costs and the platform neither loses nor earns.
+    * The waiver threshold waives that *margin*, never the cost underneath it.
+      Raising the margin is a deliberate decision to make money on withdrawals,
+      taken on the console.
+
+    The incentive to consolidate survives without being funded by anybody: one
+    KSH 20,000 withdrawal costs the rider KSH 40, while twenty KSH 1,000
+    withdrawals cost them KSH 300. The tariff being *per transaction* is the
+    incentive — it never needed subsidising.
+    """
+    tariff = b2c_tariff(amount)
+    margin = Decimal("0") if amount >= waiver_threshold else max(Decimal("0"), configured_fee)
+    return tariff + margin
 
 
 async def assert_withdrawable(
@@ -214,14 +324,27 @@ async def assert_withdrawable(
         committed = await committed_cash_float_for_vendor(session, provider_id)
     elif provider_type == "rider":
         committed = await committed_cash_float(session, provider_id)
+    elif provider_type == "customer":
+        committed = await restricted_customer_credit(session, provider_id)
     else:
         committed = Decimal("0")
 
     detail = f"Insufficient balance. Available: KSH {available:.2f}"
     if committed > 0:
-        detail += (
-            f" (KSH {committed:.2f} of your KSH {_money(wallet_balance):.2f} is held "
-            "as float for cash orders you are carrying, and is released when you "
-            "deliver them)"
-        )
+        if provider_type == "customer":
+            # A different sentence, because it is a different fact. Telling a
+            # customer their money is "float for cash orders" would be nonsense
+            # to them, and a refusal somebody cannot make sense of is a support
+            # ticket every single time.
+            detail += (
+                f" (KSH {committed:.2f} of your KSH {_money(wallet_balance):.2f} is "
+                "returned bottle deposit. You can spend it on any order; it "
+                "cannot be withdrawn as cash)"
+            )
+        else:
+            detail += (
+                f" (KSH {committed:.2f} of your KSH {_money(wallet_balance):.2f} is held "
+                "as float for cash orders you are carrying, and is released when you "
+                "deliver them)"
+            )
     raise HTTPException(status_code=400, detail=detail + ".")

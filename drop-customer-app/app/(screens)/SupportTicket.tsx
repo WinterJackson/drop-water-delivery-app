@@ -14,11 +14,10 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
-    Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 /**
@@ -95,7 +94,7 @@ const SupportTicket = () => {
                 <View className="flex-1">
                     <Text
                         numberOfLines={1}
-                        className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}
+                        className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}
                     >
                         {ticket?.subject ?? "Your request"}
                     </Text>
@@ -132,7 +131,7 @@ const SupportTicket = () => {
                                 className="mt-5 px-6 py-3 rounded-xl"
                                 style={{ backgroundColor: BRAND.primary }}
                             >
-                                <Text className="text-white font-bold">Try again</Text>
+                                <Text className="text-white font-sans-bold">Try again</Text>
                             </PressableScale>
                         </View>
                     ) : (
@@ -164,7 +163,7 @@ const SupportTicket = () => {
                                     }`}
                                 >
                                     <Text
-                                        className={`text-xs font-bold uppercase tracking-wider ${
+                                        className={`text-xs font-sans-bold uppercase tracking-wider ${
                                             darkTheme ? "text-green-400" : "text-green-700"
                                         }`}
                                     >
@@ -205,7 +204,7 @@ const SupportTicket = () => {
                                     : "bg-white border-gray-200 text-black"
                             }`}
                         />
-                        <PressableScale
+                        <PressableScale accessibilityLabel="Send your reply"
                             onPress={send}
                             disabled={!draft.trim() || isPending}
                             className="w-12 h-12 rounded-full items-center justify-center"

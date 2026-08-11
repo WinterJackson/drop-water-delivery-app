@@ -278,6 +278,60 @@ def test_every_dashboard_page_is_reachable_from_the_navigation():
     assert missing == [], f"pages with no navigation entry: {missing}"
 
 
+def test_every_dashboard_page_checks_the_capability_it_needs():
+    """A page that renders and *then* gets refused reads as a broken console.
+
+    Twelve pages did exactly that: the heading painted, the queries fired, and
+    the caller got "Couldn't load — 403 Forbidden" — so the person without
+    `finance.read` reported an outage instead of asking for the capability.
+
+    This is **not** access control and never was: `require_admin(...)` on the
+    backend is the only check that decides anything, and this one would gain a
+    caller nothing to bypass. It is the difference between being told no and
+    being shown a stack of failed requests.
+
+    `pageAccess` reads the permission out of `nav-config`, so a page and the
+    sidebar entry that hides it can never disagree about which capability it
+    needs. A page may also gate inline with `can(me, ...)` where it renders a
+    partly-permitted screen — the growth page shows the cohorts to anyone with
+    `analytics.read` and only gates the spend editor.
+    """
+    dashboard = ADMIN / "app" / "(dashboard)"
+
+    ungated = []
+    for page in dashboard.rglob("page.tsx"):
+        source = page.read_text()
+        if "pageAccess(" in source or "can(" in source:
+            continue
+        ungated.append(page.relative_to(ADMIN).as_posix())
+
+    assert ungated == [], (
+        "dashboard pages with no capability check — gate with `pageAccess()` "
+        f"from `lib/page-access`, or `can(me, ...)` for a partial screen: {ungated}"
+    )
+
+
+def test_the_page_gate_reads_its_permission_from_the_nav_config():
+    """One declaration per destination, or the two drift.
+
+    A page hidden from the sidebar but openable by URL is the same defect as a
+    page offered and then refused, and hand-writing the permission in both
+    places is how a route acquires one.
+    """
+    helper = (ADMIN / "lib" / "page-access.ts").read_text()
+
+    assert "server-only" in helper, (
+        "page-access reaches the admin API, so it must never be importable from "
+        "a Client Component"
+    )
+    assert "NAV_ITEMS" in helper, (
+        "the page gate must read its permission from nav-config, not take one "
+        "as an argument"
+    )
+    # Fails closed: an unidentifiable caller is refused, not admitted.
+    assert "if (!me)" in helper and "allowed: false" in helper
+
+
 def test_the_navigation_is_declared_once():
     """The sidebar, the drawer, the bottom bar and the breadcrumb all render
     from `nav-config.ts`.
@@ -573,3 +627,27 @@ def test_queue_headers_never_coerce_a_missing_figure_to_zero():
             offenders.append(f"{path.relative_to(ADMIN).as_posix()}: {match.group(0)}")
 
     assert offenders == [], f"queue figures coerced to zero: {offenders}"
+
+
+def test_a_customised_setting_states_what_the_platform_ships():
+    """"Customised" alone cannot tell a decision from a leftover.
+
+    A `Platform_Settings` row outranks the shipped default forever, so a value
+    left behind by an older release keeps pricing every order while the source
+    says something else. The only place that is visible to the person who can
+    fix it is this screen, so it has to say both figures — and offer the
+    shipped one in one click, through the same validated, reasoned save as any
+    other change.
+    """
+    source = _code_only(ADMIN / "app" / "(dashboard)" / "platform" / "pricing" / "PricingEditor.tsx")
+
+    assert "setting.default" in source, (
+        "the editor no longer reads the shipped default, so a stored row "
+        "holding an old one is invisible"
+    )
+    assert "The platform ships" in source
+    assert "Use the shipped value" in source
+    assert "set(setting.key, setting.default)" in source, (
+        "reverting to the shipped value must go through the normal draft, so "
+        "it is previewed and saved with a reason like any other change"
+    )

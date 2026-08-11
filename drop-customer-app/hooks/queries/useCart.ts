@@ -21,23 +21,62 @@ export interface CartQuote {
     vehicle_class: string;
     distance_km: number;
     estimated_minutes: number;
-    product_subtotal: number;
-    delivery_fee: number;
-    service_fee: number;
-    surge_fee: number;
-    delivery_markup: number;
-    payload_surcharge: number;
-    staircase_surcharge: number;
-    bottle_deposit: number;
-    debt_settlement: number;
-    welcome_discount: number;
-    wallet_discount: number;
-    total: number;
+    /**
+     * Every figure below is a **decimal string**, not a number. Render with
+     * `formatMoney` and add with `sumMoney` from `@/utils/money`; never
+     * `Number(...)` one. The backend holds these as `Decimal` off `NUMERIC`
+     * columns precisely so that the amount displayed, the amount charged and
+     * the amount recorded cannot drift, and parsing them here would put the
+     * float error back in at the last step.
+     */
+    product_subtotal: string;
+    delivery_fee: string;
+    service_fee: string;
+    surge_fee: string;
+    delivery_markup: string;
+    payload_surcharge: string;
+    staircase_surcharge: string;
+    bottle_deposit: string;
+    debt_settlement: string;
+    welcome_discount: string;
+    mpesa_discount: string;
+    wallet_discount: string;
+    total: string;
     surge_active: boolean;
     is_welcome_offer: boolean;
     /** False when a platform rule (MOQ, unit cap, distance) blocks checkout. */
     checkout_ready: boolean;
     warnings: string[];
+    /**
+     * Whether cash on delivery is offered on this basket, decided server-side
+     * by the same function checkout uses. `reason` is the server's own sentence
+     * and is rendered verbatim — the rules behind it are settings rows, so a
+     * message composed here would go stale the moment one moved.
+     */
+    cash?: { available: boolean; reason: string | null };
+    /**
+     * Whether the *store* is taking this order, decided by the same function
+     * `create_order` re-checks under its row lock.
+     *
+     * Separate from `checkout_ready`, which is about the basket. A basket that
+     * is perfectly valid at a shop that is shut is not the same problem and
+     * does not have the same fix: "add KSH 120 more" is something to do,
+     * "paused until 14:30" is something to wait for.
+     *
+     * `reason` is the server's own sentence — it carries the store's own note
+     * ("restocking") and its reopening time, neither of which this app could
+     * compose.
+     */
+    store?: {
+        accepting: boolean;
+        /** open | paused | offline | closed_hours | suspended */
+        state: string;
+        reason: string | null;
+        reopens_at: string | null;
+        accepts_cash: boolean;
+        cash_reason: string | null;
+        min_order_value: string;
+    };
     moq_kg: number | null;
     max_units: number | null;
     max_distance_km: number;
@@ -70,7 +109,7 @@ export function useDetailedCart() {
 export function useCartQuote(
     lat?: number | null,
     lng?: number | null,
-    deliveryType: string = 'quick_swap',
+    deliveryType: string = 'exchange',
     enabled: boolean = true,
 ) {
     const { userId } = useAuth();
@@ -184,14 +223,30 @@ export function useDeleteCartItem() {
 }
 
 export interface DeliveryFeePreview {
-    delivery_fee: number;
-    quick_swap_fee: number;
-    keep_my_bottle_fee: number;
+    /** Decimal strings, like every money field. */
+    delivery_fee: string;
+    /**
+     * One fee per bottle option, so the cart states what each choice costs
+     * before the customer picks rather than after.
+     *
+     * `refill_mine` is dearer because it is a **round trip** — the rider
+     * collects the customer's own bottle, carries it to the station and brings
+     * that same bottle back. `new_bottle` travels the same single leg as an
+     * exchange; its difference is the refundable deposit, which is a quote line
+     * rather than a delivery cost.
+     */
+    exchange_fee: string;
+    refill_mine_fee: string;
+    new_bottle_fee: string;
+    /** @deprecated Retired names, still served for older builds. */
+    quick_swap_fee: string;
+    /** @deprecated */
+    keep_my_bottle_fee: string;
     distance_km: number;
     estimated_minutes: number;
     vehicle_class: string;
-    service_fee: number;
-    surge_fee: number;
+    service_fee: string;
+    surge_fee: string;
     surge_active: boolean;
     max_distance_km: number;
     within_range: boolean;
@@ -204,7 +259,7 @@ export function useDeliveryFee(
     lng_to?: number,
     vendor_type: string = 'retail_refill',
     vehicle_class: string = 'motorbike',
-    delivery_type: string = 'quick_swap',
+    delivery_type: string = 'exchange',
 ) {
     const api = useApiRequest();
     const hasCoords = !!lat_from && !!lng_from && !!lat_to && !!lng_to;

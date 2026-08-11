@@ -8,17 +8,27 @@ many rows went with it.
 import csv
 import io
 import logging
-from typing import Literal
+from datetime import date as DateType
+from decimal import Decimal
+from typing import Literal, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies.admin_dependencies import AdminAccess, require_admin
 from core.redis_client import redis_limiter as limiter
 from dependencies.dependencies import get_db
-from models.admin_model import PERM_ANALYTICS_READ, PERM_DATA_EXPORT, PERM_FINANCE_READ
+from models.admin_model import (
+    PERM_ANALYTICS_READ,
+    PERM_DATA_EXPORT,
+    PERM_FINANCE_READ,
+    PERM_SETTINGS_MANAGE,
+)
 from services import admin_analytics_service as analytics
+from services import admin_growth_service as growth
 from services import admin_service
 
 logger = logging.getLogger(__name__)
@@ -166,3 +176,116 @@ async def analytics_demand(
         "pattern": await analytics.demand_pattern(db, days=days),
         "geography": await analytics.geographic_demand(db, days=days),
     }
+
+
+# ── Acquisition cost and cohort economics ────────────────────────────────
+#
+# `/analytics/cohorts` above answers *do customers come back*. These answer the
+# question a business acts on — **whether the ones who came back paid back what
+# it cost to get them** — and the platform has had every input on every order
+# since the first one.
+#
+# The spend endpoints are `settings.manage` rather than `analytics.read`:
+# entering a figure that moves every CAC on the console is a decision about the
+# business, not a report. Reading them needs only `analytics.read`, because a
+# CAC with the spend hidden is not a CAC.
+
+
+class AcquisitionSpendRequest(BaseModel):
+    """One month's spend on one channel."""
+
+    #: Any day inside the month; normalised to the first on write.
+    period_month: DateType
+    channel: str = Field(min_length=1, max_length=60)
+    amount: Decimal = Field(ge=0, le=Decimal("100000000"))
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.get("/growth/cohorts", summary="What each cohort cost, and what it returned")
+@limiter.limit("60/minute")
+async def growth_cohorts(
+    request: Request,
+    months: int = Query(12, ge=2, le=36),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_ANALYTICS_READ)),
+):
+    """Cohort economics: CAC, cumulative contribution, payback month.
+
+    `measured` and `entered` acquisition cost are returned separately and are
+    never silently blended — the platform can prove the first from its own rows
+    and cannot see the second at all, and a screen that adds them without
+    saying so reports that acquisition is cheap on a month nobody filled in.
+    """
+    return {
+        "summary": await growth.acquisition_summary(db, months=months),
+        **await growth.cohort_economics(db, months=months),
+    }
+
+
+@router.get("/growth/spend", summary="Off-platform acquisition spend, as entered")
+@limiter.limit("60/minute")
+async def growth_list_spend(
+    request: Request,
+    months: int = Query(12, ge=1, le=36),
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_ANALYTICS_READ)),
+):
+    return await growth.list_spend(db, months=months)
+
+
+@router.put("/growth/spend", summary="Record or correct one month's spend")
+@limiter.limit("30/minute")
+async def growth_record_spend(
+    request: Request,
+    body: AcquisitionSpendRequest,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_SETTINGS_MANAGE)),
+):
+    """An upsert, keyed on (month, channel).
+
+    Audited: this figure moves every CAC on the console, and a number that
+    changed with no record of who changed it is a number nobody will trust
+    enough to act on.
+    """
+    result = await growth.record_spend(
+        db,
+        period_month=body.period_month,
+        channel=body.channel,
+        amount=body.amount,
+        note=body.note,
+        recorded_by=getattr(access, "id", None),
+    )
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="growth.spend_recorded",
+        target_type="acquisition_spend",
+        target_id=result["id"],
+        after=result,
+    )
+    # One commit, so the change and the record of who made it land together.
+    await db.commit()
+    return result
+
+
+@router.delete("/growth/spend/{spend_id}", summary="Remove a spend entry")
+@limiter.limit("30/minute")
+async def growth_delete_spend(
+    request: Request,
+    spend_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_SETTINGS_MANAGE)),
+):
+    result = await growth.delete_spend(db, spend_id=spend_id)
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="growth.spend_deleted",
+        target_type="acquisition_spend",
+        target_id=spend_id,
+        # What it was, not merely that it went. A hole in the CAC series with no
+        # record of what filled it is one nobody can later explain.
+        before=result["was"],
+    )
+    await db.commit()
+    return {"deleted": result["deleted"]}

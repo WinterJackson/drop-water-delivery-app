@@ -90,8 +90,54 @@ def test_the_schedule_covers_every_job_that_used_to_be_an_arq_cron():
         # New: neither of these had a schedule before.
         "check-push-receipts",
         "stale-asset-monitor",
+        # The deposit book's nightly upkeep: expiry, one-sided settlement,
+        # dormancy conversion and the three-way reconciliation. One slug rather
+        # than four, because the reconciliation has to read a book the sweeps
+        # have already brought up to date.
+        "deposit-maintenance",
+        # Frees float locked to cash orders nobody delivered, and puts the order
+        # back in the pool. Every ten minutes rather than nightly: both halves
+        # are time-sensitive — a rider who cannot accept work, and a customer
+        # who has not been told their delivery is not coming.
+        "release-unclaimed-cash",
+        # Clears pauses that have expired and tells the store it is open again.
+        # Every five minutes because the shortest pause the app offers is
+        # fifteen: a resume notification that arrives an hour late is worse
+        # than none, since the vendor has already assumed it failed and paused
+        # a second time.
+        "resume-paused-stores",
     }
     assert set(cron_routes._job_table()) == expected
+
+
+def test_the_runbook_lists_every_slug_and_invents_none():
+    """`docs/cron-jobs.md` is what somebody types into cron-job.org.
+
+    The schedule lives outside this repository, so that table is not
+    documentation of the system — it *is* the system's schedule, transcribed by
+    hand. A slug missing from it is a sweep that never runs anywhere, silently:
+    `deposit-maintenance` and `release-unclaimed-cash` were both added to the
+    code and left out of the table, so the deposit reconciliation and the cash
+    float release would have been set up by nobody.
+
+    A slug in the table that no longer exists is the opposite failure and just
+    as quiet — cron-job.org keeps calling it and every call 404s.
+    """
+    import pathlib
+    import re
+
+    doc = (pathlib.Path(__file__).resolve().parents[2] / "docs/cron-jobs.md").read_text()
+    documented = set(re.findall(r"^\| `([a-z-]+)`", doc, re.M))
+    slugs = set(cron_routes._job_table())
+
+    assert slugs - documented == set(), (
+        "these jobs have no row in docs/cron-jobs.md, so whoever sets up the "
+        f"schedule will never create them: {sorted(slugs - documented)}"
+    )
+    assert documented - slugs == set(), (
+        "docs/cron-jobs.md lists slugs that no longer exist; every call to them "
+        f"404s: {sorted(documented - slugs)}"
+    )
 
 
 def test_internal_cron_is_off_unless_explicitly_enabled():

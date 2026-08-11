@@ -159,6 +159,30 @@ The same applies to a **difference**: `formatMoneyDelta()` renders `+41.00` /
 was live on the pricing preview — a float round trip on the one screen whose job
 is to make a pricing change safe to approve.
 
+## 🔐 A page checks what it needs before it renders
+
+`pageAccess(pathname)` from `lib/page-access.ts` — `server-only`, like every
+module that reaches the API. It reads the required capability out of
+**`nav-config`**, so the gate and the sidebar entry that hides the page can
+never disagree; a page hidden from the nav but openable by URL is the same
+defect as a page offered and then refused.
+
+Twelve pages had no check at all. They painted their heading, fired their
+queries and rendered "Couldn't load — 403 Forbidden", which reads as the console
+being broken: the person's next move was to report an outage rather than ask for
+the capability. `NoAccess` names the missing capability instead.
+
+This is courtesy, not access control. `require_admin(...)` on the backend is
+still the only check that decides anything, and a build of this app with these
+gates deleted would gain a caller nothing. It fails **closed** on an
+unidentifiable caller, though — refusing to fire a page's worth of queries on
+behalf of somebody we could not identify.
+
+Use `can(me, ...)` inline instead where a screen is partly permitted: the growth
+page shows the cohorts to anyone with `analytics.read` and gates only the spend
+editor. `test_admin_console_frontend.py` fails the build on a `page.tsx` with
+neither.
+
 ## ⚙️ Business values are rows, not environment variables
 
 Two screens under **Platform** look similar and are not:
@@ -218,6 +242,24 @@ delivery option, and it is recorded against their account either way.
 
 ## 🎨 UI conventions
 
+- **Typography is three families and one rule.** Karla (`--font-sans`) for body,
+  Fredoka (`--font-heading`) for headings, JetBrains Mono (`--font-mono`) for
+  figures and identifiers. Headings get the heading face from one `h1…h6` rule
+  in `globals.css`, so **a heading must be a heading element** — `CardHeader`
+  renders a real `<h2>`. Anything else needs `font-heading` named explicitly,
+  which is why the sidebar and header wordmarks carry it.
+  - **Figures are not headings.** `Stat` renders `<p>`, deliberately, so totals
+    stay in Karla with tabular numerals.
+  - Fredoka is loaded at **400/500/600 only**, paired with
+    `font-synthesis-weight: none`. Without that, `font-bold` on an `<h2>` is a
+    browser-thickened 600 — smeared next to the real face, and the cap buys
+    nothing.
+  - JetBrains Mono's variable is `--font-jetbrains-mono`, **not** `--font-mono`:
+    that is Tailwind v4's own theme token, and `--font-mono: var(--font-mono, …)`
+    is a cycle CSS drops at computed-value time, leaving no monospace font and
+    no error. `BackendAPI/tests/test_typography.py` fails the build on it, and
+    on any `var(--font-…)` that nothing defines — which is what `--font-inter`
+    was for months while every fallback chain silently did the work.
 - **Semantic tokens only**: `bg-surface`, `text-muted`, `border-default`. Never
   `bg-white dark:bg-neutral-900` at a call site — that is how the two themes
   drift. Dark mode is one block in `globals.css`.

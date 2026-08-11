@@ -7,14 +7,13 @@ import {
     Dimensions,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
     KeyboardAvoidingView,
     Platform,
     ImageBackground,
-    Image
+    Image,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import * as Haptics from "expo-haptics";
@@ -121,7 +120,7 @@ export default function ForgotPassword() {
                 <SafeAreaView className="flex-1">
                     <ScrollView contentContainerStyle={{ paddingHorizontal: 32, paddingTop: 40, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                         <View className="mb-8 mt-10">
-                            <Text className={`text-3xl font-bold mb-2 tracking-tight ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                            <Text className={`text-3xl font-heading-semibold mb-2 tracking-tight ${darkTheme ? "text-white" : "text-gray-900"}`}>
                                 Reset Password
                             </Text>
                             <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -132,7 +131,7 @@ export default function ForgotPassword() {
                         {errors ? (
                             <View className="flex-row items-center gap-2 mb-4 bg-red-500/10 p-3 rounded-lg">
                                 <Ionicons name="alert-circle" size={20} color="#ef4444" />
-                                <Text className="text-red-500 text-sm font-medium flex-1">{errors}</Text>
+                                <Text className="text-red-500 text-sm font-sans-medium flex-1">{errors}</Text>
                             </View>
                         ) : null}
 
@@ -140,11 +139,11 @@ export default function ForgotPassword() {
                             {!successfulCreation ? (
                                 <>
                                     <View>
-                                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Email Address</Text>
+                                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Email Address</Text>
                                         <View className={`flex-row items-center h-[55px] px-4 rounded-2xl border-2 ${focusEmail ? "border-accentbg bg-accentbg/5" : (darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white")}`}>
                                             <Ionicons name="mail" size={20} color={focusEmail ? "#d9a31b" : (darkTheme ? "#6B7280" : "#9CA3AF")} />
                                             <TextInput
-                                                className={`flex-1 ml-3 text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                                className={`flex-1 ml-3 text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                                 placeholder="Enter your email"
                                                 placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                                 keyboardType="email-address"
@@ -163,17 +162,17 @@ export default function ForgotPassword() {
                                         onPress={onRequestReset}
                                         className={`h-[55px] mt-4 rounded-full items-center justify-center ${loading || !emailAddress ? "bg-accentbg/50" : "bg-accentbg"}`}
                                     >
-                                        {loading ? <Ionicons name="sync" size={32} color={BRAND.white} /> : <Text className="text-white font-bold text-lg">Send Reset Code</Text>}
+                                        {loading ? <Ionicons name="sync" size={32} color={BRAND.white} /> : <Text className="text-white font-sans-bold text-lg">Send Reset Code</Text>}
                                     </PressableScale>
                                 </>
                             ) : (
                                 <>
                                     <View>
-                                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Reset Code</Text>
+                                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Reset Code</Text>
                                         <View className={`flex-row items-center h-[55px] px-4 rounded-2xl border-2 ${focusCode ? "border-accentbg bg-accentbg/5" : (darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white")}`}>
                                             <Ionicons name="keypad" size={20} color={focusCode ? "#d9a31b" : (darkTheme ? "#6B7280" : "#9CA3AF")} />
                                             <TextInput
-                                                className={`flex-1 ml-3 text-lg font-bold tracking-[10px] text-center ${darkTheme ? "text-white" : "text-black"}`}
+                                                className={`flex-1 ml-3 text-lg font-sans-bold tracking-[10px] text-center ${darkTheme ? "text-white" : "text-black"}`}
                                                 placeholder="000000"
                                                 placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                                 keyboardType="number-pad"
@@ -187,11 +186,11 @@ export default function ForgotPassword() {
                                     </View>
                                     
                                     <View>
-                                        <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>New Password</Text>
+                                        <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>New Password</Text>
                                         <View className={`flex-row items-center h-[55px] px-4 rounded-2xl border-2 ${focusPassword ? "border-accentbg bg-accentbg/5" : (darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white")}`}>
                                             <Ionicons name="lock-closed" size={20} color={focusPassword ? "#d9a31b" : (darkTheme ? "#6B7280" : "#9CA3AF")} />
                                             <TextInput
-                                                className={`flex-1 ml-3 text-base font-medium ${darkTheme ? "text-white" : "text-black"}`}
+                                                className={`flex-1 ml-3 text-base font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}
                                                 placeholder="Enter new password"
                                                 placeholderTextColor={darkTheme ? "#6B7280" : "#9CA3AF"}
                                                 secureTextEntry={!showPassword}
@@ -200,7 +199,7 @@ export default function ForgotPassword() {
                                                 onFocus={() => handleFocus(setFocusPassword)}
                                                 onBlur={() => setFocusPassword(false)}
                                             />
-                                            <PressableScale onPress={() => setShowPassword(!showPassword)} className="p-2">
+                                            <PressableScale accessibilityLabel={showPassword ? "Hide password" : "Show password"} onPress={() => setShowPassword(!showPassword)} className="p-2">
                                                 {showPassword ? (
                                                     <Ionicons name="eye-off" size={20} color={darkTheme ? "#6B7280" : "#9CA3AF"} />
                                                 ) : (
@@ -216,7 +215,7 @@ export default function ForgotPassword() {
                                         onPress={onReset}
                                         className={`h-[55px] mt-4 rounded-full items-center justify-center ${loading || !code || !password ? "bg-accentbg/50" : "bg-accentbg"}`}
                                     >
-                                        {loading ? <Ionicons name="sync" size={32} color={BRAND.white} /> : <Text className="text-white font-bold text-lg">Set New Password</Text>}
+                                        {loading ? <Ionicons name="sync" size={32} color={BRAND.white} /> : <Text className="text-white font-sans-bold text-lg">Set New Password</Text>}
                                     </PressableScale>
                                 </>
                             )}
@@ -227,7 +226,7 @@ export default function ForgotPassword() {
                                 </Text>
                                 <Link href={"/(Auth)/sign-in/screen"} asChild>
                                     <PressableScale hitSlop={10}>
-                                        <Text className="text-accenttxt font-bold">Back to Sign In</Text>
+                                        <Text className="text-accenttxt font-sans-bold">Back to Sign In</Text>
                                     </PressableScale>
                                 </Link>
                             </View>

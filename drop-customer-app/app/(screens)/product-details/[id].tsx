@@ -7,9 +7,9 @@ import {
     Modal,
     ScrollView,
     StatusBar,
-    Text,
-    View
+    View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SkeletonCard, SkeletonRow, Skeleton } from "@/components/ui/Skeleton";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
@@ -28,7 +28,7 @@ import { useDeliveryFee } from "@/hooks/queries/useCart";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-
+import { formatMoney, isZeroMoney } from "@/utils/money";
 
 const ProductDetails = () => {
 	// <---------------HOOKES--------------->
@@ -208,21 +208,28 @@ const ProductDetails = () => {
 	const minQty = Product?.minimum_order_qty || 1;
 	const maxStock = Product?.stock || 0;
 
-	// Estimated delivery time based on vendor's delivery radius
-	// Average motorbike speed in Nairobi traffic: ~15 km/h
+	/**
+	 * The server's estimate, for the distance to *this* customer.
+	 *
+	 * `/api/delivery-fee` — already called above for the fee — returns
+	 * `estimated_minutes` off the same Haversine distance it prices. This
+	 * screen ignored it and derived its own from `vendor.delivery_radius`,
+	 * which was wrong twice: that column is one the vendor typed and dispatch
+	 * has never read, and a radius is the distance to the *edge of the
+	 * catchment*, so every customer saw the estimate for the furthest possible
+	 * address regardless of living next door. A store that set 15 km quoted
+	 * "45 min–1.5 hrs" to the flat above it.
+	 */
 	const getEstimatedDelivery = (): string => {
-		const radius = Product?.vendor?.delivery_radius;
-		if (!radius || radius <= 0) return "30-60 min";
-		const minMinutes = Math.round((radius / 20) * 60); // optimistic
-		const maxMinutes = Math.round((radius / 10) * 60); // conservative
-		if (maxMinutes <= 60) {
-			return `${Math.max(15, minMinutes)}-${maxMinutes} min`;
-		}
-		const minHrs = (minMinutes / 60).toFixed(1);
-		const maxHrs = (maxMinutes / 60).toFixed(1);
-		return `${minHrs}-${maxHrs} hrs`;
+		const minutes = deliveryFeeData?.estimated_minutes;
+		if (!minutes || minutes <= 0) return "30-60 min";
+		// A range, because a single figure reads as a promise. The server's
+		// number is the midpoint.
+		const low = Math.max(10, Math.round(minutes * 0.75));
+		const high = Math.round(minutes * 1.5);
+		if (high <= 60) return `${low}-${high} min`;
+		return `${(low / 60).toFixed(1)}-${(high / 60).toFixed(1)} hrs`;
 	};
-
 
 	return (
 		<>
@@ -237,7 +244,7 @@ const ProductDetails = () => {
 					<PressableScale activeOpacity={0.7} onPress={() => router.back()}>
 						<BackButtonMinimal />
 					</PressableScale>
-					<PressableScale activeOpacity={0.7} onPress={handleToggleFavorite}>
+					<PressableScale accessibilityLabel={isFavorite ? "Remove from your favourites" : "Add to your favourites"} activeOpacity={0.7} onPress={handleToggleFavorite}>
 						<View 
 							className="w-10 h-10 items-center justify-center rounded-full"
 							style={{
@@ -341,12 +348,12 @@ const ProductDetails = () => {
 							{/* Title & Price row */}
 							<View className="flex-row justify-between items-start mb-2">
 								<View className="flex-1 pr-4">
-									<Text className={`text-2xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+									<Text className={`text-2xl font-heading-semibold ${darkTheme ? "text-white" : "text-black"}`}>
 										{Product?.name}
 									</Text>
 								</View>
 								<View className="items-end">
-									<Text className="text-2xl font-bold" style={{ color: BRAND.blue }}>
+									<Text className="text-2xl font-sans-bold" style={{ color: BRAND.blue }}>
 										KSH {Math.round((Product?.price - Product?.discount) * 100) / 100}
 									</Text>
                                     <View className="flex-row items-center mt-0.5 gap-1">
@@ -377,19 +384,19 @@ const ProductDetails = () => {
 								{Product?.capacity != null && (
 									<View className="flex-1 p-3 rounded-2xl items-center border" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.white, borderColor: darkTheme ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)" }}>
 										<Text className={`text-xs mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Capacity</Text>
-										<Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{Product.capacity}L</Text>
+										<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{Product.capacity}L</Text>
 									</View>
 								)}
 								{Product?.weight_kg != null && (
 									<View className="flex-1 p-3 rounded-2xl items-center border" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.white, borderColor: darkTheme ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)" }}>
 										<Text className={`text-xs mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Weight</Text>
-										<Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{Product.weight_kg} kg</Text>
+										<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{Product.weight_kg} kg</Text>
 									</View>
 								)}
 								{minQty > 1 && (
 									<View className="flex-1 p-3 rounded-2xl items-center border" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.white, borderColor: darkTheme ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)" }}>
 										<Text className={`text-xs mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Min. Order</Text>
-										<Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{minQty} {Product?.unit || 'units'}</Text>
+										<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-black"}`}>{minQty} {Product?.unit || 'units'}</Text>
 									</View>
 								)}
 							</View>
@@ -398,7 +405,7 @@ const ProductDetails = () => {
 							<View className="flex-row gap-3 mb-6">
 								<View className="flex-1 p-4 rounded-[20px] border" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.white, borderColor: darkTheme ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)" }}>
 									<Text className={`text-sm mb-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Availability</Text>
-									<Text className="font-bold" style={{ color: stockAvailable ? TOAST.success : TOAST.error }}>
+									<Text className="font-sans-bold" style={{ color: stockAvailable ? TOAST.success : TOAST.error }}>
 										{stockAvailable ? "In Stock" : "Out Of Stock"}
 									</Text>
 								</View>
@@ -408,13 +415,13 @@ const ProductDetails = () => {
                                         <View className="mt-1"><Skeleton width={60} height={16} /></View>
                                     ) : (
                                         <>
-                                            <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>{getEstimatedDelivery()}</Text>
+                                            <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{getEstimatedDelivery()}</Text>
                                             {deliveryFeeData?.delivery_fee !== undefined && (
                                                 <Text 
-                                                    className={`text-xs mt-1 ${deliveryFeeData.delivery_fee !== 0 ? (darkTheme ? "text-gray-400" : "text-gray-500") : "font-bold"}`}
-                                                    style={deliveryFeeData.delivery_fee === 0 ? { color: TOAST.success } : {}}
+                                                    className={`text-xs mt-1 ${!isZeroMoney(deliveryFeeData.delivery_fee) ? (darkTheme ? "text-gray-400" : "text-gray-500") : "font-sans-bold"}`}
+                                                    style={isZeroMoney(deliveryFeeData.delivery_fee) ? { color: TOAST.success } : {}}
                                                 >
-                                                    {deliveryFeeData.delivery_fee === 0 ? "Free Delivery" : `KSH ${deliveryFeeData.delivery_fee}`}
+                                                    {isZeroMoney(deliveryFeeData.delivery_fee) ? "Free Delivery" : formatMoney(deliveryFeeData.delivery_fee)}
                                                 </Text>
                                             )}
                                         </>
@@ -424,7 +431,7 @@ const ProductDetails = () => {
 
 							{/* Vendor Snippet */}
 							<View className="mb-6">
-								<Text className={`text-lg font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>Vendor</Text>
+								<Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>Vendor</Text>
 								<PressableScale 
 									activeOpacity={0.9} 
 									onPress={() => {
@@ -439,7 +446,7 @@ const ProductDetails = () => {
 												<Ionicons name="home" size={24} color={BRAND.primary} />
 											</View>
 											<View className="flex-1 pr-2">
-												<Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`} numberOfLines={1}>
+												<Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`} numberOfLines={1}>
 													{Product?.vendor?.business_name || "Vendor Name"}
 												</Text>
 												<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`} numberOfLines={1}>
@@ -458,7 +465,7 @@ const ProductDetails = () => {
 							<View className="mt-6">
 								{/* Quantity Selector */}
 								<View className="flex-row items-center justify-between mb-4">
-									<Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Quantity</Text>
+									<Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>Quantity</Text>
 									<View className="flex-row items-center justify-between px-2 py-2 rounded-full w-[130px]" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}>
 										<PressableScale 
 											activeOpacity={0.7} 
@@ -466,11 +473,11 @@ const ProductDetails = () => {
 											disabled={Quantity <= minQty}
 										>
 											<View className={`w-10 h-10 rounded-full items-center justify-center ${Quantity <= minQty ? "opacity-30" : darkTheme ? "bg-white/10" : "bg-black/5"}`}>
-												<Text className={`text-xl font-medium ${darkTheme ? "text-white" : "text-black"}`}>−</Text>
+												<Text className={`text-xl font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}>−</Text>
 											</View>
 										</PressableScale>
 										
-										<Text className={`font-bold text-lg min-w-[28px] text-center ${darkTheme ? "text-white" : "text-black"}`}>{Quantity}</Text>
+										<Text className={`font-sans-bold text-lg min-w-[28px] text-center ${darkTheme ? "text-white" : "text-black"}`}>{Quantity}</Text>
 										
 										<PressableScale 
 											activeOpacity={0.7} 
@@ -486,7 +493,7 @@ const ProductDetails = () => {
 											disabled={!stockAvailable || Quantity >= maxStock}
 										>
 											<View className={`w-10 h-10 rounded-full items-center justify-center ${(!stockAvailable || Quantity >= maxStock) ? "opacity-30" : darkTheme ? "bg-white/10" : "bg-white shadow-sm"}`}>
-												<Text className={`text-xl font-medium ${darkTheme ? "text-white" : "text-black"}`}>+</Text>
+												<Text className={`text-xl font-sans-medium ${darkTheme ? "text-white" : "text-black"}`}>+</Text>
 											</View>
 										</PressableScale>
 									</View>
@@ -495,7 +502,7 @@ const ProductDetails = () => {
 								{/* Subtotal */}
 								<View className="flex-row items-center justify-between mb-5">
 									<Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
-									<Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+									<Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
 										KSH {Math.round(((Product?.price || 0) - (Product?.discount || 0)) * Quantity * 100) / 100}
 									</Text>
 								</View>
@@ -504,12 +511,12 @@ const ProductDetails = () => {
 								<View className="flex-row gap-3">
 									<PressableScale activeOpacity={0.9} onPress={stockAvailable ? () => add_to_cart() : undefined} className="flex-1" disabled={!stockAvailable}>
 										<View className={`h-[56px] rounded-full items-center justify-center border-2 ${!stockAvailable ? "opacity-40" : ""} ${darkTheme ? "bg-transparent" : "bg-white"}`} style={{ borderColor: BRAND.blue }}>
-											<Text className="font-bold text-sm" style={{ color: BRAND.blue }}>Add to Cart</Text>
+											<Text className="font-sans-bold text-sm" style={{ color: BRAND.blue }}>Add to Cart</Text>
 										</View>
 									</PressableScale>
 									<PressableScale activeOpacity={0.9} onPress={stockAvailable ? () => directCheckout() : undefined} className="flex-1" disabled={!stockAvailable}>
 										<View className={`h-[56px] rounded-full items-center justify-center ${!stockAvailable ? "opacity-40" : ""}`} style={{ backgroundColor: BRAND.blue, shadowColor: BRAND.blue, shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 4 }, elevation: 5 }}>
-											<Text className="text-white font-bold text-sm">Buy Now</Text>
+											<Text className="text-white font-sans-bold text-sm">Buy Now</Text>
 										</View>
 									</PressableScale>
 								</View>
@@ -524,7 +531,7 @@ const ProductDetails = () => {
 				<View className="flex-1 items-center justify-center bg-black/50">
 					<View className="p-6 rounded-[24px] items-center justify-center w-[80%] max-w-xs shadow-2xl" style={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.white }}>
 						<Ionicons name="sync" size={40} color={BRAND.primary} />
-						<Text className={`font-bold mt-2 ${darkTheme ? "text-white" : "text-black"}`}>Processing...</Text>
+						<Text className={`font-sans-bold mt-2 ${darkTheme ? "text-white" : "text-black"}`}>Processing...</Text>
 					</View>
 				</View>
 			</Modal>

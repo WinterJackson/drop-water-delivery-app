@@ -2,10 +2,9 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
-from sqlalchemy import select, desc, or_, update
+from sqlalchemy import select, desc, update
 from models.notification_model import Notification
 from models.user_model import User
-from models.vendor_model import Vendor
 from models.deliverer_model import Deliverer
 import logging
 

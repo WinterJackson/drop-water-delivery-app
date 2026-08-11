@@ -202,6 +202,39 @@ async def set_ticket_status(
     return {"ok": True, "status": ticket.status}
 
 
+class PriorityRequest(BaseModel):
+    priority: Literal["low", "normal", "high", "urgent"]
+
+
+@router.post("/support/tickets/{ticket_id}/priority", summary="Escalate a ticket")
+async def set_ticket_priority(
+    ticket_id: UUID,
+    body: PriorityRequest,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_SUPPORT_RESPOND)),
+):
+    """Audited like any other change of state.
+
+    Escalation is a claim about someone else's workload, so it carries a name —
+    the queue is sorted oldest-first and moving a ticket up it means moving
+    every other one down.
+    """
+    ticket = await support_service.set_priority(
+        db, ticket_id=ticket_id, priority=body.priority, admin_email=access.email
+    )
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="support.priority",
+        target_type="support_ticket",
+        target_id=ticket_id,
+        after={"priority": body.priority},
+        reason=f"Priority set to {body.priority}",
+    )
+    await db.commit()
+    return {"ok": True, "priority": ticket.priority}
+
+
 @router.post("/support/tickets/{ticket_id}/assign", summary="Take a ticket")
 async def assign_ticket(
     ticket_id: UUID,

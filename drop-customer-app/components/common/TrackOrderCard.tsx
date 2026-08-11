@@ -1,4 +1,5 @@
-import { View, Text, Image } from "react-native";
+import { View, Image } from "react-native";
+import { Text } from '@/components/ui/Text';
 import React from "react";
 import images from "@/constants/images/images";
 import Button from "../ui/Button";
@@ -31,7 +32,7 @@ const TrackOrderCard = ({ data }: Props) => {
           {/* <---------RATING----------> */}
           <View className="gap-1">
             <View className="flex-row gap-3 items-end">
-              <Text className="font-semibold">Rating:</Text>
+              <Text className="font-sans-semibold">Rating:</Text>
               <View className="flex-row gap-1">
                 {[...Array(5)].map((star, index) => {
                   return <Text key={index}>⭐</Text>;
@@ -43,21 +44,21 @@ const TrackOrderCard = ({ data }: Props) => {
           {/* <---------PLATE_NO----------> */}
           <View className="gap-1">
             <View className="flex-row gap-3 items-end">
-              <Text className="font-semibold">Plate No:</Text>
+              <Text className="font-sans-semibold">Plate No:</Text>
               <Text className={"text-gray-500"}>{`${"KMDC 2485Q"}`}</Text>
             </View>
           </View>
           {/* <---------DELIVERY_FEE----------> */}
           <View className="gap-1">
             <View className="flex-row gap-3 items-end">
-              <Text className="font-semibold">Delivery Fee:</Text>
+              <Text className="font-sans-semibold">Delivery Fee:</Text>
               <Text className={"text-gray-500"}>{`KSH ${120}`}</Text>
             </View>
           </View>
           {/* <---------PHONE_NO----------> */}
           <View className="gap-1">
             <View className="flex-row gap-3 items-center">
-              {/* <Text className="font-semibold">Contact:</Text> */}
+              {/* <Text className="font-sans-semibold">Contact:</Text> */}
               <PressableScale 
                 activeOpacity={0.7}
                 className="flex-row gap-3 items-center"
@@ -74,19 +75,19 @@ const TrackOrderCard = ({ data }: Props) => {
 
       <View className="gap-1">
             <View className="gap-1 flex-row items-end">
-                <Text className="font-bold text-gray-800">Placed At:  </Text>
+                <Text className="font-sans-bold text-gray-800">Placed At:  </Text>
                 <Text className={'text-gray-700'}>{`${"2:00pm "}`}</Text>
             </View>
             <View className="gap-1 flex-row items-end">
-                <Text className="font-bold text-gray-800">Delivery Time:  </Text>
+                <Text className="font-sans-bold text-gray-800">Delivery Time:  </Text>
                 <Text className={'text-gray-700'}>{`${"10min"}`}</Text>
             </View>
             <View className="gap-1 flex-row items-end">
-                <Text className="font-bold text-gray-800">Items:  </Text>
+                <Text className="font-sans-bold text-gray-800">Items:  </Text>
                 <Text className={'text-gray-700'}>{`${"3 items"}`}</Text>
             </View>
             <View className="gap-1 flex-row items-end">
-                <Text className="font-bold text-gray-800">Amount:  </Text>
+                <Text className="font-sans-bold text-gray-800">Amount:  </Text>
                 <Text className={'text-gray-700'}>{`KSH ${300}`}</Text>
             </View>
         </View>

@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, ScrollView } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -10,6 +11,7 @@ import { useVendorFavorites } from "@/hooks/queries/useVendorFavorites";
 import { BRAND } from "@/constants/brandColors";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { FavoriteVendorSkeleton } from "@/components/skeletons/ContextualSkeletons";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 export default function FavouritesList() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -37,7 +39,7 @@ export default function FavouritesList() {
   return (
     <View className="flex-col gap-4 mt-2">
       <View className="px-5 py-3 flex-row items-center justify-between">
-        <Text className={`font-bold text-lg tracking-wide ${darkTheme ? "text-white" : "text-gray-900"}`}>
+        <Text className={`font-sans-bold text-lg tracking-wide ${darkTheme ? "text-white" : "text-gray-900"}`}>
           Your Favourites
         </Text>
         <Ionicons name="star" size={20} color={BRAND.primary} />
@@ -100,13 +102,13 @@ export default function FavouritesList() {
                   
                   <View className="flex-col justify-center pr-2">
                     <Text 
-                      className={`text-sm font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`} 
+                      className={`text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`} 
                       numberOfLines={1}
                     >
                       {vendor?.business_name || "Vendor"}
                     </Text>
                     {isSelected && (
-                      <Text className={`text-[10px] font-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                      <Text className={`text-[10px] font-sans-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                         ⭐ {vendor?.rating || "4.5"} • Verified
                       </Text>
                     )}
@@ -136,12 +138,23 @@ export default function FavouritesList() {
                   <Ionicons name="time-outline" size={18} color={BRAND.primary} />
                 </View>
                 <View className="flex-1">
-                  <Text className={`text-sm font-bold ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+                  <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
                     Reorder from {selectedVendor.business_name}
                   </Text>
-                  <Text className={`text-xs mt-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                    Skip the cart and order your usual immediately.
-                  </Text>
+                  {/* "Skip the cart and order your usual immediately" is a
+                      promise, and against a shut shop it is one the platform
+                      cannot keep. Favourites is where this matters most: the
+                      customer already knows which store they want, so the only
+                      thing on the card worth reading is whether it is open. */}
+                  {selectedVendor.is_accepting_orders === false ? (
+                    <View className="mt-0.5">
+                      <StoreClosedNotice store={selectedVendor} compact />
+                    </View>
+                  ) : (
+                    <Text className={`text-xs mt-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                      Skip the cart and order your usual immediately.
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>

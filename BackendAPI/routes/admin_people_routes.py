@@ -362,6 +362,13 @@ class DepositReturn(BaseModel):
     reason: str = Field(..., min_length=10, max_length=500)
 
 
+class AccountKind(BaseModel):
+    """Household or commercial. Decides which bottle ceiling applies."""
+
+    is_commercial: bool
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
 @router.get(
     "/people/customers/{customer_id}/balances",
     summary="What a customer owes, and what they are owed",
@@ -391,7 +398,22 @@ async def customer_balances(
         "debt_blocks_ordering": debt >= ceiling,
         "bottle_deposit_balance": str(Decimal(str(customer.bottle_deposit_balance or 0))),
         "bottles_held": int(customer.bottles_held or 0),
+        # Which ceiling this account is held to, and the ceiling itself. An
+        # office refused at six bottles needs somebody to be able to see *why*
+        # before they can fix it.
+        "is_commercial": bool(customer.is_commercial),
+        "bottle_limit": await _bottle_ceiling_for(db, customer),
+        # Spendable, not withdrawable: returned bottle deposit. Shown because
+        # "your balance is 900 but you can withdraw 0" is otherwise a support
+        # ticket that nobody in the console can answer.
+        "wallet_not_withdrawable": str(Decimal(str(customer.non_withdrawable_balance or 0))),
     }
+
+
+async def _bottle_ceiling_for(db: AsyncSession, customer: User) -> int:
+    from services import customer_bottle_service
+
+    return await customer_bottle_service.bottle_ceiling(db, customer)
 
 
 async def _debt_ceiling(db: AsyncSession) -> Decimal:
@@ -475,6 +497,65 @@ async def write_off_debt(
         "customer_id": str(customer_id),
         "written_off": str(amount),
         "debt_balance": str(customer.debt_balance),
+    }
+
+
+@router.post(
+    "/people/customers/{customer_id}/account-kind",
+    summary="Mark a customer as a household or a commercial account",
+)
+@limiter.limit("20/minute")
+async def set_account_kind(
+    request: Request,
+    customer_id: UUID,
+    body: AccountKind,
+    db: AsyncSession = Depends(get_db),
+    access: AdminAccess = Depends(require_admin(PERM_CUSTOMERS_SUSPEND)),
+):
+    """Which bottle ceiling this account is held to.
+
+    `max_bottles_held_commercial` existed, was validated, and could never apply:
+    the column deciding it had no way of being set, so every account on the
+    platform was a household and an office ordering water was refused at six
+    bottles with nothing anyone could do about it. A limit that cannot be lifted
+    is not a limit, it is a wall.
+
+    Deliberately not self-service, and not `customers.read`. It raises the
+    platform's own exposure to one account — the ceiling exists to cap how many
+    bottles a single party can hold on deposit — so it sits with the grant that
+    already covers acting on an account rather than merely viewing one.
+    """
+    customer = await db.get(User, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    before = bool(customer.is_commercial)
+    if before == body.is_commercial:
+        return {
+            "customer_id": str(customer_id),
+            "is_commercial": before,
+            "bottle_limit": await _bottle_ceiling_for(db, customer),
+            "message": "No change — that is already how this account is set.",
+        }
+
+    customer.is_commercial = body.is_commercial
+
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="customers.account_kind",
+        target_type="customer",
+        target_id=customer_id,
+        before={"is_commercial": before},
+        after={"is_commercial": body.is_commercial},
+        reason=body.reason,
+    )
+
+    await db.commit()
+    return {
+        "customer_id": str(customer_id),
+        "is_commercial": bool(customer.is_commercial),
+        "bottle_limit": await _bottle_ceiling_for(db, customer),
     }
 
 

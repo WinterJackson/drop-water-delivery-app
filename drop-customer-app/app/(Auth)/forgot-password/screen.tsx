@@ -10,9 +10,9 @@ import {
     KeyboardAvoidingView,
     ScrollView,
     StatusBar,
-    Text,
-    View
+    View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 
 import InputField from "@/components/ui/InputField";
 import icons from "@/constants/icons/icons";
@@ -163,7 +163,7 @@ export default function ForgotPassword() {
                                                 {loading ? (
                                                     <Ionicons name="sync" size={32} color={BRAND.white} />
                                                 ) : (
-                                                    <Text className={`text-white text-xl font-semibold`}>
+                                                    <Text className={`text-white text-xl font-sans-semibold`}>
                                                         Send Reset Code
                                                     </Text>
                                                 )}
@@ -210,7 +210,7 @@ export default function ForgotPassword() {
                                                 {loading ? (
                                                     <Ionicons name="sync" size={32} color={BRAND.white} />
                                                 ) : (
-                                                    <Text className={`text-white text-xl font-semibold`}>
+                                                    <Text className={`text-white text-xl font-sans-semibold`}>
                                                         Reset Password
                                                     </Text>
                                                 )}

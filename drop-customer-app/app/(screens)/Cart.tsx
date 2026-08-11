@@ -3,18 +3,17 @@
 // };
 
 import {
-	View,
-	Text,
-	Image,
-	ScrollView,
-	Dimensions,
-	
-	StatusBar,
-	ImageBackground,
-	Modal,
-	StyleSheet,
-	ActivityIndicator,
+    View,
+    Image,
+    ScrollView,
+    Dimensions,
+    StatusBar,
+    ImageBackground,
+    Modal,
+    StyleSheet,
+    ActivityIndicator,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import React, { useContext, useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { BRAND } from "@/constants/brandColors";
 import { randomUUID } from 'expo-crypto';
@@ -35,10 +34,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { UIThemeContext } from "@/context/ThemeContext";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { useAuth } from "@clerk/clerk-expo";
-import ApiRoutes from "@/API/routes/ApiRoutes";
 import images from "@/constants/images/images";
 import Context from "@/context/context";
-import { TextInput } from "react-native";
+
 import { ROUTES } from "@/API/routes/ApiRoutes";
 import { ApiError, errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
@@ -49,6 +47,7 @@ import { RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import PressableScale from "@/components/ui/PressableScale";
+import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney, subtractMoney } from "@/utils/money";
 
 const { width, height } = Dimensions.get("screen");
 
@@ -70,7 +69,21 @@ export default function Cart() {
 	const {currentTheme} = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark"
 	const api = useApiRequest()
-	const [deliveryType, setDeliveryType] = useState<'quick_swap' | 'keep_my_bottle'>('quick_swap');
+	/**
+	 * Three distinct transactions, not two.
+	 *
+	 * `exchange` — a pool bottle for the pool bottle you hand back.
+	 * `refill_mine` — **your** bottle, collected, refilled and returned. The
+	 *   hygiene option: nobody else's kitchen. A round trip, so it costs more.
+	 * `new_bottle` — the platform's bottle, and you keep it. The only one that
+	 *   takes a deposit.
+	 *
+	 * "Keep My Bottle" used to mean the last of those while being named for the
+	 * middle one, so a household that wanted their own bottle refilled was
+	 * charged a KSH 300 deposit on a bottle they already owned.
+	 */
+	type BottleOption = 'exchange' | 'refill_mine' | 'new_bottle';
+	const [deliveryType, setDeliveryType] = useState<BottleOption>('exchange');
 	
 	// <--------------REACT QUERY-------------->
 	const { data: Cart, isLoading: isCartLoading, refetch: refetchCart, isRefetching } = useDetailedCart();
@@ -152,35 +165,72 @@ export default function Cart() {
 	const pollingIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// <-------------VARIABLES------------->
 	// Delivery-type selector labels only — the authoritative fee is quote.delivery_fee.
-	const quickSwapFee = deliveryFeeData?.quick_swap_fee ?? 50;
-	const keepMyBottleFee = deliveryFeeData?.keep_my_bottle_fee ?? 50;
-	const deliveryPremium = Math.max(0, keepMyBottleFee - quickSwapFee);
+	// No `?? 50` fallback. A hardcoded price shown when the endpoint is
+	// unreachable is the exact defect the "business values are rows" rule exists
+	// to prevent — the customer would be quoted a figure the platform does not
+	// charge. `null` renders as "—" and the option still works; the authoritative
+	// total always comes from the quote.
+	const exchangeFee = deliveryFeeData?.exchange_fee ?? null;
+	const refillMineFee = deliveryFeeData?.refill_mine_fee ?? null;
+	// Subtracted in cents. `refillMineFee - exchangeFee` on two decimal strings
+	// is a float subtraction of two figures the server sent precisely so that it
+	// would not be one.
+	const refillMinePremium =
+		exchangeFee !== null && refillMineFee !== null
+			? (compareMoney(refillMineFee, exchangeFee) > 0
+				? subtractMoney(refillMineFee, exchangeFee)
+				: "0.00")
+			: null;
+	const depositPerBottle = quote?.bottle_deposit ?? null;
+
+	// Cash availability is the server's answer, not a rule restated here.
+	// Absent (an older backend, or the quote still loading) means offer it and
+	// let checkout decide — the same refusal, one step later, rather than
+	// hiding a payment method because a field has not arrived yet.
+	const cashAvailable = quote?.cash?.available !== false;
+	const cashReason = quote?.cash?.reason ?? null;
+	// `—` for a figure that has not arrived, never a plausible-looking zero.
+	const money = (v: string | null) => (v === null ? '—' : formatMoneyShort(v));
 
 	const CartLoaded = !isCartLoading;
 
 	// ── Every line item below is server-computed ──────────────────────────────
-	const subtotal = quote?.product_subtotal ?? Cart?.total_amount ?? 0;
-	const deliveryFee = quote?.delivery_fee ?? 0;
-	const serviceFee = quote?.service_fee ?? Cart?.service_fee ?? 0;
-	const surgeFee = quote?.surge_fee ?? 0;
-	const deliveryMarkup = quote?.delivery_markup ?? 0;
-	const payload_surcharge = quote?.payload_surcharge ?? 0;
-	const staircase_surcharge = quote?.staircase_surcharge ?? 0;
-	const bottle_fee_total = quote?.bottle_deposit ?? 0;
-	const welcome_discount = quote?.welcome_discount ?? 0;
-	const wallet_discount = quote?.wallet_discount ?? 0;
-	const finalTotal = quote?.total ?? 0;
+	// Decimal strings throughout — rendered with `formatMoney`, tested for
+	// presence with `isZeroMoney`, and never summed here: `total` is the
+	// server's and this screen has no business re-deriving it.
+	const subtotal = quote?.product_subtotal ?? Cart?.total_amount ?? "0";
+	const deliveryFee = quote?.delivery_fee ?? "0";
+	const serviceFee = quote?.service_fee ?? Cart?.service_fee ?? "0";
+	const surgeFee = quote?.surge_fee ?? "0";
+	const deliveryMarkup = quote?.delivery_markup ?? "0";
+	const payload_surcharge = quote?.payload_surcharge ?? "0";
+	const staircase_surcharge = quote?.staircase_surcharge ?? "0";
+	const bottle_fee_total = quote?.bottle_deposit ?? "0";
+	const debt_settlement = quote?.debt_settlement ?? "0";
+	const welcome_discount = quote?.welcome_discount ?? "0";
+	const wallet_discount = quote?.wallet_discount ?? "0";
+	const finalTotal = quote?.total ?? "0";
 
 	// Platform rules, surfaced before checkout rather than as a 400 afterwards.
 	const moqShortfallKg = quote?.moq_kg
 		? Math.max(0, quote.moq_kg - (quote.total_weight_kg ?? 0))
 		: 0;
 	const isOutOfRange = quote ? quote.distance_km > quote.max_distance_km : false;
+	// The shop being shut is not the basket being wrong, and it is checked
+	// first: telling somebody to add KSH 120 to reach a minimum at a store that
+	// closed twenty minutes ago sends them to do work that will not help.
+	// Absent means open — an older backend, or a quote still loading, should
+	// not close a store this screen cannot see the state of.
+	const storeClosedReason = quote?.store && quote.store.accepting === false
+		? quote.store.reason
+		: null;
 	const checkoutBlockedReason = !User?.lat || !User?.lng || (User.lat === 0 && User.lng === 0)
 		? "Set your delivery location to see the total."
-		: quote && !quote.checkout_ready
-			? quote.warnings[0]
-			: null;
+		: storeClosedReason
+			? storeClosedReason
+			: quote && !quote.checkout_ready
+				? quote.warnings[0]
+				: null;
 	const canCheckout = !!quote?.checkout_ready && !isQuoteLoading && !checkoutBlockedReason;
 
 	// <-------------FUNCTIONS------------->
@@ -226,7 +276,8 @@ export default function Cart() {
 				payment_method: string;
 				CheckoutRequestID: string | null;
 				order_id: string;
-				amount: number;
+				/** Decimal string — what was actually charged. */
+				amount: string;
 			}>(ROUTES.CHECKOUT, payload);
 
 			if (response.payment_method === "cash") {
@@ -369,8 +420,6 @@ export default function Cart() {
 		};
 	}, [CheckoutRequestID, modalPage, confirmTransaction]);
 
-
-
 	// ANIMATIONS 
 	const translateX = useSharedValue(0)
 
@@ -442,7 +491,7 @@ export default function Cart() {
 						>
 							<BackButtonMinimal/>
 						</PressableScale>
-						<Text className={`text-xl font-bold tracking-tight ${darkTheme?"text-white":"text-black"}`}>Your Cart</Text>
+						<Text className={`text-xl font-sans-bold tracking-tight ${darkTheme?"text-white":"text-black"}`}>Your Cart</Text>
 					</View>
 					</View>
 					<View className="flex-1 gap-3">
@@ -495,39 +544,48 @@ export default function Cart() {
 									{/* Delivery Type Selection */}
 									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && vendor_type !== 'wholesale_b2b' && (
 										<View className={`w-full gap-3 p-5 rounded-[24px] mt-2 mb-2 ${darkTheme ? "bg-[#1B1F24]" : "bg-white border border-gray-100"}`}>
-											<Text className={`text-lg font-bold ${darkTheme ? 'text-white' : 'text-black'}`}>Delivery Option</Text>
+											<Text className={`text-lg font-sans-bold ${darkTheme ? 'text-white' : 'text-black'}`}>Which bottle?</Text>
 											
-											<PressableScale 
-												activeOpacity={0.7}
-												onPress={() => setDeliveryType('quick_swap')}
-												className={`w-full p-4 rounded-xl border-2 mb-2 ${deliveryType === 'quick_swap' ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#0e0e0e]' : 'border-gray-200 bg-white')}`}
-											>
-												<View className="flex-row justify-between items-center">
-													<View className="flex-col max-w-[80%]">
-														<Text className={`text-base font-bold ${darkTheme ? 'text-white' : 'text-black'}`}>Quick Swap</Text>
-														<Text className={`text-xs mt-1 ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>Give your empty bottle to the rider. Standard delivery fee.</Text>
+											{([
+												{
+													value: 'exchange' as BottleOption,
+													title: 'Exchange my empty bottle',
+													detail: `Hand your empty to the rider and get a filled one. ${money(exchangeFee)} delivery.`,
+												},
+												{
+													value: 'refill_mine' as BottleOption,
+													title: 'Refill my own bottle',
+													// The reason this option exists. Stated plainly, because
+													// "quick swap" told a customer nothing about whose bottle
+													// arrives at their door.
+													detail: `We collect your bottle, refill it and bring the same one back — nobody else drinks from it.${refillMinePremium ? ` +${money(refillMinePremium)} for the round trip.` : ''}`,
+												},
+												{
+													value: 'new_bottle' as BottleOption,
+													title: 'I need a bottle',
+													// Refundable, said in the option itself rather than in a
+													// footnote under it. Calling a deposit a fee tells the
+													// customer the money is gone.
+													detail: `You keep the bottle. ${money(depositPerBottle)} deposit — refundable when you return it.`,
+												},
+											]).map((option) => (
+												<PressableScale
+													key={option.value}
+													activeOpacity={0.7}
+													onPress={() => setDeliveryType(option.value)}
+													className={`w-full p-4 rounded-xl border-2 mb-2 ${deliveryType === option.value ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#0e0e0e]' : 'border-gray-200 bg-white')}`}
+												>
+													<View className="flex-row justify-between items-center">
+														<View className="flex-col max-w-[80%]">
+															<Text className={`text-base font-sans-bold ${darkTheme ? 'text-white' : 'text-black'}`}>{option.title}</Text>
+															<Text className={`text-xs mt-1 ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>{option.detail}</Text>
+														</View>
+														<View className={`w-6 h-6 rounded-full border-2 items-center justify-center ${deliveryType === option.value ? 'border-primary' : 'border-gray-400'}`}>
+															{deliveryType === option.value && <View className="w-3 h-3 rounded-full bg-primary" />}
+														</View>
 													</View>
-													<View className={`w-6 h-6 rounded-full border-2 items-center justify-center ${deliveryType === 'quick_swap' ? 'border-primary' : 'border-gray-400'}`}>
-														{deliveryType === 'quick_swap' && <View className="w-3 h-3 rounded-full bg-primary" />}
-													</View>
-												</View>
-											</PressableScale>
-
-											<PressableScale 
-												activeOpacity={0.7}
-												onPress={() => setDeliveryType('keep_my_bottle')}
-												className={`w-full p-4 rounded-xl border-2 ${deliveryType === 'keep_my_bottle' ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#0e0e0e]' : 'border-gray-200 bg-white')}`}
-											>
-												<View className="flex-row justify-between items-center">
-													<View className="flex-col max-w-[80%]">
-														<Text className={`text-base font-bold ${darkTheme ? 'text-white' : 'text-black'}`}>Keep My Bottle</Text>
-														<Text className={`text-xs mt-1 ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>You don't have an empty bottle to return. +KSH {deliveryPremium.toFixed(0)} delivery premium.</Text>
-													</View>
-													<View className={`w-6 h-6 rounded-full border-2 items-center justify-center ${deliveryType === 'keep_my_bottle' ? 'border-primary' : 'border-gray-400'}`}>
-														{deliveryType === 'keep_my_bottle' && <View className="w-3 h-3 rounded-full bg-primary" />}
-													</View>
-												</View>
-											</PressableScale>
+												</PressableScale>
+											))}
 										</View>
 									)}
 
@@ -536,50 +594,76 @@ export default function Cart() {
 										CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && (
 											<View className={`w-full gap-3 p-5 rounded-[24px] mt-2 mb-4 ${darkTheme ? "bg-[#1B1F24]" : "bg-white border border-gray-100"}`}>
 												<View className="flex-row justify-between items-center">
-													<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+													<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 														Subtotal
 													</Text>
-													<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-														KSH {(Cart?.total_amount ?? 0).toFixed(2)}
+													<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+														{formatMoney(Cart?.total_amount)}
 													</Text>
 												</View>
-												{bottle_fee_total > 0 && (
+												{!isZeroMoney(bottle_fee_total) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-col">
-															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
-																New Bottle Fee
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+																Bottle Deposit
 															</Text>
+															{/* A deposit, not a fee: `customer_bottle_service` holds it
+															    as a liability the platform returns when the bottles come
+															    back. It is also charged whenever you keep bottles, not
+															    only on a first order — "New Bottle Fee / Required for
+															    first order" was wrong on both counts and told the
+															    customer the money was gone. */}
 															<Text className={`text-xs italic ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
-																Required for first order
+																Refundable when you return the bottles
 															</Text>
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {bottle_fee_total.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(bottle_fee_total)}
 														</Text>
 													</View>
 												)}
-												{welcome_discount > 0 && (
+												{/* An unpaid balance from an earlier order, collected on this
+												    one. `create_order` clears it. It was in the quote and in the
+												    total and on no line, so the customer paid an unexplained
+												    difference — the one charge on this screen that is not for
+												    anything in the basket. */}
+												{!isZeroMoney(debt_settlement) && (
+													<View className="flex-row justify-between items-center pt-2">
+														<View className="flex-col flex-1 pr-3">
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-amber-400' : 'text-amber-700'}`}>
+																Previous Balance
+															</Text>
+															<Text className={`text-xs italic ${darkTheme ? 'text-amber-400/80' : 'text-amber-700/80'}`}>
+																Owed from an earlier order — settled by this one
+															</Text>
+														</View>
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-amber-400' : 'text-amber-700'}`}>
+															{formatMoney(debt_settlement)}
+														</Text>
+													</View>
+												)}
+												{!isZeroMoney(welcome_discount) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-col">
-															<Text className={`text-base font-medium ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
 																First Bottle Discount
 															</Text>
 															<Text className={`text-xs italic ${darkTheme ? 'text-green-400/80' : 'text-green-600/80'}`}>
 																30% Welcome Offer Applied
 															</Text>
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
-															- KSH {welcome_discount.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
+															- {formatMoney(welcome_discount)}
 														</Text>
 													</View>
 												)}
 												<View className="flex-col pb-4 border-b ${darkTheme ? 'border-white/10' : 'border-gray-200'}">
 													<View className={`flex-row justify-between items-center`}>
-														<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+														<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 															Delivery Fee
 														</Text>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {deliveryFee.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(deliveryFee)}
 														</Text>
 													</View>
 													{vendor_type === 'wholesale_b2b' && (
@@ -589,113 +673,113 @@ export default function Cart() {
 													)}
 												</View>
 												<View className={`flex-row justify-between items-center pb-4 border-b ${darkTheme ? 'border-white/10' : 'border-gray-200'}`}>
-													<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+													<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 														Service Fee
 													</Text>
-													<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-														KSH {serviceFee.toFixed(2)}
+													<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+														{formatMoney(serviceFee)}
 													</Text>
 												</View>
 
 												{/* Peak-hour surcharge. Previously charged silently. */}
-												{surgeFee > 0 && (
+												{!isZeroMoney(surgeFee) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-row items-center gap-1">
 															<Ionicons name="trending-up" size={16} color={BRAND.primary} />
-															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 																Peak Hour Surcharge
 															</Text>
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {surgeFee.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(surgeFee)}
 														</Text>
 													</View>
 												)}
-												{deliveryMarkup > 0 && (
+												{!isZeroMoney(deliveryMarkup) && (
 													<View className="flex-row justify-between items-center pt-2">
-														<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+														<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 															Logistics Handling
 														</Text>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {deliveryMarkup.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(deliveryMarkup)}
 														</Text>
 													</View>
 												)}
-												{bottle_fee_total > 0 && (
+												{!isZeroMoney(bottle_fee_total) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-col">
-															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 																Bottle Deposit
 															</Text>
 															<Text className={`text-xs ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
 																Refundable when you return the bottle
 															</Text>
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {bottle_fee_total.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(bottle_fee_total)}
 														</Text>
 													</View>
 												)}
-												{welcome_discount > 0 && (
+												{!isZeroMoney(welcome_discount) && (
 													<View className="flex-row justify-between items-center pt-2">
-														<Text className="text-base font-medium" style={{ color: BRAND.primary }}>
+														<Text className="text-base font-sans-medium" style={{ color: BRAND.primary }}>
 															Welcome Offer (30% off deposit)
 														</Text>
-														<Text className="text-lg font-semibold" style={{ color: BRAND.primary }}>
-															- KSH {welcome_discount.toFixed(2)}
+														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
+															- {formatMoney(welcome_discount)}
 														</Text>
 													</View>
 												)}
 												
 												{/* --- Surcharges --- */}
-												{payload_surcharge > 0 && (
+												{!isZeroMoney(payload_surcharge) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-row items-center gap-1">
-															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 																Heavy Payload Surcharge
 															</Text>
 															{/* Info Icon placeholder - could be added later */}
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {payload_surcharge.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(payload_surcharge)}
 														</Text>
 													</View>
 												)}
-												{staircase_surcharge > 0 && (
+												{!isZeroMoney(staircase_surcharge) && (
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-row items-center gap-1">
-															<Text className={`text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 																Staircase Surcharge (Floor {User?.floor_level ?? 0})
 															</Text>
 															{/* Info Icon placeholder */}
 														</View>
-														<Text className={`text-lg font-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															KSH {staircase_surcharge.toFixed(2)}
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
+															{formatMoney(staircase_surcharge)}
 														</Text>
 													</View>
 												)}
-												{wallet_discount > 0 && (
+												{!isZeroMoney(wallet_discount) && (
 													<View 
 														className="flex-row justify-between items-center pt-2 pb-2 border-b border-dashed"
 														style={{ borderBottomColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
 													>
 														<View className="flex-col">
-															<Text className="text-base font-medium" style={{ color: BRAND.primary }}>
+															<Text className="text-base font-sans-medium" style={{ color: BRAND.primary }}>
 																Drop Cashback Applied
 															</Text>
 														</View>
-														<Text className="text-lg font-semibold" style={{ color: BRAND.primary }}>
-															- KSH {wallet_discount.toFixed(2)}
+														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
+															- {formatMoney(wallet_discount)}
 														</Text>
 													</View>
 												)}
 
 												<View className="flex-row justify-between items-center pt-4">
-													<Text className={`text-xl font-bold tracking-tight ${darkTheme ? 'text-white' : 'text-black'}`}>
+													<Text className={`text-xl font-sans-bold tracking-tight ${darkTheme ? 'text-white' : 'text-black'}`}>
 														Total Amount
 													</Text>
-													<Text className={`text-2xl font-bold tracking-tight ${darkTheme ? 'text-accentbg' : 'text-primary'}`}>
-														KSH {finalTotal.toFixed(2)}
+													<Text className={`text-2xl font-sans-bold tracking-tight ${darkTheme ? 'text-accentbg' : 'text-primary'}`}>
+														{formatMoney(finalTotal)}
 													</Text>
 												</View>
 											</View>
@@ -707,7 +791,7 @@ export default function Cart() {
 										<View className={`w-full mt-2 p-4 rounded-2xl border ${darkTheme ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
 											<View className="flex-row items-center gap-2">
 												<Ionicons name="scale-outline" size={18} color="#d97706" />
-												<Text className={`flex-1 text-sm font-medium ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
+												<Text className={`flex-1 text-sm font-sans-medium ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
 													Add {moqShortfallKg.toFixed(0)} kg more to meet the {quote?.moq_kg?.toFixed(0)} kg wholesale minimum
 													({(quote?.total_weight_kg ?? 0).toFixed(0)} / {quote?.moq_kg?.toFixed(0)} kg).
 												</Text>
@@ -718,7 +802,7 @@ export default function Cart() {
 										<View className={`w-full mt-2 p-4 rounded-2xl border ${darkTheme ? 'bg-red-500/10 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
 											<View className="flex-row items-center gap-2">
 												<Ionicons name="location-outline" size={18} color="#ef4444" />
-												<Text className={`flex-1 text-sm font-medium ${darkTheme ? 'text-red-300' : 'text-red-700'}`}>
+												<Text className={`flex-1 text-sm font-sans-medium ${darkTheme ? 'text-red-300' : 'text-red-700'}`}>
 													This vendor is {quote?.distance_km.toFixed(1)} km away — beyond the {quote?.max_distance_km.toFixed(0)} km limit.
 													Choose a closer vendor or update your delivery location.
 												</Text>
@@ -728,7 +812,7 @@ export default function Cart() {
 									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && quoteError && (
 										<PressableScale className="w-full mt-2" onPress={() => refetchQuote()}>
 											<View className={`w-full p-4 rounded-2xl border ${darkTheme ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
-												<Text className={`text-sm font-medium text-center ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
+												<Text className={`text-sm font-sans-medium text-center ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
 													{errorMessage(quoteError, "Couldn't calculate your total.")} Tap to retry.
 												</Text>
 											</View>
@@ -755,8 +839,8 @@ export default function Cart() {
 												{isQuoteLoading ? (
 													<ActivityIndicator color="white" />
 												) : (
-													<Text className={`text-xl font-bold tracking-tight ${canCheckout ? 'text-white' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`}>
-														{canCheckout ? `Checkout • KSH ${finalTotal.toFixed(2)}` : (checkoutBlockedReason || "Checkout unavailable")}
+													<Text className={`text-xl font-sans-bold tracking-tight ${canCheckout ? 'text-white' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`}>
+														{canCheckout ? `Checkout • ${formatMoney(finalTotal)}` : (checkoutBlockedReason || "Checkout unavailable")}
 													</Text>
 												)}
 											</View>
@@ -796,7 +880,7 @@ export default function Cart() {
 						onPress={(e) => e.stopPropagation()}
 					>
 						<View className={`w-full items-center h-[60px] justify-center`}>
-							<Text className={`text-2xl font-semibold ${darkTheme?"text-white":"text-black"}`}>Checkout</Text>
+							<Text className={`text-2xl font-heading-semibold ${darkTheme?"text-white":"text-black"}`}>Checkout</Text>
 						</View>
 						<View className=" py-7 items-center flex-row justify-evenly w-[90%] self-center">
 							<Animated.View className={`w-full flex-row absolute self-center rounded-full gap-2 h-1  m-2`}>
@@ -829,7 +913,7 @@ export default function Cart() {
 														minWidth: width,
 													}}
 												>
-													<Text className={`font-semibold text-xl self-center ${darkTheme?"text-white":""}`}>
+													<Text className={`font-sans-semibold text-xl self-center ${darkTheme?"text-white":""}`}>
 														Payment method
 													</Text>
 													<View className={`px-4 py-2 items-center`}>
@@ -853,19 +937,35 @@ export default function Cart() {
 															</View>
 														</PressableScale>
 
-														{/* Cash on Delivery */}
+														{/* Cash on Delivery.
+														    Offered only when the server says so. The rules —
+														    a first completed order, a value ceiling, a
+														    distance limit — are settings rows, so the app
+														    neither restates them nor guesses: it renders the
+														    server's own sentence. Letting somebody pick cash
+														    and be refused after entering a phone number is
+														    the same refusal with a wasted trip attached. */}
 														<PressableScale
-															activeOpacity={0.6}
+															activeOpacity={cashAvailable ? 0.6 : 1}
+															disabled={!cashAvailable}
+															accessibilityState={{ disabled: !cashAvailable }}
 															className="flex-1 h-[60px] justify-center items-center max-w-[160px]"
 															onPress={() => {
+																if (!cashAvailable) {
+																	Toast.info("Cash not available", cashReason ?? "")
+																	return
+																}
 																setPaymentMethod("cash")
 																nextPage()
 																setModalPage(2)
 															}}
 														>
-															<View className={`w-full h-full justify-center items-center rounded-2xl border ${darkTheme ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}>
+															<View
+																className={`w-full h-full justify-center items-center rounded-2xl border ${darkTheme ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+																style={cashAvailable ? undefined : { opacity: 0.45 }}
+															>
 																<Ionicons name="cash-outline" size={24} color={BRAND.primary} />
-																<Text className={`font-bold mt-1 text-xs ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>Cash on Delivery</Text>
+																<Text className={`font-sans-bold mt-1 text-xs ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>Cash on Delivery</Text>
 															</View>
 														</PressableScale>
 													</View>
@@ -881,13 +981,13 @@ export default function Cart() {
 														PaymentMethod == "mpesa" && (
 															<View className={`w-full  items-center gap-4`}>
 																<Image source={images.mpesa_logo} className="h-[40px] w-[100px]" resizeMode="contain"/>
-																<Text className={`text-base font-semibold ${darkTheme?"text-white":""}`}>
+																<Text className={`text-base font-sans-semibold ${darkTheme?"text-white":""}`}>
 																	Enter your Phone Number:
 																</Text>
 
 																<View className={`px-5 flex-row h-[50px] min-w-[250px] gap-2 items-center rounded-full ${darkTheme?"bg-gray-200/20":"bg-white"}`}>
 																	<Ionicons name="call" size={20} color={BRAND.primary} />
-																	<Text className={`text-base font-semibold ${darkTheme?"text-white":""}`}>+254</Text>
+																	<Text className={`text-base font-sans-semibold ${darkTheme?"text-white":""}`}>+254</Text>
 																	<TextInput
 																		placeholder="712345678"
 																		placeholderTextColor={darkTheme ? "#888" : "#A0AEC0"}
@@ -939,7 +1039,7 @@ export default function Cart() {
 																					<ActivityIndicator size="small" color={darkTheme ? BRAND.bgDark : BRAND.white} />
 																				</View>
 																			) : (
-																				<Text className={`font-bold text-xl ${darkTheme?"":"text-white"}`}>Continue</Text>
+																				<Text className={`font-sans-bold text-xl ${darkTheme?"":"text-white"}`}>Continue</Text>
 																			)}
 																		</View>
 																	</PressableScale>
@@ -953,11 +1053,11 @@ export default function Cart() {
 																<View className={`w-16 h-16 rounded-full items-center justify-center mb-2 ${darkTheme ? "bg-slate-800" : "bg-green-50"}`}>
 																	<Ionicons name="cash" size={32} color={BRAND.primary} />
 																</View>
-																<Text className={`text-xl font-bold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
+																<Text className={`text-xl font-sans-bold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
 																	Pay with Cash
 																</Text>
 																<Text className={`text-center text-base mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-																	You will pay <Text className="font-bold">KSH {finalTotal.toFixed(2)}</Text> in cash to the rider upon delivery.
+																	You will pay <Text className="font-sans-bold">{formatMoney(finalTotal)}</Text> in cash to the rider upon delivery.
 																</Text>
 																
 																<View className={` flex-row justify-center gap-3 w-full`}>
@@ -983,7 +1083,7 @@ export default function Cart() {
 																			{PaymentLoading ? (
 																				<ActivityIndicator size="small" color={BRAND.white} />
 																			) : (
-																				<Text className={`font-bold text-lg text-white`}>Place Order</Text>
+																				<Text className={`font-sans-bold text-lg text-white`}>Place Order</Text>
 																			)}
 																		</View>
 																	</PressableScale>
@@ -999,7 +1099,7 @@ export default function Cart() {
 													}}
 												>
 													<View className={`w-full items-center gap-5 py-3`}>
-														<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>Confirmation</Text>
+														<Text className={`text-xl font-sans-semibold ${darkTheme?"text-white":""}`}>Confirmation</Text>
 														{paymentTimedOut ? (
 															// The customer is never stranded: after the polling window closes
 															// the order still exists and can be checked again or opened in
@@ -1018,7 +1118,7 @@ export default function Cart() {
 																	}}
 																>
 																	<View className={`h-[40px] min-w-[200px] items-center justify-center px-6 rounded-full bg-green-500`}>
-																		<Text className="font-bold text-lg text-white">Check again</Text>
+																		<Text className="font-sans-bold text-lg text-white">Check again</Text>
 																	</View>
 																</PressableScale>
 																<PressableScale
@@ -1031,7 +1131,7 @@ export default function Cart() {
 																			: "/(screens)/Orders");
 																	}}
 																>
-																	<Text className={`text-base font-medium underline ${darkTheme?"text-gray-300":"text-gray-600"}`}>
+																	<Text className={`text-base font-sans-medium underline ${darkTheme?"text-gray-300":"text-gray-600"}`}>
 																		View my order
 																	</Text>
 																</PressableScale>
@@ -1056,7 +1156,7 @@ export default function Cart() {
 																		<ActivityIndicator size="small" color={darkTheme ? BRAND.bgDark : BRAND.white} />
 																	</View>
 																) : (
-																	<Text className={`font-bold text-xl ${darkTheme?"":"text-white"}`}>Confirm</Text>
+																	<Text className={`font-sans-bold text-xl ${darkTheme?"":"text-white"}`}>Confirm</Text>
 																)}
 															</View>
 														</PressableScale>
@@ -1073,7 +1173,7 @@ export default function Cart() {
 										}}
 									>
 										<View className={`rounded-full px-6 py-2 bg-blue-500`}>
-											<Text className={`font-bold text-xl ${darkTheme?"text-black":"text-white"}`}>Next</Text>
+											<Text className={`font-sans-bold text-xl ${darkTheme?"text-black":"text-white"}`}>Next</Text>
 										</View>
 									</PressableScale> */}
 								</View>
@@ -1089,7 +1189,7 @@ export default function Cart() {
 						<View className="h-[160px] w-[160px] items-center justify-center bg-green-500 rounded-full shadow-xl ">
 							<Ionicons name="checkmark-circle" size={24} color={BRAND.white} />
 						</View>
-						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>Transaction was completed successfully.</Text>
+						<Text className={`text-xl font-sans-semibold ${darkTheme?"text-white":""}`}>Transaction was completed successfully.</Text>
 						<View className={`gap-4 flex-row `}>
 							<PressableScale
 								activeOpacity={0.6}
@@ -1097,7 +1197,7 @@ export default function Cart() {
 									router.push("/(screens)")
 								}}
 							>
-								<Button style={`rounded-full ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Continue Shopping "} textStyle={`font-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
+								<Button style={`rounded-full ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Continue Shopping "} textStyle={`font-sans-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
 							</PressableScale>
 							<PressableScale
 								activeOpacity={0.6}
@@ -1105,7 +1205,7 @@ export default function Cart() {
 									router.push("/(screens)/Orders")
 								}}
 							>
-								<Button style={"bg-primary rounded-full"} label={"See Order "} textStyle={`font-semibold text-lg text-white`}/>
+								<Button style={"bg-primary rounded-full"} label={"See Order "} textStyle={`font-sans-semibold text-lg text-white`}/>
 							</PressableScale>
 							
 						</View>
@@ -1120,8 +1220,8 @@ export default function Cart() {
 						<View className="h-[100px] w-[100px] items-center justify-center bg-red-500 rounded-full shadow-xl ">
 							<Ionicons name="close" size={24} color={BRAND.white} />
 						</View>
-						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}>{ErrorMessage}</Text>
-						<Text className={`text-xl font-semibold ${darkTheme?"text-white":""}`}></Text>
+						<Text className={`text-xl font-sans-semibold ${darkTheme?"text-white":""}`}>{ErrorMessage}</Text>
+						<Text className={`text-xl font-sans-semibold ${darkTheme?"text-white":""}`}></Text>
 						<View className={`gap-4 flex-row `}>
 							<PressableScale
 								activeOpacity={0.6}
@@ -1130,7 +1230,7 @@ export default function Cart() {
 									setErrorModal(false)
 								}}
 							>
-								<Button style={`rounded-full px-5 ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Cancel"} textStyle={`font-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
+								<Button style={`rounded-full px-5 ${darkTheme?"bg-gray-200/20":"bg-white"}`} label={"Cancel"} textStyle={`font-sans-semibold text-lg ${darkTheme?"text-white":"text-black"}`}/>
 							</PressableScale>
 							<PressableScale
 								activeOpacity={0.6}
@@ -1140,7 +1240,7 @@ export default function Cart() {
 									setModalPage(3);
 								}}
 							>
-								<Button style={"bg-primary rounded-full px-5"} label={"Re-try"} textStyle={`font-semibold text-lg text-white`}/>
+								<Button style={"bg-primary rounded-full px-5"} label={"Re-try"} textStyle={`font-sans-semibold text-lg text-white`}/>
 							</PressableScale>
 							
 						</View>

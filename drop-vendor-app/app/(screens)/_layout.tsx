@@ -89,6 +89,7 @@ export default function ScreensLayout() {
         <Stack.Screen name="WalletScreen" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="Transactions" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="BottleReconciliation" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="BottleLedger" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="MyMap" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="AddProduct" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="Notifications" options={{ animation: 'slide_from_right' }} />

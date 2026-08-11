@@ -12,15 +12,15 @@ import { useRiderProfile, useRiderEarnings, useRiderOrders, useTripRadar } from 
 import { useRiderStore } from "@/stores/useRiderStore";
 import {
     RefreshControl,
-    ScrollView, 
+    ScrollView,
     StatusBar,
-    Text,
     View,
     TouchableWithoutFeedback,
     Keyboard,
     Linking,
     Platform,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useUnreadNotificationCount } from "@/hooks/queries/useNotifications";
@@ -235,7 +235,7 @@ export default function Dashboard() {
           <Ionicons name={icon} size={24} color={BRAND.primary} />
         </View>
         <View className="flex-1">
-          <Text className={`font-bold text-base ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
+          <Text className={`font-sans-bold text-base ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
           <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{subtitle}</Text>
         </View>
         <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -271,9 +271,9 @@ export default function Dashboard() {
                 <Ionicons name="location" size={24} color={BRAND.primary} />
                 <View className="flex-col justify-center">
                   <View className="flex-row items-center gap-1">
-                    <Text className={`text-xs font-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Working Zone</Text>
+                    <Text className={`text-xs font-sans-medium ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Working Zone</Text>
                   </View>
-                  <Text numberOfLines={1} className={`text-sm font-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                  <Text numberOfLines={1} className={`text-sm font-sans-bold max-w-[150px] ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
                     {operationAddress}
                   </Text>
                 </View>
@@ -288,7 +288,7 @@ export default function Dashboard() {
                 <View className="relative w-10 h-10 items-center justify-center">
                   {unreadCount > 0 && (
                     <View className="absolute z-10 top-0 right-0 bg-red-500 items-center justify-center min-w-[18px] h-[18px] rounded-full px-1">
-                      <Text className="text-white font-bold text-[10px]">
+                      <Text className="text-white font-sans-bold text-[10px]">
                         {unreadCount > 99 ? "99+" : unreadCount}
                       </Text>
                     </View>
@@ -327,12 +327,12 @@ export default function Dashboard() {
               <SwipeToGoOnline isOnline={isOnline} onToggle={toggleOnline} isLoading={isToggling} />
             ) : (
               <View className={`mx-5 mb-4 mt-2 p-5 rounded-2xl border ${darkTheme ? "bg-[#1A1A1A] border-gray-800" : "bg-white border-gray-200"}`}>
-                <Text className={`font-bold text-lg mb-1 ${darkTheme ? "text-white" : "text-black"}`}>Vendor Required</Text>
+                <Text className={`font-sans-bold text-lg mb-1 ${darkTheme ? "text-white" : "text-black"}`}>Vendor Required</Text>
                 <Text className={`text-sm mb-4 ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
                   To receive deliveries, you must apply and be accepted by a water vendor in your zone.
                 </Text>
                 <PressableScale onPress={() => router.push("/(screens)/DiscoverVendors")} className="bg-primary py-3 rounded-xl items-center">
-                  <Text className="text-white font-bold text-base">Find a Vendor</Text>
+                  <Text className="text-white font-sans-bold text-base">Find a Vendor</Text>
                 </PressableScale>
               </View>
             )}
@@ -342,7 +342,7 @@ export default function Dashboard() {
               <View className={`mx-5 mb-2 mt-2 p-4 rounded-2xl flex-row items-center gap-3 ${darkTheme ? "bg-yellow-500/10 border border-yellow-500/20" : "bg-yellow-50 border border-yellow-200"}`}>
                 <Text style={{ fontSize: 22 }}>⚠️</Text>
                 <View className="flex-1">
-                  <Text className={`font-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
+                  <Text className={`font-sans-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
                     You are Offline
                   </Text>
                   <Text className={`text-xs mt-0.5 ${darkTheme ? "text-yellow-400/70" : "text-yellow-600"}`}>
@@ -363,7 +363,7 @@ export default function Dashboard() {
 
             {/* Quick Actions */}
             <View className="px-5 mt-4">
-              <Text className={`font-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Quick Actions</Text>
+              <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Quick Actions</Text>
               <View className="gap-3">
                 <QuickActionCard title="Discover Vendors" subtitle="Find water distribution points" icon="business-outline" route="/(screens)/DiscoverVendors" />
                 <QuickActionCard title="Withdraw Earnings" subtitle="Transfer funds directly to M-Pesa" icon="cash-outline" route="/(screens)/Cashout" />

@@ -5,6 +5,7 @@ import { Badge, Card, CardHeader, ErrorState } from "@/components/ui/primitives"
 import { ApiError, get } from "@/lib/api/server";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import { formatDateTime } from "@/lib/utils/format";
+import { PriorityControl } from "./PriorityControl";
 import { TicketThread, type Message } from "./TicketThread";
 
 export const metadata = { title: "Ticket" };
@@ -60,6 +61,13 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         ? PERMISSIONS.ridersRead
         : PERMISSIONS.vendorsRead,
   );
+
+  // Gated for the same reason the name above it is. Both stock presets that
+  // reach this screen happen to carry `orders.read`, but **roles are presets,
+  // not authority** — permissions are edited per administrator, and a link that
+  // walks someone into a refusal is the failure the courtesy layer exists to
+  // avoid. The id itself is not hidden; only the link to a page they cannot open.
+  const canOpenOrder = can(me, PERMISSIONS.ordersRead);
 
   return (
     <div className="space-y-6">
@@ -128,18 +136,34 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
                 />
               ) : null}
             </dl>
+            <div className="border-t border-default">
+              <PriorityControl
+                ticketId={ticket.id}
+                priority={ticket.priority}
+                canRespond={can(me, PERMISSIONS.supportRespond)}
+              />
+            </div>
           </Card>
 
           {ticket.related_order_id ? (
             <Card>
               <CardHeader title="Related order" />
               <div className="px-5 py-4 text-sm">
-                <Link
-                  href="/operations/orders"
-                  className="font-mono text-[var(--accent)] underline underline-offset-4"
-                >
-                  {ticket.related_order_id.slice(0, 8)}
-                </Link>
+                {/* Carries the id. This linked to the bare queue, so an agent
+                    answering "where is my order" landed on an unfiltered board
+                    with the one thing they needed sitting on the screen behind
+                    them. `view=all` because the default board is "stuck" and a
+                    delivered order is not on it. */}
+                {canOpenOrder ? (
+                  <Link
+                    href={`/operations/orders?view=all&q=${ticket.related_order_id}`}
+                    className="font-mono text-[var(--accent)] underline underline-offset-4"
+                  >
+                    {ticket.related_order_id.slice(0, 8)}
+                  </Link>
+                ) : (
+                  <span className="font-mono">{ticket.related_order_id.slice(0, 8)}</span>
+                )}
               </div>
             </Card>
           ) : null}

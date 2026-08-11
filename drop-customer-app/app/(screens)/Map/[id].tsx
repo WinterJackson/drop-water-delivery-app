@@ -1,6 +1,5 @@
 // url : /(screens)/Maps/lat=lat%lng=lng%id=id
 
-
 import { useCallback, useContext, useEffect, useState, useRef as useReactRef } from "react";
 import {
     ActivityIndicator,
@@ -10,11 +9,10 @@ import {
     ScrollView,
     StatusBar,
     StyleSheet,
-    Text,
-    TextInput,
     TouchableWithoutFeedback,
-    View
+    View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 
@@ -48,7 +46,6 @@ if (Platform.OS !== 'web') {
     GestureHandlerRootViewComponent = ({ children }: any) => <div>{children}</div>;
 }
 
-import ApiRoutes from "@/API/routes/ApiRoutes";
 import MiniOrderCard from "@/components/common/MiniOrderCard";
 import MiniVendorCard from "@/components/common/MiniVendorCard";
 import OngoingOrderCard from "@/components/common/OngoingOrderCard";
@@ -79,9 +76,6 @@ import {
     GestureDetector,
 } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
-
-
-
 
 const { width, height } = Dimensions.get("window");
 const MAP_DIMENSIONS = {
@@ -504,7 +498,6 @@ type Vendor = {
 	location_address: string;
 	lat: number;
 	lng: number;
-	delivery_radius: number;
 	shift_start: string; // e.g. "07:00:00"
 	shift_end: string; // e.g. "19:00:00"
 	verification_status: "pending" | "verified" | "rejected"; // enum-like union
@@ -530,7 +523,6 @@ export default function Maps() {
 	// Support both | and % for backward compatibility with existing links
 	const separator = actualParams.includes("|") ? "|" : "%";
 	const pathVariables = actualParams.split(separator);
-
 
 	const pathLat = Number(pathVariables?.[0]?.split("=")[1]) || 1;
 	const pathlng = Number(pathVariables?.[1]?.split("=")[1]) || 1;
@@ -572,7 +564,6 @@ export default function Maps() {
     const { data: User, isPending: loadingUser, refetch: refetchUser } = useUserDetails();
     const { isLoaded, isSignedIn } = useAuth();
     const Loading = vendorsLoading;
-
 
 	// if(User === undefined || User === null){
 	// 	fetchUserDetails()
@@ -759,7 +750,6 @@ const initialRegion: import("@/types/models").MapRegion = {
 	// Gesture handler — passthrough (no fling expand/collapse needed for setLocation mode)
 	const flingGesture = Gesture.Fling().direction(Directions.UP).enabled(false);
 
-
 	// >---->> FETCHING DATA FROM BACKEND
     useEffect(() => {
         if (!allVendors || allVendors.length === 0) return;
@@ -813,7 +803,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 				<View
 					className={`w-[45px] h-[45px] items-center justify-center rounded-full border-2 border-accentbg bg-black `}
 				>
-					<Text className="text-accentbg font-semibold">
+					<Text className="text-accentbg font-sans-semibold">
 						{item.properties.point_count}
 					</Text>
 				</View>
@@ -1027,14 +1017,14 @@ const initialRegion: import("@/types/models").MapRegion = {
 									className={`w-6 h-6 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}
 									style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
 								>
-									<Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>+</Text>
+									<Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>+</Text>
 								</PressableScale>
 								<PressableScale
 									onPress={() => handleZoom(false)}
 									className={`w-6 h-6 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}
 									style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
 								>
-									<Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>−</Text>
+									<Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>−</Text>
 								</PressableScale>
 							</View>
 						</View>
@@ -1057,10 +1047,10 @@ const initialRegion: import("@/types/models").MapRegion = {
 										}}
 									>
 										<View className={`px-6 py-3 ${darkTheme?"bg-black":"bg-white"} rounded-full`}>
-											<Text className={`text-accentbg font-bold`}>Track Orders</Text>
+											<Text className={`text-accentbg font-sans-bold`}>Track Orders</Text>
 										</View>
 									</PressableScale>
-									<PressableScale 
+									<PressableScale accessibilityLabel="Leave the full-screen map" 
 										activeOpacity={0.6}
 										onPress={()=>{
 											collapseFullscreenMap()
@@ -1091,7 +1081,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 						>
 							<View className="relative self-center max-w-[400px] ">
 								<View className="absolute -top-14 right-0  items-center gap-3 flex-row">
-									<PressableScale 
+									<PressableScale accessibilityLabel="Leave the full-screen map and hide this order" 
 										activeOpacity={0.6}
 										onPress={()=>{ 
 											collapseFullscreenMap()
@@ -1109,7 +1099,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 										</View>
 									</PressableScale>
 								</View>
-								<MiniOrderCard/>
+								<MiniOrderCard data={activeSession} />
 							</View>
 						</View>
 					)}
@@ -1148,7 +1138,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 								</PressableScale>
 
 								{/* <---------------------CENTER USER LOCATION TOGGLE-----------------------> */}
-								<PressableScale
+								<PressableScale accessibilityLabel="Centre the map on my location"
 									className="absolute -top-14 right-4"
 									onPress={async () => {
 										try {
@@ -1191,7 +1181,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 										<View className="gap-4 p-3 pb-8">
 											{/* Header */}
 											<View className="gap-1">
-												<Text className={`font-bold text-xl ${darkTheme?"text-on-surface":"text-gray-900"}`}>Set Delivery Location</Text>
+												<Text className={`font-sans-bold text-xl ${darkTheme?"text-on-surface":"text-gray-900"}`}>Set Delivery Location</Text>
 												<Text className={`text-sm ${darkTheme?"text-on-surface-variant":"text-gray-500"}`}>Pan the map to pinpoint your exact delivery location.</Text>
 											</View>
 
@@ -1205,7 +1195,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 															<Text className={`text-sm ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Finding address...</Text>
 														</View>
 													) : (
-														<Text numberOfLines={2} className={`text-sm font-medium ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+														<Text numberOfLines={2} className={`text-sm font-sans-medium ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
 															{liveAddress || "Move the map to select location"}
 														</Text>
 													)}
@@ -1215,7 +1205,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 											{/* Saved Locations (Uber-style recent addresses) */}
 											{savedLocations.length > 0 && (
 												<View className="gap-2">
-													<Text className={`text-xs font-semibold uppercase tracking-wider ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Saved Locations</Text>
+													<Text className={`text-xs font-sans-semibold uppercase tracking-wider ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Saved Locations</Text>
 													{savedLocations.slice(0, 4).map((loc: import("@/types/models").SavedLocation) => (
 														<PressableScale
 															key={loc.id}
@@ -1235,7 +1225,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 																	<Text className="text-base">{loc.label === "Home" ? "🏠" : loc.label === "Work" ? "💼" : "📍"}</Text>
 																</View>
 																<View className="flex-1">
-																	{loc.label && <Text className={`text-xs font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{loc.label}</Text>}
+																	{loc.label && <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{loc.label}</Text>}
 																	<Text numberOfLines={1} className={`text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}>{loc.address}</Text>
 																</View>
 															</View>
@@ -1248,7 +1238,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 											<View className="gap-3 mt-1 mb-2">
 												<View className={`flex-row items-center justify-between p-3.5 rounded-xl ${darkTheme ? "bg-surface-container" : "bg-white"} border ${darkTheme ? "border-outline-variant" : "border-gray-200"}`}>
 													<View className="flex-1">
-														<Text className={`text-sm font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Floor Level</Text>
+														<Text className={`text-sm font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Floor Level</Text>
 														<Text className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>0 for Ground Floor</Text>
 													</View>
 													<TextInput
@@ -1257,14 +1247,14 @@ const initialRegion: import("@/types/models").MapRegion = {
 														keyboardType="number-pad"
 														placeholder="0"
 														placeholderTextColor={darkTheme ? "#9ca3af" : "#6b7280"}
-														className={`w-16 h-10 px-3 rounded-lg border text-center font-bold text-base ${darkTheme ? "bg-surface text-white border-outline" : "bg-white text-black border-gray-300"}`}
+														className={`w-16 h-10 px-3 rounded-lg border text-center font-sans-bold text-base ${darkTheme ? "bg-surface text-white border-outline" : "bg-white text-black border-gray-300"}`}
 													/>
 												</View>
 
 												{parseInt(floorLevel || "0") > 2 && (
 													<View className={`flex-row items-center justify-between p-3.5 rounded-xl ${darkTheme ? "bg-surface-container" : "bg-white"} border ${darkTheme ? "border-outline-variant" : "border-gray-200"}`}>
 														<View className="flex-1">
-															<Text className={`text-sm font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Building has Elevator?</Text>
+															<Text className={`text-sm font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Building has Elevator?</Text>
 															<Text className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Helps rider prepare for delivery</Text>
 														</View>
 														<PressableScale
@@ -1286,7 +1276,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 													{isConfirmingLocation ? (
 														<ActivityIndicator color={BRAND.white} />
 													) : (
-														<Text className="text-white font-bold text-lg">Confirm Location</Text>
+														<Text className="text-white font-sans-bold text-lg">Confirm Location</Text>
 													)}
 												</View>
 											</PressableScale>
@@ -1295,7 +1285,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 
 									{dataShown === "orders" && (
 										<View className="gap-2 p-3">
-											<Text className={`font-semibold text-xl ${darkTheme?"text-white":"text-black"}`}>Ongoing Orders</Text>
+											<Text className={`font-sans-semibold text-xl ${darkTheme?"text-white":"text-black"}`}>Ongoing Orders</Text>
 											{activeSession ? (
 												<OngoingOrderCard 
 													data={activeSession} 
@@ -1308,7 +1298,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 											)}
 											<View className={`py-3 gap-2`}>
 												<View className={`flex-row w-full justify-between items-center`}>
-													<Text className={`font-semibold text-xl ${darkTheme?"text-white":"text-black"}`}>Order History</Text>
+													<Text className={`font-sans-semibold text-xl ${darkTheme?"text-white":"text-black"}`}>Order History</Text>
 													<PressableScale
 														activeOpacity={0.7}
 														onPress={()=>{
@@ -1316,7 +1306,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 														}}
 													>
 														<View className={`px-3 py-2 flex-row gap-2 items-center rounded-full ${darkTheme?"bg-gray-200/10":"bg-white"}`}> 
-															<Text className={`font-semibold ${darkTheme?"text-gray-400":"text-gray-600"}`}>See all</Text>
+															<Text className={`font-sans-semibold ${darkTheme?"text-gray-400":"text-gray-600"}`}>See all</Text>
 															<Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
 														</View>
 													</PressableScale>
@@ -1352,5 +1342,4 @@ const initialRegion: import("@/types/models").MapRegion = {
 		</>
 	);
 }
-
 

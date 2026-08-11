@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
-import { Modal, View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { Modal, View, TouchableOpacity, ActivityIndicator } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
 import * as Haptics from "expo-haptics";
@@ -52,7 +53,7 @@ export default function PopupModal() {
                 <View 
                     className={`w-full max-w-sm rounded-[24px] p-6 shadow-lg ${darkTheme ? "bg-gray-900 border border-gray-800" : "bg-white"}`}
                 >
-                    <Text className={`text-xl font-bold mb-3 text-center ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-xl font-sans-bold mb-3 text-center ${darkTheme ? "text-white" : "text-black"}`}>
                         {title}
                     </Text>
                     
@@ -68,7 +69,7 @@ export default function PopupModal() {
                                 onPress={handleCancel} 
                                 className={`flex-1 py-3.5 items-center rounded-xl border ${darkTheme ? "border-gray-700 bg-gray-800" : "border-gray-300 bg-white"}`}
                             >
-                                <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
+                                <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
                                     {cancelText}
                                 </Text>
                             </TouchableOpacity>
@@ -84,7 +85,7 @@ export default function PopupModal() {
                             {isLoading ? (
                                 <ActivityIndicator color={BRAND.white} />
                             ) : (
-                                <Text className="text-white font-bold text-lg">
+                                <Text className="text-white font-sans-bold text-lg">
                                     {confirmText}
                                 </Text>
                             )}

@@ -1,7 +1,8 @@
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TextInput, ActivityIndicator } from "react-native";
+import { View, ScrollView, ActivityIndicator } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -62,10 +63,9 @@ export default function PersonalDetails() {
         }
     };
 
-
     const InputField = ({ label, value, onChangeText = () => {}, keyboardType = "default", editable = true, maxLength }: InputFieldProps) => (
         <View className="mb-5">
-            <Text className={`font-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+            <Text className={`font-sans-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                 {label}
             </Text>
             <View className={`px-4 py-3 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"} ${!editable ? "opacity-50" : ""}`}>
@@ -99,7 +99,7 @@ export default function PersonalDetails() {
                 <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Personal Details
                 </Text>
             </View>
@@ -113,12 +113,12 @@ export default function PersonalDetails() {
                 <InputField label="Phone Number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={15} />
 
                 {/* ── Address Anti-Fraud Details ── */}
-                <Text className={`font-semibold mt-4 mb-4 text-lg ${darkTheme ? "text-white" : "text-black"}`}>Delivery Details</Text>
+                <Text className={`font-sans-semibold mt-4 mb-4 text-lg ${darkTheme ? "text-white" : "text-black"}`}>Delivery Details</Text>
                 
                 <InputField label="Floor Level (0 = Ground Floor)" value={String(floor)} onChangeText={(text: string) => setFloor(parseInt(text) || 0)} keyboardType="number-pad" maxLength={3} />
                 
                 <View className={`flex-row justify-between items-center mb-5 px-4 py-3 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
-                    <Text className={`text-base font-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Has Elevator</Text>
+                    <Text className={`text-base font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Has Elevator</Text>
                     <PressableScale onPress={() => setHasElevator(!hasElevator)} className={`w-14 h-8 rounded-full justify-center px-1 ${hasElevator ? "bg-sky-500" : (darkTheme ? "bg-gray-700" : "bg-gray-300")}`}>
                         <Animated.View className="w-6 h-6 rounded-full bg-white" style={elevatorToggleStyle} />
                     </PressableScale>
@@ -133,7 +133,7 @@ export default function PersonalDetails() {
                         {isSaving ? (
                             <ActivityIndicator color={BRAND.white} />
                         ) : (
-                            <Text className="text-white text-lg font-bold">Save Changes</Text>
+                            <Text className="text-white text-lg font-sans-bold">Save Changes</Text>
                         )}
                     </View>
                 </PressableScale>

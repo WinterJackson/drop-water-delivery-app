@@ -53,11 +53,20 @@ async def fetch_payouts(
 # These are called by Safaricom servers when a B2C transaction completes or times out.
 
 async def _reconcile_wallet_transaction(session, conversation_id: str, success: bool, result_desc: str, mpesa_receipt: str | None):
-    from sqlalchemy.future import select
-    from models.wallet_transaction_model import WalletTransaction, TransactionStatus, UserType
+    """Settle a wallet withdrawal from Safaricom's B2C result.
+
+    The `status == processing` filter plus `FOR UPDATE` is the replay guard:
+    Safaricom retries this callback, and a second refund would mint money.
+    """
+    from models.wallet_transaction_model import (
+        TransactionStatus,
+        TransactionType,
+        WalletTransaction,
+    )
     from models.user_model import User
     from models.vendor_model import Vendor
     from models.deliverer_model import Deliverer
+    from services.wallet_service import _locked_wallet_owner, apply_wallet_delta
 
     stmt = select(WalletTransaction).where(
         WalletTransaction.reference_id == conversation_id,
@@ -71,14 +80,35 @@ async def _reconcile_wallet_transaction(session, conversation_id: str, success: 
         tx.status = TransactionStatus.completed
         tx.mpesa_receipt_number = mpesa_receipt
     else:
-        # Real payout failed after we'd already deducted the wallet balance — refund it now.
+        # The disbursement never landed, and the balance was debited when the
+        # withdrawal was raised — so it has to come back.
         model = {"vendor": Vendor, "rider": Deliverer, "customer": User}[tx.user_type.value]
-        result = await session.execute(select(model).where(model.clerk_id == tx.user_id).with_for_update())
-        user = result.scalars().first()
-        if user:
+        # By `wallet_owner_id`, not by clerk id: an owner with two stores has two
+        # balances, and this used to credit whichever row came back first.
+        owner = await _locked_wallet_owner(session, model, tx)
+        if owner:
+            # Through `apply_wallet_delta`, so the return is a ledger row the
+            # provider can see. This was a bare `wallet_balance = … - …`: the
+            # money reappeared with nothing in the history to account for it, on
+            # the one event a provider is most likely to query.
+            #
             # `tx.amount` is signed and this was a debit, so returning it means
-            # subtracting a negative. Decimal, not float — this is money.
-            user.wallet_balance = Decimal(str(user.wallet_balance or 0)) - Decimal(str(tx.amount))
+            # negating it. Decimal, not float — this is money.
+            await apply_wallet_delta(
+                session,
+                owner=owner,
+                clerk_id=tx.user_id,
+                user_type=tx.user_type.value,
+                amount=-Decimal(str(tx.amount)),
+                transaction_type=TransactionType.refund,
+                description=f"Withdrawal failed, amount returned ({result_desc})",
+                reference_id=str(tx.id),
+            )
+        else:
+            logger.error(
+                "B2C failure for transaction %s could not be refunded: owner not found.",
+                tx.id,
+            )
         tx.status = TransactionStatus.failed
         tx.failure_reason = result_desc
 
@@ -112,7 +142,6 @@ async def b2c_result_callback(request: Request, session: AsyncSession = Depends(
             return {"message": "Wallet transaction reconciled"}
 
         # Find the payout record by ConversationID
-        from sqlalchemy.future import select
         from models.payout_model import Payout
         # Lock it: Safaricom retries this callback, and the failure branch now
         # refunds the balance. Two concurrent deliveries of the same result must
@@ -234,7 +263,6 @@ async def b2c_timeout_callback(request: Request, session: AsyncSession = Depends
             if handled:
                 return {"message": "Wallet transaction timeout reconciled"}
 
-            from sqlalchemy.future import select
             from models.payout_model import Payout
             stmt = select(Payout).where(Payout.conversation_id == conversation_id)
             result_row = await session.execute(stmt)

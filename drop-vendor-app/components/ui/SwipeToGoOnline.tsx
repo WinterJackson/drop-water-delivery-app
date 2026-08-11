@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo } from 'react';
-import { View, Text, useWindowDimensions, ActivityIndicator } from 'react-native';
+import { View, useWindowDimensions, ActivityIndicator } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -169,7 +170,7 @@ export default function SwipeToGoOnline({ isOnline, onToggle, isLoading }: Swipe
         >
           {/* Background Text */}
           <View style={{ position: 'absolute', width: '100%', alignItems: 'center' }}>
-            <Animated.Text style={[textStyle, { fontSize: 16, fontWeight: '700', letterSpacing: 0.5 }]}>
+            <Animated.Text style={[textStyle, { fontSize: 16, fontFamily: 'Karla_700Bold', letterSpacing: 0.5 }]}>
               {isLoading ? 'Updating...' : (isOnline ? 'You are Online' : 'Swipe to go Online')}
             </Animated.Text>
           </View>

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber } from "@/lib/utils/format";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Fleet" };
 
@@ -78,6 +80,13 @@ type Payload = {
 };
 
 export default async function FleetPage() {
+  // Gated on the capability `nav-config` declares for `/people/fleet` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/people/fleet");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   let data: Payload;
   try {
     data = await get<Payload>("/api/admin/fleet");

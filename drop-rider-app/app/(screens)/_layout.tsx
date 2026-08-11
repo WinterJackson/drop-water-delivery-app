@@ -9,7 +9,8 @@ import { Stack, usePathname, useRouter, Redirect } from "expo-router";
 import { useContext, useEffect } from "react";
 import { useRiderStore } from "@/stores/useRiderStore";
 import { PressableScale } from "@/components/ui/PressableScale";
-import { ActivityIndicator, Dimensions, View, Text } from "react-native";
+import { ActivityIndicator, Dimensions, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -97,7 +98,7 @@ export default function ScreensLayout() {
     return (
       <View className="flex-1 items-center justify-center px-6" style={{ backgroundColor: bg }}>
         <Ionicons name="cloud-offline-outline" size={48} color={BRAND.primary} />
-        <Text className={`text-lg font-bold text-center mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
+        <Text className={`text-lg font-sans-bold text-center mt-4 ${darkTheme ? "text-white" : "text-black"}`}>
           Can't confirm your verification
         </Text>
         <Text className={`text-sm text-center mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -111,7 +112,7 @@ export default function ScreensLayout() {
         >
           {isFetching
             ? <ActivityIndicator size="small" color="#fff" />
-            : <Text className="text-white font-bold">Try again</Text>}
+            : <Text className="text-white font-sans-bold">Try again</Text>}
         </PressableScale>
         <PressableScale
           onPress={async () => {
@@ -121,7 +122,7 @@ export default function ScreensLayout() {
           }}
           className="mt-4 p-2"
         >
-          <Text className="text-accentbg font-bold">Sign out</Text>
+          <Text className="text-accentbg font-sans-bold">Sign out</Text>
         </PressableScale>
       </View>
     );
@@ -131,7 +132,12 @@ export default function ScreensLayout() {
   // waiting four days on KYC is exactly the person who needs to ask why. Sending
   // them back to the wall they are already stuck behind leaves them with the app
   // store review page as their only way to reach anybody.
-  const allowedWhileUnverified = ["VerificationWall", "Support"];
+  //
+  // `SupportTicket` is listed even though the match below is a substring one
+  // that already lets it through — reading the *answer* matters at least as much
+  // as asking the question, and relying on one screen's name being a prefix of
+  // the other's is a rename away from stranding exactly this rider.
+  const allowedWhileUnverified = ["VerificationWall", "Support", "SupportTicket"];
 
   if (
     statusData?.kyc_status !== "approved" &&
@@ -193,7 +199,6 @@ export default function ScreensLayout() {
           style={{ bottom: insets.bottom + 8 }}
         >
 
-
           <View 
             className={`rounded-full px-4 flex-row justify-around items-center w-full max-w-[350px] h-[64px] ${ darkTheme? "bg-surface-container border" : "bg-white border border-gray-100"}`}
             style={darkTheme ? { borderColor: 'rgba(255,255,255,0.1)' } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
@@ -223,7 +228,6 @@ export default function ScreensLayout() {
               </PressableScale>
             )}
             
-
 
             {/* Profile */}
             <PressableScale onPress={() => router.push("/(screens)/Profile")}>

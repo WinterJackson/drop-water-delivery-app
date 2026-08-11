@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from uuid import UUID
 from typing import Optional, List, Literal
 from utils.serializers import safe_serialize
+from utils.money import money_str
 from schemas.order_schema import PaginatedOrders
 
 router = APIRouter()
@@ -73,7 +74,12 @@ class VendorProfileUpdateRequest(BaseModel):
     location_address: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
-    delivery_radius: Optional[float] = None
+    # `delivery_radius` is deliberately absent. How far the platform will carry
+    # an order is `retail_max_distance_km` / `wholesale_max_distance_km` on the
+    # console, and nothing on the dispatch path has ever read the vendor
+    # column — so the stepper in the vendor app was writing a number that
+    # decided nothing about deliveries and everything about the delivery
+    # estimate quoted to customers. `GET /storefront` reports the real radius.
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
     preferred_payment_method: Optional[List[str]] = None
@@ -405,12 +411,41 @@ async def vendor_bottle_ledger(
     db: AsyncSession = Depends(get_db),
     vendor: Vendor = Depends(get_active_store),
 ):
-    """Audit trail of every bottle movement for this vendor."""
+    """Audit trail of every bottle movement for this vendor.
+
+    Rider **names** are resolved here rather than in `get_ledger_history`, which
+    the rider app also calls and which would be joining a rider onto their own
+    rows. A history keyed by UUID is unreadable at a counter — "did Brian
+    already bring those six back on Tuesday?" is the question this answers, and
+    it cannot be answered by `a3f1c8e2-…`.
+
+    `has_more` rather than a total count: the ledger only grows, and `COUNT(*)`
+    over it on every page of an infinite scroll costs more than the page itself.
+    """
+    from models.deliverer_model import Deliverer
     from services.bottle_ledger_service import get_ledger_history
 
-    return {
-        "entries": await get_ledger_history(db, vendor_id=vendor.id, limit=limit, offset=offset)
-    }
+    # One extra row tells us whether another page exists without counting.
+    entries = await get_ledger_history(
+        db, vendor_id=vendor.id, limit=limit + 1, offset=offset
+    )
+    has_more = len(entries) > limit
+    entries = entries[:limit]
+
+    rider_ids = {UUID(entry["rider_id"]) for entry in entries if entry.get("rider_id")}
+    names: dict[str, str] = {}
+    if rider_ids:
+        rows = (
+            await db.execute(
+                select(Deliverer.id, Deliverer.name).where(Deliverer.id.in_(rider_ids))
+            )
+        ).all()
+        names = {str(rider_id): name for rider_id, name in rows}
+
+    for entry in entries:
+        entry["rider_name"] = names.get(entry.get("rider_id") or "")
+
+    return {"entries": entries, "has_more": has_more}
 
 
 @router.get("/products")
@@ -628,21 +663,40 @@ async def vendor_wallet_summary(
     """
     from decimal import Decimal
 
-    from services.settlement_service import available_for_payout, committed_cash_float_for_vendor
+    from services.settlement_service import (
+        available_for_payout,
+        committed_cash_float_for_vendor,
+        withdrawal_terms,
+    )
 
     balance = Decimal(str(vendor.wallet_balance or 0))
     committed = await committed_cash_float_for_vendor(db, vendor.id)
     available = await available_for_payout(
         db, provider_id=vendor.id, provider_type="vendor", wallet_balance=balance,
     )
+    # Scoped to *this store's* type: the wholesale minimum and waiver differ from
+    # the retail ones, and an owner holding one of each would otherwise be shown
+    # whichever row the database returned first.
+    minimum, fee, waiver = await withdrawal_terms(
+        db, provider_type="vendor", vendor_type=vendor.vendor_type
+    )
 
     return {
-        "wallet_balance": float(balance),
-        "committed_cash_float": float(committed),
-        "available_for_withdrawal": float(available),
+        "wallet_balance": money_str(balance),
+        "committed_cash_float": money_str(committed),
+        "available_for_withdrawal": money_str(available),
         # Negative means the store owes the platform — settle before it can
         # accept further cash orders.
         "is_in_arrears": balance < 0,
+        # Same three rows the withdrawal is judged by. The app had them as
+        # literals (`isWholesale ? 5000 : 2500`, a fee of 15, a minimum of 500),
+        # so the console could not change what a vendor was told.
+        "withdrawal": {
+            "minimum": money_str(minimum),
+            "fee": money_str(fee),
+            # Compared against the **amount withdrawn**, never the balance held.
+            "fee_waiver_threshold": money_str(waiver),
+        },
     }
 
 
@@ -688,6 +742,132 @@ async def vendor_upload_image(
         raise HTTPException(status_code=500, detail="Could not save that image. Please try again.")
 
     return {"url": key, "secure_url": key}
+
+
+# ── Storefront controls ───────────────────────────────────────────────────
+#
+# What a store decides for itself. Split across two authorisation levels on
+# purpose, and the split is not cosmetic:
+#
+# * *Will we take cash* and *what is the smallest order worth preparing* are
+#   terms of trade. They belong to the owner, alongside the payout account and
+#   the business name.
+# * *Are we open right now* is the shop floor. The person who has just run out
+#   of 20 L bottles at 11am is the person standing behind the counter, and a
+#   pause they cannot apply until they reach the owner is a pause that arrives
+#   after the orders do.
+#
+# This is also the gap the existing `is_online` swipe leaves: it writes through
+# `PUT /profile`, which is owner-only, so a staff member is shown the control
+# on the dashboard and gets `owner_only` when they use it.
+
+
+class StorefrontTermsRequest(BaseModel):
+    """Owner-level terms. Both optional — only what is sent moves."""
+
+    accepts_cash: Optional[bool] = None
+    min_order_value: Optional[float] = Field(default=None, ge=0)
+
+
+class StorefrontPauseRequest(BaseModel):
+    minutes: int = Field(gt=0, le=72 * 60)
+    #: Shown to customers beside the reopening time. "Closed" with no reason
+    #: reads as broken; "Back at 14:30 — restocking" reads as a shop.
+    reason: Optional[str] = Field(default=None, max_length=140)
+
+
+@router.get("/storefront")
+async def vendor_get_storefront(
+    db: AsyncSession = Depends(get_db),
+    vendor: Vendor = Depends(get_active_store),
+):
+    """What this store is currently offering, and the bounds it may set within.
+
+    The ceilings ship **with** the state, so the app renders the same limit the
+    server enforces. A pause duration or an order minimum stated as a literal
+    in the app is a number that goes stale the moment an administrator moves
+    the setting — the mistake both apps made with the withdrawal fee.
+    """
+    from services import platform_config_service, vendor_availability
+    from services.dispatch_policy import DispatchPolicy
+
+    # `store_state` refreshes the configuration itself, and the limits below are
+    # read after it — so there is no second refresh here.
+    state = await vendor_availability.store_state(db, vendor)
+
+    payload = state.as_dict()
+    payload.update(
+        {
+            "is_online": bool(vendor.is_online),
+            "pause_reason": vendor.pause_reason,
+            "limits": {
+                "max_min_order_value": str(
+                    platform_config_service.get_decimal("vendor_max_min_order_value")
+                ),
+                "max_pause_minutes": platform_config_service.get_int("vendor_max_pause_hours") * 60,
+                "pause_presets_minutes": [
+                    m for m in vendor_availability.PAUSE_PRESET_MINUTES
+                    if m <= platform_config_service.get_int("vendor_max_pause_hours") * 60
+                ],
+                "may_decline_cash": platform_config_service.get_bool("vendor_may_decline_cash"),
+                "hours_enforced": platform_config_service.get_bool("vendor_hours_enforced"),
+                # How far this store's orders actually travel. Not a bound on
+                # anything the vendor may set — it is the one the platform
+                # sets, reported so the store's map draws its real catchment.
+                # The app used to draw `Vendor.delivery_radius`, a column the
+                # vendor could drag and that dispatch has never read.
+                "delivery_radius_km": DispatchPolicy.max_distance_km(
+                    vendor.vendor_type or "retail_refill"
+                ),
+            },
+        }
+    )
+    return payload
+
+
+@router.put("/storefront")
+async def vendor_set_storefront_terms(
+    body: StorefrontTermsRequest,
+    db: AsyncSession = Depends(get_db),
+    vendor: Vendor = Depends(get_owned_store),
+):
+    """Owner only — the terms this store trades on."""
+    from services import vendor_availability
+
+    state = await vendor_availability.set_controls(
+        db,
+        vendor,
+        accepts_cash=body.accepts_cash,
+        min_order_value=body.min_order_value,
+    )
+    return state.as_dict()
+
+
+@router.post("/storefront/pause")
+async def vendor_pause_store(
+    body: StorefrontPauseRequest,
+    db: AsyncSession = Depends(get_db),
+    vendor: Vendor = Depends(require_permission("manage_orders")),
+):
+    """Stop taking orders for a while. Reopens by itself."""
+    from services import vendor_availability
+
+    state = await vendor_availability.set_controls(
+        db, vendor, pause_minutes=body.minutes, pause_reason=body.reason
+    )
+    return state.as_dict()
+
+
+@router.post("/storefront/resume")
+async def vendor_resume_store(
+    db: AsyncSession = Depends(get_db),
+    vendor: Vendor = Depends(require_permission("manage_orders")),
+):
+    """Cancel a running pause and start taking orders again now."""
+    from services import vendor_availability
+
+    state = await vendor_availability.set_controls(db, vendor, resume=True)
+    return state.as_dict()
 
 
 @router.get("/dashboard")

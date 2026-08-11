@@ -14,9 +14,7 @@ from models.order_model import Order
 from models.payment_model import Payment
 from services.payment_service import initiate_mpesa_reversal
 from services.notification_service import create_notification, queue_push
-from services.expo_push_service import send_push_message
 from models.user_model import User
-import asyncio
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useContext, useImperativeHandle, useMemo, useRef } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { BRAND } from '@/constants/brandColors';
@@ -65,10 +66,10 @@ const StoreSwitcherSheet = forwardRef<StoreSwitcherSheetRef, StoreSwitcherSheetP
         <BottomSheetView style={{ flex: 1, paddingHorizontal: 20 }}>
           {/* Header */}
           <View className="flex-row items-center justify-between mb-4 pt-1">
-            <Text className={`text-xl font-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>
+            <Text className={`text-xl font-sans-bold ${darkTheme ? 'text-white' : 'text-gray-900'}`}>
               Your Stores
             </Text>
-            <PressableScale onPress={() => bottomSheetRef.current?.dismiss()}>
+            <PressableScale accessibilityLabel="Close the store list" onPress={() => bottomSheetRef.current?.dismiss()}>
               <View className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? 'bg-surface-container-high' : 'bg-white'}`}>
                 <Ionicons name="close" size={18} color={BRAND.primary} />
               </View>
@@ -84,7 +85,7 @@ const StoreSwitcherSheet = forwardRef<StoreSwitcherSheetRef, StoreSwitcherSheetP
           ) : !stores || stores.length === 0 ? (
             <View className="items-center justify-center py-8">
               <Ionicons name="storefront-outline" size={48} color={BRAND.primary} />
-              <Text className={`mt-3 text-base font-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
+              <Text className={`mt-3 text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
                 No additional stores found
               </Text>
               <Text className={`mt-1 text-sm text-center ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
@@ -122,7 +123,7 @@ const StoreSwitcherSheet = forwardRef<StoreSwitcherSheetRef, StoreSwitcherSheetP
                     <View className="flex-1">
                       <Text
                         numberOfLines={1}
-                        className={`text-base font-bold ${
+                        className={`text-base font-sans-bold ${
                           isActive
                             ? darkTheme ? 'text-white' : 'text-gray-900'
                             : darkTheme ? 'text-on-surface' : 'text-gray-800'

@@ -2,9 +2,9 @@ import React, { useCallback, useContext, useState, memo } from "react";
 import {
     RefreshControl,
     StatusBar,
-    Text,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -22,6 +22,7 @@ import SearchBar from "@/components/common/Search";
 import { ScrollView } from "react-native-gesture-handler";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useWalletTransactionsPaginated } from "@/hooks/queries/useWallet";
+import { formatMoney } from "@/utils/money";
 
 const TRANSACTION_COLORS: Record<string, string> = {
   top_up: "bg-blue-500/20 text-blue-600",
@@ -56,7 +57,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
             <Ionicons name={iconName as any} size={20} color={textColor.replace("text-", "").replace("-600", "Color")} style={darkTheme ? { opacity: 0.8 } : {}} />
           </View>
           <View>
-            <Text className={`font-bold text-base capitalize ${darkTheme ? "text-white" : "text-slate-900"}`}>
+            <Text className={`font-sans-bold text-base capitalize ${darkTheme ? "text-white" : "text-slate-900"}`}>
               {item.transaction_type.replace(/_/g, " ")}
             </Text>
             <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
@@ -64,11 +65,26 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
             </Text>
           </View>
         </View>
-        <Text className={`font-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
-          {isPositive ? "+" : "-"}KSH {item.amount}
+        <Text className={`font-sans-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
+          {isPositive ? "+" : "-"}{formatMoney(item.amount)}
         </Text>
       </View>
       
+      {/* A failure the vendor can act on. Rendered outside the details block
+          below, which only appears when there is a description or a reference —
+          a withdrawal that failed before M-Pesa ever issued one has neither, so
+          the reason would have been hidden in exactly the case it matters. */}
+      {item.status === "failed" && item.failure_reason ? (
+        <View className={`p-3 rounded-xl mt-1 border ${darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+          <Text className={`text-xs font-sans-bold mb-0.5 ${darkTheme ? "text-red-400" : "text-red-700"}`}>
+            Why this failed
+          </Text>
+          <Text className={`text-xs ${darkTheme ? "text-red-300/80" : "text-red-700/80"}`}>
+            {item.failure_reason}
+          </Text>
+        </View>
+      ) : null}
+
       {(item.description || item.reference_id || item.mpesa_receipt_number) && (
         <View className={`p-3 rounded-xl ${darkTheme ? "bg-black/20" : "bg-slate-50"} mt-1`}>
           {item.description && (
@@ -87,7 +103,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
                 Receipt: {item.mpesa_receipt_number}
               </Text>
             )}
-            <Text className={`text-xs font-bold capitalize ${item.status === 'completed' ? 'text-green-500' : item.status === 'failed' ? 'text-red-500' : 'text-amber-500'}`}>
+            <Text className={`text-xs font-sans-bold capitalize ${item.status === 'completed' ? 'text-green-500' : item.status === 'failed' ? 'text-red-500' : 'text-amber-500'}`}>
                 {item.status}
             </Text>
           </View>
@@ -181,7 +197,7 @@ export default function Transactions() {
                   className={`px-4 py-2 rounded-full border ${typeFilter === f.id ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
                   style={typeFilter !== f.id ? { ...(darkTheme ? {} : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : {}}
                 >
-                  <Text className={`font-semibold text-sm ${typeFilter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                  <Text className={`font-sans-semibold text-sm ${typeFilter === f.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                     {f.label}
                   </Text>
                 </PressableScale>

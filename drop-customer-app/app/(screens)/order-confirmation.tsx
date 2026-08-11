@@ -1,7 +1,8 @@
 import { UIThemeContext } from '@/context/ThemeContext';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useContext } from 'react';
-import { StatusBar, Text, View } from 'react-native';
+import { StatusBar, View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import Animated, { BounceIn } from 'react-native-reanimated';
 import { TOAST } from "@/constants/brandColors";
@@ -28,7 +29,7 @@ export default function OrderConfirmation() {
                     entering={BounceIn.delay(800)}
                     className={`px-5 py-3 rounded-full border ${darkTheme ? 'bg-green-500/20 border-green-500/30' : 'bg-green-50 border-green-200'}`}
                 >
-                    <Text className="font-bold text-base text-center" style={{ color: TOAST.success }}>
+                    <Text className="font-sans-bold text-base text-center" style={{ color: TOAST.success }}>
                         🎉 Drop Cashback Earned!
                     </Text>
                 </Animated.View>
@@ -39,7 +40,7 @@ export default function OrderConfirmation() {
                         activeOpacity={0.8}
                         onPress={() => router.push('/(screens)/Orders')}
                     >
-                        <Text className="text-white font-bold text-lg">Track Order</Text>
+                        <Text className="text-white font-sans-bold text-lg">Track Order</Text>
                     </PressableScale>
 
                     <PressableScale 
@@ -47,7 +48,7 @@ export default function OrderConfirmation() {
                         activeOpacity={0.8}
                         onPress={() => router.push('/(screens)')}
                     >
-                        <Text className={`font-bold text-lg ${darkTheme ? 'text-sky-400' : 'text-sky-500'}`}>
+                        <Text className={`font-sans-bold text-lg ${darkTheme ? 'text-sky-400' : 'text-sky-500'}`}>
                             Back to Home
                         </Text>
                     </PressableScale>

@@ -49,6 +49,12 @@ class BottleLedgerEntryType(str, enum.Enum):
     DELIVERY_ACCRUAL = "delivery_accrual"
     #: Vendor confirmed physical receipt of empties from the rider.
     VENDOR_RECEIPT = "vendor_receipt"
+    #: Rider collected a customer's deposit bottles. They hold them now, and owe
+    #: them to the store named on the return. Without this entry a returned
+    #: bottle would leave the customer's count, leave the platform's liability,
+    #: and appear nowhere — the deposit refunded against an asset the platform
+    #: had stopped tracking.
+    DEPOSIT_RETURN = "deposit_return"
     #: Manual correction (write-off, dispute resolution, opening balance).
     ADJUSTMENT = "adjustment"
 

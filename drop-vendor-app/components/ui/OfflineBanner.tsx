@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 // @ts-ignore
 import NetInfo from "@react-native-community/netinfo";
 
@@ -47,7 +48,7 @@ const styles = StyleSheet.create({
     },
     text: {
         color: "#fff",
-        fontWeight: "600",
+        fontFamily: 'Karla_600SemiBold',
         fontSize: 14,
     },
 });

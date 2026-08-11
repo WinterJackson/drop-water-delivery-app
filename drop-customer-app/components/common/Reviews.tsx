@@ -1,4 +1,5 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import React, { useContext, useState } from "react";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -115,7 +116,7 @@ const Reviews = ({ targetType, targetId }: { targetType: "vendor" | "rider"; tar
       {summary && total > 0 && (
         <View className="flex-row gap-5 items-center p-4 rounded-2xl bg-accentbg/5">
           <View className="items-center">
-            <Text className={`text-3xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+            <Text className={`text-3xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
               {summary.average_rating.toFixed(1)}
             </Text>
             <Stars rating={summary.average_rating} />

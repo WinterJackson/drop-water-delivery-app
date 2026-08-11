@@ -2,9 +2,10 @@ from pydantic import BaseModel
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
+from utils.money import MoneyField
 
 class PayoutCreate(BaseModel):
-    amount: float
+    amount: MoneyField
     payment_method: str
     account_details: str
     idempotency_key: Optional[str] = None
@@ -13,7 +14,7 @@ class PayoutResponse(BaseModel):
     id: UUID
     provider_id: UUID
     provider_type: str
-    amount: float
+    amount: MoneyField
     status: str
     payment_method: str
     account_details: str
@@ -23,7 +24,7 @@ class PayoutResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class ProviderBalanceResponse(BaseModel):
-    lifetime_earnings: float
-    pending_payouts: float
-    completed_payouts: float
-    available_balance: float
+    lifetime_earnings: MoneyField
+    pending_payouts: MoneyField
+    completed_payouts: MoneyField
+    available_balance: MoneyField

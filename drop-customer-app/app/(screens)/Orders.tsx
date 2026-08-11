@@ -8,7 +8,8 @@ import useWebSocket from "@/hooks/useWebSocket";
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useContext, useCallback, useState, useMemo, useRef } from "react";
-import { RefreshControl, StatusBar, Text, TouchableWithoutFeedback, View } from "react-native";
+import { RefreshControl, StatusBar, TouchableWithoutFeedback, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUserDetails } from "@/hooks/queries/useUser";
@@ -72,7 +73,7 @@ const Orders = () => {
 				<View className={`w-full p-4 rounded-2xl border flex-row items-center gap-3 ${darkTheme ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
 					<Ionicons name="time-outline" size={20} color="#d97706" />
 					<View className="flex-1">
-						<Text className={`text-sm font-bold ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
+						<Text className={`text-sm font-sans-bold ${darkTheme ? 'text-amber-300' : 'text-amber-800'}`}>
 							Payment not confirmed
 						</Text>
 						<Text className={`text-xs mt-0.5 ${darkTheme ? 'text-amber-400/80' : 'text-amber-700'}`}>
@@ -177,7 +178,7 @@ const Orders = () => {
 						<Text
 							className={`${
 								darkTheme ? "text-white" : "text-black"
-							} text-xl font-bold`}
+							} text-xl font-sans-bold`}
 						>
 							Orders
 						</Text>
@@ -187,7 +188,7 @@ const Orders = () => {
 					{/* FILTER HEADER */}
 					<View className="relative z-10">
 						<View className={`flex-row justify-between items-center m-4 px-3 py-2 rounded-xl ${darkTheme?"bg-gray-200/15":"bg-white"} `}>
-							<Text className={`font-semibold text-lg capitalize ${darkTheme?"text-white":"text-black"}`}>
+							<Text className={`font-sans-semibold text-lg capitalize ${darkTheme?"text-white":"text-black"}`}>
 								{selectedFilter}
 							</Text>
 
@@ -196,7 +197,7 @@ const Orders = () => {
 								onPress={() => setShowFilter(!showFilter)}
 							>
 								<View className="flex-row items-center gap-2 p-2 px-4 rounded-xl">
-									<Text className={`font-semibold text-lg ${darkTheme?"text-white":"text-black"}`}>
+									<Text className={`font-sans-semibold text-lg ${darkTheme?"text-white":"text-black"}`}>
 										Filter
 									</Text>
 									<Ionicons name="filter" size={24} color={BRAND.primary} />

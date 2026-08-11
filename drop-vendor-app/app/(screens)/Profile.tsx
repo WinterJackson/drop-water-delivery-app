@@ -5,11 +5,11 @@ import * as Haptics from "expo-haptics";
 import {
     ScrollView,
     StatusBar,
-    Text,
     View,
     TouchableOpacity,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Image } from "expo-image";
 import { BRAND } from "@/constants/brandColors";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -187,7 +187,7 @@ export default function Profile() {
         <Ionicons name={icon} size={24} color={danger ? "#ef4444" : BRAND.primary} />
       </View>
       <View className="flex-1">
-        <Text className={`text-lg font-bold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>{label}</Text>
+        <Text className={`text-lg font-sans-bold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>{label}</Text>
         <Text className={`text-sm mt-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{description}</Text>
       </View>
       <Ionicons name={path ? "chevron-forward" : "chevron-forward"} size={24} color={danger ? "#ef4444" : BRAND.primary} />
@@ -212,10 +212,10 @@ export default function Profile() {
           <TouchableOpacity onPress={() => router.back()} className="mr-4">
             <BackButtonMinimal />
           </TouchableOpacity>
-          <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Settings</Text>
+          <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Settings</Text>
 
           {/* THEME TOGGLE — matches Customer & Rider app pattern */}
-          <TouchableOpacity
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={darkTheme ? "Switch to the light theme" : "Switch to the dark theme"}
             activeOpacity={0.7}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -256,7 +256,7 @@ export default function Profile() {
               </View>
             </View>
             {!isStaff && (
-                <TouchableOpacity 
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change your profile photo" 
                     onPress={pickImage}
                     disabled={imageUploading}
                     className="absolute bottom-5 right-1 rounded-full items-center justify-center border-[2.5px]"
@@ -266,15 +266,15 @@ export default function Profile() {
                 </TouchableOpacity>
             )}
           </View>
-          <Text className={`text-2xl font-bold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
+          <Text className={`text-2xl font-heading-semibold text-center ${darkTheme ? "text-white" : "text-slate-900"}`}>
             {vendor?.business_name || "Settings Hub"}
           </Text>
-          <Text className={`text-base mt-1 font-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+          <Text className={`text-base mt-1 font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
             Managed by {user?.fullName || "Owner"}
           </Text>
         </View>
 
-        <Text className={`mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Account & Identity</Text>
+        <Text className={`mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Account & Identity</Text>
         
         <NavItem 
           icon="storefront-outline" 
@@ -284,15 +284,28 @@ export default function Profile() {
         />
         
         {!isStaff && (
-          <NavItem 
-            icon="person-circle-outline" 
-            label="Owner Profile" 
-            description="Manage personal KYC and sign-in details" 
-            path="/(screens)/OwnerProfile" 
+          <NavItem
+            icon="person-circle-outline"
+            label="Owner Profile"
+            description="Manage personal KYC and sign-in details"
+            path="/(screens)/OwnerProfile"
           />
         )}
 
-        <Text className={`mt-6 mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Business Tools</Text>
+        {/* Owner-only, and the link is hidden for staff for the same reason the
+            other four are: bouncing somebody off a screen they were invited to
+            open is the same decision as not offering it. Pausing the shop is
+            *not* here — it is on the dashboard and open to staff. */}
+        {!isStaff && (
+          <NavItem
+            icon="pricetag-outline"
+            label="Store Terms"
+            description="Cash orders and your minimum order value"
+            path="/(screens)/business/StoreTerms"
+          />
+        )}
+
+        <Text className={`mt-6 mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Business Tools</Text>
         
         <NavItem 
           icon="map-outline" 
@@ -324,7 +337,7 @@ export default function Profile() {
           />
         )}
 
-        <Text className={`mt-6 mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Help</Text>
+        <Text className={`mt-6 mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Help</Text>
 
         {/* Not owner-only. Staff are the ones on the floor when a rider turns up
             with the wrong bottle count, and they have no other way to reach us. */}
@@ -335,7 +348,7 @@ export default function Profile() {
           path="/(screens)/Support"
         />
 
-        <Text className={`mt-6 mb-4 ml-2 font-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>System & Security</Text>
+        <Text className={`mt-6 mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>System & Security</Text>
         
         <NavItem 
           icon="log-out-outline" 

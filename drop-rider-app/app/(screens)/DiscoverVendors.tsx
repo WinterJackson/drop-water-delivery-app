@@ -1,7 +1,8 @@
 import { ApiError, errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, StatusBar, FlatList, RefreshControl, Image, TextInput, Switch, Platform, TouchableOpacity } from "react-native";
+import { View, StatusBar, FlatList, RefreshControl, Image, Switch, Platform, TouchableOpacity } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useRouter } from "expo-router";
@@ -184,8 +185,8 @@ export default function DiscoverVendors() {
       </View>
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
-          <Text className={`font-bold text-lg flex-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>{item.business_name}</Text>
-          <Text className={`text-xs ml-2 font-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>{item.distance_km} KM</Text>
+          <Text className={`font-sans-bold text-lg flex-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>{item.business_name}</Text>
+          <Text className={`text-xs ml-2 font-sans-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>{item.distance_km} KM</Text>
         </View>
         <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{item.address}</Text>
         
@@ -194,29 +195,29 @@ export default function DiscoverVendors() {
               <>
                 {parseFloat(item.distance_km) > 2.0 ? (
                   <View className="flex-1 py-2.5 rounded-lg bg-gray-500/10 border border-gray-500/20 items-center">
-                    <Text className="text-gray-500 font-semibold text-sm">Too Far ({item.distance_km} KM)</Text>
+                    <Text className="text-gray-500 font-sans-semibold text-sm">Too Far ({item.distance_km} KM)</Text>
                   </View>
                 ) : activeVendorCount >= 10 ? (
                  <View className="flex-1 py-2.5 rounded-lg bg-gray-500/10 border border-gray-500/20 items-center">
-                   <Text className="text-gray-500 font-semibold text-sm">Max 10 Vendors Reached</Text>
+                   <Text className="text-gray-500 font-sans-semibold text-sm">Max 10 Vendors Reached</Text>
                  </View>
                ) : (
                  <PressableScale onPress={() => handleApply(item.id)} className="flex-1 py-2.5 rounded-lg bg-accentbg items-center">
-                   <Text className="text-white font-semibold text-sm">Apply</Text>
+                   <Text className="text-white font-sans-semibold text-sm">Apply</Text>
                  </PressableScale>
                )}
              </>
            )}
            {item.status === "pending" && (
              <View className="flex-1 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20 items-center">
-               <Text className="text-orange-500 font-semibold text-sm">Pending Approval</Text>
+               <Text className="text-orange-500 font-sans-semibold text-sm">Pending Approval</Text>
              </View>
            )}
            {item.status === "approved" && (() => {
              const isMuted = mutedVendors.includes(item.id);
              return (
                <View className="flex-1 py-1.5 px-3 rounded-lg bg-green-500/10 border border-green-500/20 flex-row justify-between items-center">
-                 <Text className="text-green-600 font-semibold text-xs flex-1">
+                 <Text className="text-green-600 font-sans-semibold text-xs flex-1">
                    {isMuted ? "Muted Locally" : "Receiving Orders"}
                  </Text>
                  <Switch
@@ -230,7 +231,7 @@ export default function DiscoverVendors() {
            })()}
            {item.status === "suspended" && (
              <View className="flex-1 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20 items-center">
-               <Text className="text-red-500 font-semibold text-sm">Suspended by Vendor</Text>
+               <Text className="text-red-500 font-sans-semibold text-sm">Suspended by Vendor</Text>
              </View>
            )}
         </View>
@@ -256,7 +257,7 @@ export default function DiscoverVendors() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Discover Vendors
               </Text>
           </View>
@@ -268,7 +269,7 @@ export default function DiscoverVendors() {
           <View className="flex-1">
             <Text className={`text-sm mt-1 mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Find and apply to up to 10 nearby water vendors.</Text>
           </View>
-          <PressableScale
+          <PressableScale accessibilityLabel={isMapView ? "Show these vendors as a list" : "Show these vendors on a map"}
             onPress={() => setIsMapView(!isMapView)}
             className={`w-12 h-12 rounded-full items-center justify-center border ${darkTheme ? "bg-white/10 border-white/20" : "bg-white border-gray-200"}`}
           >
@@ -284,7 +285,7 @@ export default function DiscoverVendors() {
                 onChangeText={setSearchQuery}
                 placeholder="Search by store name..."
                 placeholderTextColor={darkTheme ? "#9ca3af" : "#6b7280"}
-                className={`flex-1 font-semibold ${darkTheme ? "text-white" : "text-black"}`}
+                className={`flex-1 font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}
             />
         </View>
       </View>
@@ -352,14 +353,14 @@ export default function DiscoverVendors() {
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
                   style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
                 >
-                  <Text className={`text-xl font-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>+</Text>
+                  <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>+</Text>
                 </PressableScale>
                 <PressableScale
                   onPress={() => handleZoom(false)}
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
                   style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
                 >
-                  <Text className={`text-xl font-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>−</Text>
+                  <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>−</Text>
                 </PressableScale>
               </View>
               </>

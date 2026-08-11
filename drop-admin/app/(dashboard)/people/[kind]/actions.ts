@@ -137,6 +137,15 @@ export type CustomerBalances = {
   debt_blocks_ordering: boolean;
   bottle_deposit_balance: string;
   bottles_held: number;
+  /** Which bottle ceiling this account is held to, and the ceiling itself. */
+  is_commercial: boolean;
+  bottle_limit: number;
+  /**
+   * Spendable, not withdrawable: returned bottle deposit. Shown because
+   * "the balance says 900 and they can withdraw 0" is otherwise a support
+   * ticket nobody in the console can answer.
+   */
+  wallet_not_withdrawable: string;
 };
 
 /** Fetch debt, deposit and wallet state for a customer. */
@@ -225,6 +234,45 @@ export async function returnDeposit(
       { bottles: count, reason: reason.trim() },
     );
     revalidatePath(`/people/customers/${id}`);
+    return { ok: true, data };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+
+export type AccountKindResult = {
+  customer_id: string;
+  is_commercial: boolean;
+  bottle_limit: number;
+  message?: string;
+};
+
+/**
+ * Household or commercial — which bottle ceiling this account is held to.
+ *
+ * `max_bottles_held_commercial` existed, was validated, and could never apply:
+ * nothing could set the column that decides it, so every account was a
+ * household and an office ordering water was refused at six bottles with
+ * nothing anyone could do. A limit that cannot be lifted is a wall.
+ */
+export async function setAccountKind(
+  id: string,
+  isCommercial: boolean,
+  reason: string,
+): Promise<ActionResult<AccountKindResult>> {
+  if (reason.trim().length < 10) {
+    return {
+      ok: false,
+      error: "At least ten characters — this is recorded against your account.",
+    };
+  }
+
+  try {
+    const data = await post<AccountKindResult>(
+      `/api/admin/people/customers/${id}/account-kind`,
+      { is_commercial: isCommercial, reason: reason.trim() },
+    );
     return { ok: true, data };
   } catch (error) {
     return fail(error);

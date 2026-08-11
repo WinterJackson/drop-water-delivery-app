@@ -24,6 +24,7 @@ import {
   Settings,
   SlidersHorizontal,
   Store,
+  TrendingUp,
   Truck,
   UserRound,
   Users,
@@ -94,6 +95,19 @@ export const NAV_SECTIONS: NavSection[] = [
         permission: PERMISSIONS.analyticsRead,
         mobilePriority: 7,
         blurb: "Revenue, demand, retention and unit economics.",
+      },
+      {
+        // Its own destination rather than a card on Analytics: it is measured
+        // in months while that screen is measured in days, and it is the only
+        // page in the console that takes a figure *from* the business — the
+        // half of acquisition cost no query here can find.
+        href: "/analytics/growth",
+        label: "Acquisition",
+        short: "CAC",
+        icon: TrendingUp,
+        permission: PERMISSIONS.analyticsRead,
+        mobilePriority: 9,
+        blurb: "What a customer costs, and when they pay it back.",
       },
     ],
   },

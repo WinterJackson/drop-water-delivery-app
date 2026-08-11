@@ -442,6 +442,18 @@ export default async function AnalyticsPage({
 
         <CohortGrid cohorts={cohorts} />
 
+        {/* This grid answers whether customers come back. The next question —
+            whether the ones who came back paid back what it cost to get them —
+            is a page of its own, and somebody reading retention is exactly who
+            wants it. A nav entry alone leaves it to be stumbled upon. */}
+        <p className="text-sm text-muted">
+          Retention says who came back.{" "}
+          <Link href="/analytics/growth" className="font-medium text-[var(--accent)] hover:underline">
+            Acquisition
+          </Link>{" "}
+          says what they cost and when each cohort paid that back.
+        </p>
+
         <div className="grid gap-6 lg:grid-cols-2">
           <StatList
             title="Buying behaviour"

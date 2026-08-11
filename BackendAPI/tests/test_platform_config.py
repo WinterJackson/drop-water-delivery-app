@@ -61,7 +61,11 @@ def test_every_setting_has_a_key_a_label_and_a_group_that_exists():
     for spec in config.SPECS:
         assert spec.label, f"{spec.key} has no label"
         assert spec.group in config.GROUP_LABELS, f"{spec.key} is in unknown group {spec.group}"
-        assert spec.kind in {"rate", "money", "int", "bool", "windows", "deposits"}
+        # `decimal` is the fractional counterpart of `int`. `int` coerces with
+        # `int(value)`, which truncates rather than refuses, so it belongs only
+        # to quantities that cannot be halved — bottles, floors, days. The
+        # retail radius is 2.5 km and would have become 2 in silence.
+        assert spec.kind in {"rate", "money", "int", "decimal", "bool", "windows", "deposits"}
 
 
 def test_every_numeric_setting_is_bounded():
@@ -191,7 +195,7 @@ def test_a_valid_change_passes_and_is_returned_coerced():
 
 
 def test_reads_fall_back_to_the_shipped_default_and_reject_unknown_keys():
-    assert config.get("retail_service_fee") == 12.0
+    assert config.get("retail_service_fee") == 35.0
     assert config.get_decimal("retail_vendor_commission_rate") == Decimal("0.05")
     assert isinstance(config.get_decimal("retail_service_fee"), Decimal)
     assert config.get_int("payload_free_units") == 2
@@ -205,14 +209,14 @@ def test_temporarily_restores_the_previous_values_even_when_the_block_raises():
     """The cache is process-wide. A preview that leaves the proposal loaded would
     price every subsequent request in the process against values nobody
     approved."""
-    config._cache.values = {"retail_service_fee": 12.0}
+    config._cache.values = {"retail_service_fee": 35.0}
 
     with pytest.raises(RuntimeError):
         with config.temporarily({"retail_service_fee": 999.0}):
             assert config.get("retail_service_fee") == 999.0
             raise RuntimeError("boom")
 
-    assert config.get("retail_service_fee") == 12.0
+    assert config.get("retail_service_fee") == 35.0
 
 
 # ── The legacy constant names ─────────────────────────────────────────────
@@ -224,7 +228,7 @@ def test_the_old_order_service_constants_still_resolve_through_the_config():
     live — the point of the change is that they are no longer constants."""
     from services import order_service
 
-    assert order_service.RETAIL_SERVICE_FEE_KSH == 12.0
+    assert order_service.RETAIL_SERVICE_FEE_KSH == 35.0
 
     config._cache.values = {"retail_service_fee": 30.0}
     assert order_service.RETAIL_SERVICE_FEE_KSH == 30.0
@@ -279,8 +283,8 @@ def test_a_fee_change_moves_the_customer_total_and_the_platform_take():
             product_total=500.0, distance_km=2.0, quantity=2, bottle_capacity=20
         )
 
-    assert Decimal(after["customer_total"]) - Decimal(before["customer_total"]) == Decimal("13")
-    assert Decimal(after["platform_revenue"]) - Decimal(before["platform_revenue"]) == Decimal("13")
+    assert Decimal(after["customer_total"]) - Decimal(before["customer_total"]) == Decimal("-10")
+    assert Decimal(after["platform_revenue"]) - Decimal(before["platform_revenue"]) == Decimal("-10")
     # The vendor is unaffected by a platform fee — it is not taken from them.
     assert after["vendor_receives"] == before["vendor_receives"]
 
@@ -378,16 +382,16 @@ async def test_the_preview_prices_a_proposal_without_saving_it(console):
     assert response.status_code == 200, response.text
     payload = response.json()
 
-    assert payload["before"]["service_fee"] == "12.00"
+    assert payload["before"]["service_fee"] == "35.00"
     assert payload["after"]["service_fee"] == "25.00"
-    assert payload["delta"]["customer_total"] == "13.00"
+    assert payload["delta"]["customer_total"] == "-10.00"
     # Present in the quote, absent from the deltas: it is a description.
     assert payload["before"]["vehicle_class"] == "motorbike"
     assert "vehicle_class" not in payload["delta"]
 
     # Nothing was written, and the process is still pricing at the old fee.
     console.db.add.assert_not_called()
-    assert config.get("retail_service_fee") == 12.0
+    assert config.get("retail_service_fee") == 35.0
 
 
 @pytest.mark.asyncio
@@ -436,3 +440,220 @@ async def test_the_settings_screen_lists_every_setting_with_its_bounds(console):
     payload = response.json()
     assert len(payload["settings"]) == len(config.SPECS)
     assert {group["key"] for group in payload["groups"]} == set(config.GROUP_LABELS)
+
+
+# ── A stored row must not silently outrank a new shipped default ──────────
+#
+# `_load` reads a row and the row wins. That is right for a value somebody
+# chose, and wrong for one that merely materialised the old default — and once
+# written the two are indistinguishable, so changing a default in the source
+# changes nothing on a running platform and nothing says so.
+#
+# This database was the worked example: `Platform_Setting_History` shows
+# `retail_service_fee` going 12 → 25 ("Verifying the config path end to end")
+# and back to 12 ("Reverting the verification change"). Nobody chose 12. The
+# revert wrote the *then-current default* into a row, and that row went on to
+# pin every quote at 12 after the default became 35.
+
+
+def _superseded_defaults() -> dict[str, tuple[float, float]]:
+    """The retirement tables out of **every** migration that declares one.
+
+    Read as source rather than imported, because a migration must stay frozen at
+    what was true when it ran — importing the live registry into one is how a
+    migration starts describing a database it was never applied to.
+
+    Every migration, not just the first: this scanned only `b2f9c14e7a35`, so
+    the tripwire protected the seven defaults retired in that batch and nothing
+    retired afterwards. `c7d2e94a6f18` retired the 2 km retail radius and would
+    have been invisible to it — which is precisely the failure the tripwire
+    exists to prevent, one level up.
+
+    A key may appear in only one table. Two migrations retiring the same key
+    would make "the current default" ambiguous here — the answer would depend on
+    which file sorted last, and filename order is not revision order. If a
+    default ever genuinely needs retiring twice, this assertion is where to
+    decide what the tripwire should then compare against.
+    """
+    versions = BACKEND / "alembic" / "versions"
+    tables: dict[str, tuple[float, float]] = {}
+    seen_in: dict[str, str] = {}
+
+    for path in sorted(versions.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.AnnAssign)
+                and getattr(node.target, "id", None) == "_SUPERSEDED"
+            ):
+                continue
+            for key, pair in ast.literal_eval(node.value).items():
+                assert key not in seen_in, (
+                    f"{key} is retired by both {seen_in[key]} and {path.name}; "
+                    "see this function's docstring"
+                )
+                seen_in[key] = path.name
+                tables[key] = pair
+
+    assert tables, "no migration declares _SUPERSEDED any more"
+    return tables
+
+
+def test_the_retirement_table_names_real_settings():
+    for key in _superseded_defaults():
+        assert key in config.SPEC_BY_KEY, (
+            f"{key} was retired by migration but is no longer a setting; the "
+            "migration is now deleting rows for a key nothing reads"
+        )
+
+
+def test_no_retired_value_is_also_the_current_default():
+    """Retiring a row whose value equals the *current* default would delete a
+    genuine decision — the operator chose exactly what the platform ships."""
+    for key, (superseded, _current) in _superseded_defaults().items():
+        assert float(config.DEFAULTS[key]) != float(superseded), (
+            f"{key} ships {superseded} again, which the migration treats as "
+            "abandoned residue and deletes"
+        )
+
+
+def test_the_retirement_table_still_describes_todays_defaults():
+    """The tripwire for the next person to change one of these defaults.
+
+    A changed default is inert against any database holding a row for that key.
+    When this fires: write a new retirement migration for the value being
+    superseded now, and update the figure here to the new default. Editing the
+    old migration is not the fix — it has already run.
+    """
+    for key, (_superseded, current) in _superseded_defaults().items():
+        assert float(config.DEFAULTS[key]) == float(current), (
+            f"{key} now ships {config.DEFAULTS[key]}, not {current}. Any "
+            "database with a stored row for it is still pricing at the old "
+            "figure — see the docstring of this test."
+        )
+
+
+def test_the_agreed_figures_are_what_the_platform_ships():
+    """The values decided for this market, in one place. Each is editable on the
+    console; these are what a fresh deployment starts from."""
+    assert config.DEFAULTS["retail_service_fee"] == 35.0
+    assert config.DEFAULTS["wholesale_service_fee"] == 120.0
+    # How far an order travels. Platform-set, one figure each, and no store sets
+    # its own — `Vendor.delivery_radius` was dropped in `c7d2e94a6f18`.
+    assert config.DEFAULTS["retail_max_distance_km"] == 2.5
+    assert config.DEFAULTS["wholesale_max_distance_km"] == 15.0
+    assert config.DEFAULTS["wholesale_vendor_commission_rate"] == 0.05
+    assert config.DEFAULTS["retail_delivery_base_fee"] == 80.0
+    assert config.DEFAULTS["retail_delivery_per_km"] == 20.0
+    assert config.DEFAULTS["mpesa_payment_discount"] == 10.0
+    # Withdrawn, not merely lowered — cashback paid out of margin the platform
+    # does not have.
+    assert config.DEFAULTS["loyalty_cashback_per_delivery"] == 0.0
+    # Cost recovery on a withdrawal, never a revenue line by default.
+    assert config.DEFAULTS["payout_transaction_fee"] == 0.0
+    # A second cut from the delivery fee. The rider's payout must stay one
+    # subtraction they can do in their head.
+    assert config.DEFAULTS["retail_delivery_markup_rate"] == 0.0
+
+
+def test_the_settings_screen_can_show_what_the_platform_ships():
+    """`describe()` must carry the shipped default alongside the live value.
+
+    Without it the console can say "customised" and nothing more, which is what
+    let a row holding an old default sit unnoticed.
+    """
+    rows = {row["key"]: row for row in config.describe()}
+    row = rows["retail_service_fee"]
+
+    assert row["default"] == config.SPEC_BY_KEY["retail_service_fee"].default
+    assert "value" in row and "is_default" in row
+
+
+@pytest.mark.asyncio
+async def test_returning_a_value_to_the_shipped_default_deletes_the_row():
+    """Un-set, not pinned at today's figure.
+
+    Storing a row that says what the default says is how this platform came to
+    run at a retail service fee of 12 with a source that said 35 — and it is
+    what the console's *Use the shipped value* button would otherwise do on
+    every click. A row is a decision; following the platform is the absence of
+    one.
+    """
+    from models.platform_setting_model import PlatformSetting
+
+    existing = PlatformSetting(key="retail_service_fee", value=12.0, version=2)
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=existing)
+    session.add = MagicMock()
+    config._cache.values = {"retail_service_fee": 12.0}
+    config._cache.version = 2
+    config._cache.loaded_at = 1.0
+
+    diff = await config.apply_changes(
+        session,
+        changes={"retail_service_fee": config.DEFAULTS["retail_service_fee"]},
+        admin_email="owner@drop.invalid",
+        reason="Following the platform again",
+    )
+
+    assert diff["retail_service_fee"] == {"before": 12.0, "after": 35.0}
+    session.delete.assert_awaited_once_with(existing)
+    # The change is still recorded — only the pinning row goes.
+    added = [call.args[0] for call in session.add.call_args_list]
+    assert not any(isinstance(obj, PlatformSetting) for obj in added), (
+        "a row holding the shipped default was written; the next release's "
+        "default will be inert against it"
+    )
+    assert any(type(obj).__name__ == "PlatformSettingHistory" for obj in added)
+
+
+@pytest.mark.asyncio
+async def test_a_value_of_the_operators_own_is_still_stored():
+    """The other half: an actual decision must survive a deploy."""
+    from models.platform_setting_model import PlatformSetting
+
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=None)
+    session.add = MagicMock()
+    config._cache.values = {}
+    config._cache.version = 1
+    config._cache.loaded_at = 1.0
+
+    await config.apply_changes(
+        session,
+        changes={"retail_service_fee": 40.0},
+        admin_email="owner@drop.invalid",
+        reason="Our own figure",
+    )
+
+    added = [call.args[0] for call in session.add.call_args_list]
+    rows = [obj for obj in added if isinstance(obj, PlatformSetting)]
+    assert len(rows) == 1 and rows[0].value == 40.0
+    session.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_config_version_never_walks_backwards():
+    """It dates an order's pricing snapshot, so it must only ever rise.
+
+    Returning a setting to the shipped default deletes its row. A maximum taken
+    over the live rows alone would then *fall*, and two different
+    configurations sharing a version number is exactly what makes a disputed
+    total untraceable. The history table is append-only; its high-water mark is
+    the honest one.
+    """
+    session = AsyncMock()
+
+    settings_rows = MagicMock()
+    settings_rows.scalars.return_value.all.return_value = []   # every row retired
+    history_max = MagicMock()
+    history_max.scalar.return_value = 9
+
+    session.execute = AsyncMock(side_effect=[settings_rows, history_max])
+
+    await config._load(session)
+
+    assert config._cache.values == {}
+    assert config.current_version() == 9, (
+        "the version fell when the last stored row was deleted"
+    )

@@ -173,7 +173,7 @@ async def test_no_debt_means_no_line_item(session):
         delivery_type="quick_swap", lat=-1.3620, lng=36.6580, apply_wallet=False,
     )
     assert quote.debt_settlement == Decimal("0.00")
-    assert quote.as_dict()["debt_settlement"] == 0.0
+    assert quote.as_dict()["debt_settlement"] == "0.00"
 
 
 @pytest.mark.asyncio
@@ -184,7 +184,7 @@ async def test_the_quote_reports_the_settlement_to_the_client(session):
         session, items=[_Item()], user=_customer(debt="50"), vendor=_vendor(),
         delivery_type="quick_swap", lat=-1.3620, lng=36.6580, apply_wallet=False,
     )
-    assert quote.as_dict()["debt_settlement"] == 50.0
+    assert quote.as_dict()["debt_settlement"] == "50.00"
 
 
 def test_the_penalty_and_the_ceiling_are_settings_not_literals():

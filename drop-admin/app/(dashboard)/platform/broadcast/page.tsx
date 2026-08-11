@@ -4,6 +4,8 @@ import { Badge, Card, CardHeader, EmptyState, ErrorState } from "@/components/ui
 import { ApiError, get } from "@/lib/api/server";
 import { formatDateTime, formatNumber } from "@/lib/utils/format";
 import { Composer, type Audience } from "./Composer";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Broadcast" };
 
@@ -32,6 +34,13 @@ const STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger"> 
 };
 
 export default async function BroadcastPage() {
+  // Gated on the capability `nav-config` declares for `/platform/broadcast` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/platform/broadcast");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   let audiences: { audiences: Audience[] };
   let campaigns: { items: Campaign[] };
   try {

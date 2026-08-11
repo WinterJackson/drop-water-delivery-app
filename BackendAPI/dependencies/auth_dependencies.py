@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Query
-from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies.dependencies import get_db
@@ -10,6 +9,7 @@ from models.deliverer_model import Deliverer
 from models.user_model import User
 from models.vendor_model import Vendor
 from utils.verify_user_token import get_current_user
+from sqlalchemy import select, or_
 
 
 async def get_current_customer(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):

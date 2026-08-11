@@ -499,11 +499,11 @@ async def test_money_never_arrives_as_a_float(world):
     """
     try:
         async with _client_as(world["super"].clerk_id) as client:
-            revenue = (await client.get("/api/admin/revenue")).json()
-            assert isinstance(revenue["total_platform_revenue"], str)
-            assert isinstance(revenue["total_gmv"], str)
-            for value in revenue["breakdown"].values():
-                assert isinstance(value, str)
+            finance = (await client.get("/api/admin/finance/summary")).json()
+            assert isinstance(finance["collections"]["paid"]["amount"], str)
+            assert isinstance(finance["payouts"]["pending"]["amount"], str)
+            for row in finance["ledger"]:
+                assert isinstance(row["amount"], str)
 
             overview = (await client.get("/api/admin/overview")).json()
             assert isinstance(overview["last_7_days"]["revenue"], str)

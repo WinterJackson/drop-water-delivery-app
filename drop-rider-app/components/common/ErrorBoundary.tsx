@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, TouchableOpacity } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { ERROR_BOUNDARY, BRAND } from '@/constants/brandColors';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { captureError } from '@/utils/sentry';
@@ -98,7 +99,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: 'Fredoka_600SemiBold',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -117,7 +118,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: BRAND.white,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Karla_600SemiBold',
   },
   crashLimit: {
     color: '#EF4444',

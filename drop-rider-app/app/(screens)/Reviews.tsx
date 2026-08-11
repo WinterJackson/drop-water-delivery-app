@@ -1,5 +1,6 @@
 import React, { useContext } from "react";
-import { View, Text, ScrollView, StatusBar, TouchableOpacity } from "react-native";
+import { View, ScrollView, StatusBar, TouchableOpacity } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -19,7 +20,7 @@ export default function Reviews() {
     const percentage = total > 0 ? (count / total) * 100 : 0;
     return (
       <View key={stars} className="flex-row items-center mb-2">
-        <Text className={`w-4 font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>{stars}</Text>
+        <Text className={`w-4 font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>{stars}</Text>
         <Ionicons name="star" size={12} color="#F59E0B" style={{ marginRight: 8 }} />
         <View className="flex-1 h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
           <View className="h-full bg-yellow-500 rounded-full" style={{ width: `${percentage}%` }} />
@@ -47,7 +48,7 @@ export default function Reviews() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Customer Feedback
               </Text>
           </View>
@@ -58,7 +59,7 @@ export default function Reviews() {
       ) : isError ? (
           <View className="flex-1 items-center justify-center p-6">
               <Ionicons name="alert-circle-outline" size={64} color={TOAST.error} />
-              <Text className={`text-lg font-bold mt-4 mb-2 text-center ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-lg font-sans-bold mt-4 mb-2 text-center ${darkTheme ? "text-white" : "text-black"}`}>
                   Failed to load reviews
               </Text>
               <Text className={`text-center mb-6 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -70,7 +71,7 @@ export default function Reviews() {
                   style={{ backgroundColor: BRAND.primary }}
               >
                   <Ionicons name="refresh" size={20} color="#fff" style={{ marginRight: 8 }} />
-                  <Text className="text-white font-bold text-base">Try Again</Text>
+                  <Text className="text-white font-sans-bold text-base">Try Again</Text>
               </TouchableOpacity>
           </View>
       ) : (
@@ -78,7 +79,7 @@ export default function Reviews() {
             {/* Overall Rating Card */}
             <View className={`w-full rounded-2xl p-5 border flex-row items-center justify-between mb-6 ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
                 <View className="items-center mr-6">
-                    <Text className={`text-5xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    <Text className={`text-5xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                         {reviewsData?.average_rating?.toFixed(1) || "5.0"}
                     </Text>
                     <View className="flex-row my-1">
@@ -103,7 +104,7 @@ export default function Reviews() {
                 </View>
             </View>
 
-            <Text className={`text-xl font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
+            <Text className={`text-xl font-sans-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
                 Recent Comments
             </Text>
 

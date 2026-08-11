@@ -1,7 +1,8 @@
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, Switch, Linking } from "react-native";
+import { View, ScrollView, Switch, Linking } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Toast } from "@/lib/toast";
@@ -74,7 +75,7 @@ export default function PrivacySecurity() {
                     <Text style={{ fontSize: 18 }}>{icon}</Text>
                 </View>
                 <View className="flex-1 pr-4">
-                    <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
                     {description && (
                         <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
                     )}
@@ -91,7 +92,7 @@ export default function PrivacySecurity() {
                     <Text style={{ fontSize: 18 }}>{icon}</Text>
                 </View>
                 <View className="flex-1 pr-4">
-                    <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
                     {description && (
                         <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
                     )}
@@ -122,7 +123,7 @@ export default function PrivacySecurity() {
                 <PressableScale onPress={() => router.back()} className="mr-4">
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                     Privacy & Security
                 </Text>
             </View>
@@ -130,7 +131,7 @@ export default function PrivacySecurity() {
 
             <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 120 }}>
                 
-                <Text className={`text-sm font-bold mb-3 uppercase tracking-widest mt-2 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-2 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Security
                 </Text>
                 <ActionItem 
@@ -140,7 +141,7 @@ export default function PrivacySecurity() {
                     onPress={handlePasswordChange}
                 />
 
-                <Text className={`text-sm font-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Legal & Compliance
                 </Text>
                 <ActionItem 
@@ -156,7 +157,7 @@ export default function PrivacySecurity() {
                     onPress={() => handleOpenLink("https://drop.space/terms")}
                 />
 
-                <Text className={`text-sm font-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
+                <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Data Preferences
                 </Text>
                 <ToggleItem 

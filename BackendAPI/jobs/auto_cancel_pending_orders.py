@@ -1,19 +1,19 @@
 import asyncio
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, update
 from sqlalchemy.sql.expression import text
 from dependencies.dependencies import get_db_session
 from models.cart_model import Cart
-from models.order_model import Order, OrderItem
-from models.product_model import Product
 from models.user_model import User
 from models.vendor_model import Vendor
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification
-from services.order_service import revert_order_side_effects
+from services.order_service import apply_status_transition, revert_order_side_effects
 from services import platform_config_service
 from routes.websocket_routes import manager
+from sqlalchemy import select, and_, func, update
+from models.order_model import Order, OrderItem
+from models.product_model import Product
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ async def run_auto_cancel_orders(batch_size: int = 100):
                 )
 
                 was_paid = order.payment_status == "paid"
-                order.order_status = "cancelled"
+                apply_status_transition(order, "cancelled")
 
                 await revert_order_side_effects(
                     session, order, reason="acceptance_sla_breach"

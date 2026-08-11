@@ -8,14 +8,13 @@ import * as ImagePicker from 'expo-image-picker';
 import {
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
     KeyboardAvoidingView,
     Platform,
     TouchableOpacity,
-    ActivityIndicator
+    ActivityIndicator,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { BRAND } from "@/constants/brandColors";
@@ -181,7 +180,7 @@ export default function Profile() {
           />
         )
       ) : (
-        <Text className={`flex-1 mt-3 font-semibold text-right ${darkTheme ? "text-white" : "text-gray-900"}`}>{value || "—"}</Text>
+        <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-white" : "text-gray-900"}`}>{value || "—"}</Text>
       )}
     </View>
   );
@@ -202,7 +201,7 @@ export default function Profile() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   Profile
               </Text>
           </View>
@@ -227,7 +226,7 @@ export default function Profile() {
                     </View>
                   )}
                 </View>
-                <TouchableOpacity 
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change your profile photo" 
                   onPress={pickImage}
                   disabled={imageUploading}
                   className="absolute bottom-1 right-1 rounded-full items-center justify-center border-[2.5px]"
@@ -237,10 +236,10 @@ export default function Profile() {
                 </TouchableOpacity>
               </View>
 
-              <Text className={`text-2xl font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+              <Text className={`text-2xl font-heading-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                 {profile?.name || user?.fullName || "Rider"}
               </Text>
-              <Text className="text-sm mt-1 font-bold text-accentbg">
+              <Text className="text-sm mt-1 font-sans-bold text-accentbg">
                 {profile?.vehicle_type === 'truck' ? 'Wholesale Capacity (50+ Bottles)' : 
                  profile?.vehicle_type === 'tuktuk' ? 'Medium Payload (10-20 Bottles)' : 
                  'Standard Payload (Max 5 Bottles)'}
@@ -251,7 +250,7 @@ export default function Profile() {
             </View>
 
             <View className="flex-row justify-between items-center mb-2 px-1">
-              <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Profile Details</Text>
+              <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>Profile Details</Text>
               <PressableScale onPress={() => {
                   if (isEditing) {
                       setEditForm({ 
@@ -263,7 +262,7 @@ export default function Profile() {
                   }
                   setIsEditing(!isEditing);
               }} className="px-3 py-1 bg-accentbg/10 rounded-full">
-                <Text className="text-accentbg font-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
+                <Text className="text-accentbg font-sans-semibold">{isEditing ? "Cancel" : "Edit"}</Text>
               </PressableScale>
             </View>
 
@@ -284,14 +283,14 @@ export default function Profile() {
                 {saving ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text className="text-white font-bold text-lg">Save Profile</Text>
+                  <Text className="text-white font-sans-bold text-lg">Save Profile</Text>
                 )}
               </PressableScale>
             )}
 
             {/* Vendor Network Block */}
             <View className="mt-8 mb-4">
-              <Text className={`mb-3 ml-1 font-bold text-lg ${darkTheme ? "text-white" : "text-gray-800"}`}>Vendor Network</Text>
+              <Text className={`mb-3 ml-1 font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-800"}`}>Vendor Network</Text>
               
               {vendorsLoading ? (
                   <View className={`rounded-2xl p-6 items-center justify-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`}>
@@ -305,7 +304,7 @@ export default function Profile() {
                         <Ionicons name="briefcase-outline" size={26} color={BRAND.primary} />
                       </View>
                       <View className="flex-1">
-                        <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>My Operation Base</Text>
+                        <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>My Operation Base</Text>
                         <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>View employer metrics and announcements</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -319,7 +318,7 @@ export default function Profile() {
                         <Ionicons name="people-outline" size={26} color={BRAND.primary} />
                       </View>
                       <View className="flex-1">
-                        <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Associated Vendors</Text>
+                        <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Associated Vendors</Text>
                         <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Associated with {registeredVendors.length} vendor{registeredVendors.length === 1 ? '' : 's'}</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -333,7 +332,7 @@ export default function Profile() {
                         <Ionicons name="business-outline" size={26} color={BRAND.primary} />
                       </View>
                       <View className="flex-1">
-                        <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Discover Vendors</Text>
+                        <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Discover Vendors</Text>
                         <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Find and apply to nearby water vendors</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -349,7 +348,7 @@ export default function Profile() {
                     <Ionicons name="water-outline" size={26} color={bottleDebtCount > 0 ? "#ea580c" : BRAND.primary} />
                   </View>
                   <View className="flex-1">
-                    <Text className={`text-base font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Bottles I'm Holding</Text>
+                    <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Bottles I'm Holding</Text>
                     <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
                       {bottleDebtCount > 0
                         ? `${bottleDebtCount} empt${bottleDebtCount === 1 ? 'y' : 'ies'} to return`
@@ -358,7 +357,7 @@ export default function Profile() {
                   </View>
                   {bottleDebtCount > 0 && (
                     <View className="px-2 py-1 rounded-full bg-orange-500/20 mr-2">
-                      <Text className="text-orange-600 font-bold text-xs">{bottleDebtCount}</Text>
+                      <Text className="text-orange-600 font-sans-bold text-xs">{bottleDebtCount}</Text>
                     </View>
                   )}
                   <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
@@ -371,7 +370,7 @@ export default function Profile() {
               onPress={handleSignOut} 
               className={`py-4 rounded-2xl items-center mt-6 bg-red-500/10`}
             >
-              <Text className="text-red-500 font-bold text-base">Sign Out</Text>
+              <Text className="text-red-500 font-sans-bold text-base">Sign Out</Text>
             </PressableScale>
           </>
         )}

@@ -32,10 +32,11 @@ import {
     Modal,
     ScrollView,
     StatusBar,
-    Text,
     TouchableWithoutFeedback,
     View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
+import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
 
 const { width, height } = Dimensions.get("window");
 
@@ -175,11 +176,11 @@ const Profile = () => {
 								>
 									<BackButtonMinimal />
 								</PressableScale>
-								<Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+								<Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
 									Profile
 								</Text>
 								{/* THEME TOGGLE BUTTON */}
-								<PressableScale
+								<PressableScale accessibilityLabel={darkTheme ? "Switch to the light theme" : "Switch to the dark theme"}
 									activeOpacity={0.7}
 									onPress={() => {
 										Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -210,11 +211,11 @@ const Profile = () => {
 						{/* <-------PROFILE DETAILS: [ PROFILE_PIC , USERNAME , EMAIL , EDIT_PROFILE_BUTTON ]-------> */}
 						<View className="w-full items-center pt-3 pb-5 gap-2">
 							{/* Cashback Banner */}
-							{User?.wallet_balance !== undefined && User?.wallet_balance > 0 && (
+							{!isZeroMoney(User?.wallet_balance) && (
 								<View className={`flex-row items-center px-4 py-2 rounded-full mb-2 border ${darkTheme ? "bg-green-500/20 border-green-500/30" : "bg-green-50 border-green-200"}`}>
 									<Text style={{ fontSize: 18, marginRight: 6 }}>💸</Text>
-									<Text className="font-bold text-sm" style={{ color: BRAND_TOAST.success }}>
-										Drop Cashback: KSh {(User.wallet_balance || 0).toLocaleString()}
+									<Text className="font-sans-bold text-sm" style={{ color: BRAND_TOAST.success }}>
+										Drop Cashback: {formatMoneyShort(User?.wallet_balance, 'KSh')}
 									</Text>
 								</View>
 							)}
@@ -514,7 +515,7 @@ const Profile = () => {
 							{/* TOP_BAR */}
 							<View className=" bg-blac py-6 flex-row justify-between items-center gap-[30px] px-5 ">
 								{/* CLOSE BOTTOMSHEET */}
-								<PressableScale
+								<PressableScale accessibilityLabel="Close"
 									activeOpacity={0.7}
 									onPress={() => {
 										Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -544,7 +545,7 @@ const Profile = () => {
 									}}
 								>
 									<View className=" px-6 py-2 bg-primary rounded-2xl shadow-2xl shadow-black">
-										<Text className="text-lg text-white font-bold">{"Save"}</Text>
+										<Text className="text-lg text-white font-sans-bold">{"Save"}</Text>
 									</View>
 								</PressableScale>
 							</View>
@@ -557,7 +558,7 @@ const Profile = () => {
 											className="w-full h-full z-0 rounded-full"
 										/>
 										{/* <------EDIT BUTTON------> */}
-										<PressableScale
+										<PressableScale accessibilityLabel="Change your profile photo"
 											className="absolute bottom-0 right-0 "
 											activeOpacity={0.7}
 											onPress={pickFile}
@@ -605,7 +606,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold text-xl ${
+																	className={`font-sans-semibold text-xl ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -638,7 +639,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold ${
+																	className={`font-sans-semibold ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -669,7 +670,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold ${
+																	className={`font-sans-semibold ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -700,7 +701,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold ${
+																	className={`font-sans-semibold ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -733,7 +734,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold ${
+																	className={`font-sans-semibold ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -764,7 +765,7 @@ const Profile = () => {
 														>
 															<View className="gap-2">
 																<Text
-																	className={`font-semibold ${
+																	className={`font-sans-semibold ${
 																		darkTheme
 																			? "text-gray-200"
 																			: "text-gray-700"
@@ -791,7 +792,7 @@ const Profile = () => {
 
 							{bottomSheetData === "favourites" && (
 								<View className="flex-1 w-full pt-3 pb-5 px-5">
-									<Text className={`text-2xl font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
+									<Text className={`text-2xl font-heading-semibold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
 										Saved Items
 									</Text>
 									<ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
@@ -819,13 +820,13 @@ const Profile = () => {
 																</View>
 															)}
 															<View className="flex-1">
-																<Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
+																<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
 																<Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`} numberOfLines={1}>
 																	Tap to view details
 																</Text>
 															</View>
 															<View className="items-end">
-																<Text className="font-bold text-green-500">KSH {product.price}</Text>
+																<Text className="font-sans-bold text-green-500">{formatMoney(product.price)}</Text>
 															</View>
 														</View>
 													</PressableScale>

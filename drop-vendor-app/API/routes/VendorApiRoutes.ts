@@ -27,6 +27,62 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/vendor/profile`,
     method: "PUT",
   } as const satisfies ApiRoute,
+  // --- Storefront ---
+  // Split across two authorisation levels on the server, and the split is the
+  // point: the terms of trade are the owner's, the pause is the shop floor's.
+  // `GET` also carries the platform's ceilings, so nothing here is ever a
+  // literal in the app — the same mistake `Cashout.tsx` made with the
+  // withdrawal fee.
+  // Both push-token paths were built inline in `usePushNotifications` off
+  // `process.env.EXPO_PUBLIC_BACKEND_BASE_URL`. The route table is the single
+  // source of truth only while nothing goes round it, and an interpolated base
+  // URL is precisely how something goes round it unnoticed — the inline-path
+  // check matched a quote immediately before `/api/`, and these had a `}`.
+  RegisterPushToken: {
+    path: `${BASE_URL}/api/auth/push-token`,
+    method: "POST",
+  } as const satisfies ApiRoute,
+  /**
+   * Startup's first call, from `app/index.tsx` and `Onboarding.tsx`. Both built
+   * it inline, and `Onboarding` re-declared `BASE_URL` locally to do it — so
+   * the one path the app cannot start without was the one path never checked
+   * against the server.
+   */
+  GetProfileStatus: {
+    path: `${BASE_URL}/api/auth/profile-status?app_type=vendor`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  /** The counterparties on an order, within the active fulfilment window. */
+  GetOrderContacts: (orderId: string): ApiRoute => ({
+    path: `${BASE_URL}/api/contacts/${orderId}`,
+    method: "GET",
+  }),
+  /**
+   * `?app_type=vendor` is not optional: the endpoint defaults to `customer`
+   * and would clear `User.push_token` for a clerk id that has no `User` row,
+   * leaving the store's token registered — the exact failure clearing it is
+   * meant to prevent.
+   */
+  DeletePushToken: {
+    path: `${BASE_URL}/api/auth/push-token?app_type=vendor`,
+    method: "DELETE",
+  } as const satisfies ApiRoute,
+  GetStorefront: {
+    path: `${BASE_URL}/api/vendor/storefront`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  SetStorefrontTerms: {
+    path: `${BASE_URL}/api/vendor/storefront`,
+    method: "PUT",
+  } as const satisfies ApiRoute,
+  PauseStore: {
+    path: `${BASE_URL}/api/vendor/storefront/pause`,
+    method: "POST",
+  } as const satisfies ApiRoute,
+  ResumeStore: {
+    path: `${BASE_URL}/api/vendor/storefront/resume`,
+    method: "POST",
+  } as const satisfies ApiRoute,
   // --- Products ---
   GetProducts: {
     path: `${BASE_URL}/api/vendor/products`,
@@ -114,14 +170,12 @@ const VendorApiRoutes = {
     method: "GET",
   } as const satisfies ApiRoute,
   // --- Payouts ---
-  RequestPayout: {
-    path: `${BASE_URL}/api/payouts/request`,
-    method: "POST",
-  } as const satisfies ApiRoute,
-  GetPayouts: {
-    path: `${BASE_URL}/api/payouts`,
-    method: "GET",
-  } as const satisfies ApiRoute,
+  // `/api/payouts` and `/api/payouts/request` are deliberately absent. Only the
+  // M-Pesa B2C *callback* router is mounted under that prefix in `main.py`;
+  // cashouts go through `WalletWithdraw` (`/api/wallet/withdraw`) and their
+  // history is the wallet ledger, which carries the status, the receipt number
+  // and the failure reason. Both were declared here, unused, pointing at routes
+  // that would 404 — a trap for whoever wires up "payout history" next.
   // --- Notifications ---
   GetNotifications: {
     path: `${BASE_URL}/api/notifications?user_type=vendor`,
@@ -248,5 +302,17 @@ const VendorApiRoutes = {
     method: "GET",
   } as const satisfies ApiRoute,
 };
+
+/**
+ * The socket origin, derived from the one BASE_URL.
+ *
+ * `useWebSocket` used to derive this itself, by splitting a REST path on
+ * `/api/` and calling `.replace('http', 'ws')` unanchored. Both halves are
+ * traps: a base URL that stops containing `/api/` silently yields the whole
+ * REST URL, and the unanchored replace rewrites the first `http` anywhere in
+ * the string. One declaration, next to the paths it shares an origin with.
+ */
+export const WS_BASE_URL =
+  process.env.EXPO_PUBLIC_WS_BASE_URL || BASE_URL.replace(/^http/, "ws");
 
 export default VendorApiRoutes;

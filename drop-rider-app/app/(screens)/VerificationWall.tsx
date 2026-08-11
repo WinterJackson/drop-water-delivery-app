@@ -1,5 +1,6 @@
 import React, { useState, useContext, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Image, ActivityIndicator, StatusBar } from 'react-native';
+import { View, ScrollView, TouchableOpacity, Image, ActivityIndicator, StatusBar } from 'react-native';
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { BRAND } from '@/constants/brandColors';
@@ -145,7 +146,7 @@ export default function VerificationWall() {
       <SafeAreaView className={`flex-1 ${darkTheme ? "bg-[#0A0A0A]" : ""}`}>
         <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
         <View className="px-5 pt-4 pb-2 border-b border-gray-200 dark:border-gray-800">
-          <Text className={`text-2xl font-black ${darkTheme ? "text-white" : "text-black"}`}>Verify Identity</Text>
+          <Text className={`text-2xl font-heading-semibold ${darkTheme ? "text-white" : "text-black"}`}>Verify Identity</Text>
           <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
             To maintain platform safety, please verify your identity before accessing deliveries.
           </Text>
@@ -162,13 +163,13 @@ export default function VerificationWall() {
       <SafeAreaView className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-[#0A0A0A]" : ""}`}>
         <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
         <Ionicons name="cloud-offline-outline" size={48} color={BRAND.primary} />
-        <Text className={`text-lg font-bold mt-4 text-center ${darkTheme ? "text-white" : "text-black"}`}>
+        <Text className={`text-lg font-sans-bold mt-4 text-center ${darkTheme ? "text-white" : "text-black"}`}>
           Couldn't check your verification status
         </Text>
         <PressableScale onPress={checkStatus} disabled={isFetching} className="mt-6 h-[48px] px-8 rounded-full items-center justify-center bg-gray-100 dark:bg-gray-800" style={{ backgroundColor: BRAND.primary }}>
           {isFetching
             ? <ActivityIndicator size="small" color="#fff" />
-            : <Text className="text-white font-bold">Retry</Text>}
+            : <Text className="text-white font-sans-bold">Retry</Text>}
         </PressableScale>
       </SafeAreaView>
     );
@@ -182,7 +183,7 @@ export default function VerificationWall() {
           <View className="w-24 h-24 rounded-full bg-orange-500/10 items-center justify-center mb-6">
             <Ionicons name="time-outline" size={48} color="#f97316" />
           </View>
-          <Text className={`text-2xl font-black text-center mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+          <Text className={`text-2xl font-heading-semibold text-center mb-3 ${darkTheme ? "text-white" : "text-gray-900"}`}>
             Verification Pending
           </Text>
           <Text className={`text-center text-base leading-relaxed ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -191,7 +192,7 @@ export default function VerificationWall() {
           <PressableScale onPress={checkStatus} disabled={isFetching} className="mt-10 px-8 py-3 rounded-full bg-gray-100 dark:bg-gray-800">
              {isFetching
                ? <ActivityIndicator size="small" color={BRAND.primary} />
-               : <Text className={`font-semibold ${darkTheme ? "text-white" : "text-black"}`}>Refresh Status</Text>}
+               : <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>Refresh Status</Text>}
           </PressableScale>
 
           {/* "Less than 24 hours" is a promise, and the rider on hour 70 has
@@ -200,7 +201,7 @@ export default function VerificationWall() {
             onPress={() => router.push("/(screens)/Support" as any)}
             className="mt-4 px-6 py-3"
           >
-            <Text className="font-semibold" style={{ color: BRAND.primary }}>
+            <Text className="font-sans-semibold" style={{ color: BRAND.primary }}>
               Waiting too long? Contact support
             </Text>
           </PressableScale>
@@ -211,7 +212,7 @@ export default function VerificationWall() {
 
   const renderImageUpload = (title: string, subtitle: string, uri: string | null, setter: any) => (
     <View className="mb-6">
-      <Text className={`text-sm font-bold mb-1 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{title}</Text>
+      <Text className={`text-sm font-sans-bold mb-1 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{title}</Text>
       <Text className={`text-xs mb-3 ${darkTheme ? "text-gray-500" : "text-gray-500"}`}>{subtitle}</Text>
       
       <TouchableOpacity 
@@ -226,7 +227,7 @@ export default function VerificationWall() {
         ) : (
           <View className="items-center">
             <Ionicons name="camera-outline" size={32} color={BRAND.primary} />
-            <Text className={`mt-2 font-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Tap to Upload Image</Text>
+            <Text className={`mt-2 font-sans-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Tap to Upload Image</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -238,7 +239,7 @@ export default function VerificationWall() {
       <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
       
       <View className="px-5 pt-4 pb-2 border-b border-gray-200 dark:border-gray-800">
-        <Text className={`text-2xl font-black ${darkTheme ? "text-white" : "text-black"}`}>Verify Identity</Text>
+        <Text className={`text-2xl font-heading-semibold ${darkTheme ? "text-white" : "text-black"}`}>Verify Identity</Text>
         <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
           To maintain platform safety, please verify your identity before accessing deliveries.
         </Text>
@@ -248,7 +249,7 @@ export default function VerificationWall() {
         
         {kycStatus === "rejected" && (
           <View className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl mb-6">
-            <Text className="text-red-500 font-bold mb-1">Verification Failed</Text>
+            <Text className="text-red-500 font-sans-bold mb-1">Verification Failed</Text>
             {/* The reviewer's actual words, when we have them. The generic
                 sentence below is a fallback for rejections recorded before the
                 reason was stored — on its own it tells the rider nothing they
@@ -261,7 +262,7 @@ export default function VerificationWall() {
           </View>
         )}
 
-        <Text className={`text-sm font-bold mb-3 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Vehicle Type</Text>
+        <Text className={`text-sm font-sans-bold mb-3 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Vehicle Type</Text>
         <View className="flex-row gap-2 mb-6">
           {["motorbike", "tuktuk", "truck"].map((type) => (
             <PressableScale 
@@ -270,7 +271,7 @@ export default function VerificationWall() {
               className={`flex-1 py-3 rounded-lg border items-center justify-center ${vehicleType === type ? 'border-primary bg-primary/10' : (darkTheme ? 'border-gray-800 bg-[#151515]' : 'border-gray-200 bg-white')}`}
               style={vehicleType === type ? { borderColor: BRAND.primary, backgroundColor: darkTheme ? `${BRAND.primary}20` : `${BRAND.primary}10` } : {}}
             >
-              <Text className={`capitalize font-semibold ${vehicleType === type ? 'text-primary' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`} style={vehicleType === type ? { color: BRAND.primary } : {}}>
+              <Text className={`capitalize font-sans-semibold ${vehicleType === type ? 'text-primary' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`} style={vehicleType === type ? { color: BRAND.primary } : {}}>
                 {type}
               </Text>
             </PressableScale>
@@ -278,13 +279,13 @@ export default function VerificationWall() {
         </View>
 
         <View className="mb-8">
-          <Text className={`text-sm font-bold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>License Plate Number</Text>
+          <Text className={`text-sm font-sans-bold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>License Plate Number</Text>
           <TextInput
             value={plateNumber}
             onChangeText={setPlateNumber}
             placeholder="e.g., KCA 123G"
             placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3b8"}
-            className={`px-4 py-4 rounded-xl border ${darkTheme ? "bg-[#151515] border-gray-800 text-white" : "bg-white border-gray-200 text-gray-900"} font-medium`}
+            className={`px-4 py-4 rounded-xl border ${darkTheme ? "bg-[#151515] border-gray-800 text-white" : "bg-white border-gray-200 text-gray-900"} font-sans-medium`}
             autoCapitalize="characters"
           />
         </View>
@@ -303,7 +304,7 @@ export default function VerificationWall() {
           {submitting ? (
             <ActivityIndicator color={BRAND.white} />
           ) : (
-            <Text className="text-white font-bold text-lg">Submit Documents</Text>
+            <Text className="text-white font-sans-bold text-lg">Submit Documents</Text>
           )}
         </PressableScale>
 

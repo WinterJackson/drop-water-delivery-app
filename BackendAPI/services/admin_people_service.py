@@ -150,6 +150,11 @@ async def list_people(
     has_more = len(rows) > limit
     rows = rows[:limit]
 
+    if kind == "vendor":
+        from services import vendor_availability
+
+        await vendor_availability.annotate(session, rows)
+
     return {
         "items": [summarise(row, kind) for row in rows],
         "next_cursor": str(rows[-1].id) if has_more and rows else None,
@@ -186,6 +191,15 @@ def summarise(row, kind: Kind) -> dict:
             "vendor_type": row.vendor_type,
             "verification_status": row.verification_status,
             "is_online": bool(row.is_online),
+            # Read off the annotation `vendor_availability` stamped on, never
+            # re-derived here — an operator asked "why is this shop getting no
+            # orders" had `is_online` and nothing else, so a store that had
+            # paused looked identical to one that was simply quiet. The
+            # permissive defaults match the customer-facing schema: a caller
+            # that has not annotated renders a store as open rather than
+            # silently closing it on a screen that decides nothing.
+            "store_state": getattr(row, "store_state", "open"),
+            "is_accepting_orders": bool(getattr(row, "is_accepting_orders", True)),
             "is_active": bool(row.is_active),
             "rating": float(row.rating) if row.rating is not None else None,
             "wallet_balance": money(row.wallet_balance),
@@ -245,9 +259,20 @@ async def get_person(session: AsyncSession, *, kind: Kind, person_id: UUID) -> d
         .all()
     )
 
+    # What the store has set for itself. An operator asked "why is this shop
+    # getting no orders" had `is_online` and nothing else, so a store that had
+    # paused, priced itself out with a minimum, or switched cash off looked
+    # identical to one that was simply quiet.
+    storefront = None
+    if kind == "vendor":
+        from services import vendor_availability
+
+        storefront = (await vendor_availability.store_state(session, row)).as_dict()
+
     return {
         **summarise(row, kind),
         "location_address": getattr(row, "location_address", None),
+        "storefront": storefront,
         "suspended_at": row.suspended_at.isoformat() if row.suspended_at else None,
         "orders": {
             "paid_count": int(totals[0] or 0),

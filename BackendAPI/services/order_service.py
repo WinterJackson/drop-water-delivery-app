@@ -1,11 +1,11 @@
 import logging
 import math
 from datetime import timedelta
+from decimal import Decimal
 from enum import Enum as PyEnum
 from sqlalchemy.ext.asyncio import AsyncSession
-from collections import defaultdict
 from uuid import UUID
-from sqlalchemy import select, and_, update
+from sqlalchemy import select, and_, func, update
 from sqlalchemy.orm import joinedload
 from fastapi import HTTPException
 from geoalchemy2.functions import ST_Distance, ST_DWithin
@@ -16,7 +16,7 @@ from models.order_model import Order, OrderItem
 from models.vendor_model import Vendor
 from models.user_model import User
 from schemas.order_schema import BaseOrder
-from services.expo_push_service import send_push_message
+from utils.money import MoneyIn, money_str
 from services.notification_service import create_notification, push_allowed, queue_push
 from services.dispatch_policy import DispatchPolicy
 import asyncio
@@ -71,29 +71,135 @@ IN_FLIGHT_DELIVERY_STATUSES = (
 )
 
 
-# Valid transitions: from_status -> allowed_to_statuses
+# ── The order state machine ───────────────────────────────────────────────
+#
+# `from_status -> the statuses it may legitimately become`.
+#
+# This table used to describe an *idealised* flow that six of the eight places
+# writing `order_status` did not follow — and the two that did enforce it were
+# enforcing a shape the platform does not have. A rider marking an order picked
+# up straight from `accepted` (the store handed it over before tapping "ready"),
+# a rider dropping an order after pickup, the cash-float sweep releasing an
+# order back to `unassigned`: all real, all routine, none of them in the table.
+#
+# A table that contradicts the code is worse than no table. It reads as
+# documentation, so the next person either trusts it — and is wrong about how
+# their own feature behaves — or "fixes" the six paths to match it and breaks
+# the rider flow.
+#
+# So this now describes what actually happens. What it still buys, and the
+# reason it is enforced at all:
+#
+#   * **Terminal is terminal.** `delivered`, `cancelled` and `rejected` move
+#     nowhere. Money has settled, stock has moved, and the customer has been
+#     charged or refunded — an order that changes after that is one whose
+#     ledger no longer matches its state.
+#   * **No going backwards.** `delivered → preparing` is not a slow update
+#     arriving late, it is a bug, and it silently un-completes a delivery.
+#
+# Per-*caller* rules stay with the caller: whether **this** rider may mark
+# **this** order picked up is a question about the rider, not about the graph.
 VALID_TRANSITIONS = {
-    OrderStatusEnum.PENDING: {OrderStatusEnum.ACCEPTED, OrderStatusEnum.REJECTED, OrderStatusEnum.CANCELLED, OrderStatusEnum.UNASSIGNED},
+    # Awaiting the vendor. A rider may already be attached — `unassigned →
+    # pending` is what claiming an order means — so pickup and delivery are
+    # reachable from here when a store hands over before tapping through.
+    OrderStatusEnum.PENDING: {
+        OrderStatusEnum.ACCEPTED, OrderStatusEnum.REJECTED, OrderStatusEnum.CANCELLED,
+        OrderStatusEnum.UNASSIGNED, OrderStatusEnum.PREPARING, OrderStatusEnum.PICKED_UP,
+        OrderStatusEnum.DELIVERED, OrderStatusEnum.PENDING_REVIEW,
+        OrderStatusEnum.MISMATCH_PENDING,
+    },
+    # Paid and on the radar, with no rider yet.
     OrderStatusEnum.UNASSIGNED: {OrderStatusEnum.PENDING, OrderStatusEnum.CANCELLED},
-    OrderStatusEnum.ACCEPTED: {OrderStatusEnum.PREPARING, OrderStatusEnum.CANCELLED},
-    OrderStatusEnum.PREPARING: {OrderStatusEnum.READY, OrderStatusEnum.CANCELLED},
-    OrderStatusEnum.READY: {OrderStatusEnum.PICKED_UP},
-    OrderStatusEnum.PICKED_UP: {OrderStatusEnum.DELIVERED, OrderStatusEnum.PENDING_REVIEW, OrderStatusEnum.MISMATCH_PENDING},
-    OrderStatusEnum.PENDING_REVIEW: {OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED},
-    OrderStatusEnum.MISMATCH_PENDING: {OrderStatusEnum.DELIVERED},
-    OrderStatusEnum.DELIVERED: set(),  # Terminal state
-    OrderStatusEnum.CANCELLED: set(),  # Terminal state
-    OrderStatusEnum.REJECTED: set(),   # Terminal state
+    OrderStatusEnum.ACCEPTED: {
+        OrderStatusEnum.PREPARING, OrderStatusEnum.CANCELLED, OrderStatusEnum.UNASSIGNED,
+        OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED,
+        OrderStatusEnum.PENDING_REVIEW, OrderStatusEnum.MISMATCH_PENDING,
+    },
+    OrderStatusEnum.PREPARING: {
+        OrderStatusEnum.READY, OrderStatusEnum.CANCELLED, OrderStatusEnum.UNASSIGNED,
+        OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED,
+        OrderStatusEnum.PENDING_REVIEW, OrderStatusEnum.MISMATCH_PENDING,
+    },
+    # Packed and waiting. A rider may still drop it, and support may still
+    # cancel it; the vendor may not, and that is enforced by the vendor route's
+    # own list of statuses rather than here.
+    OrderStatusEnum.READY: {
+        OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED,
+        OrderStatusEnum.UNASSIGNED, OrderStatusEnum.CANCELLED,
+        OrderStatusEnum.PENDING_REVIEW, OrderStatusEnum.MISMATCH_PENDING,
+    },
+    # On the bike. `cancelled` is reachable: a rider whose vehicle fails after
+    # pickup drops the order, and `revert_order_side_effects` undoes it.
+    OrderStatusEnum.PICKED_UP: {
+        OrderStatusEnum.DELIVERED, OrderStatusEnum.PENDING_REVIEW,
+        OrderStatusEnum.MISMATCH_PENDING, OrderStatusEnum.CANCELLED,
+    },
+    # The two paused states. Both resume rather than terminate, and both can
+    # still be cancelled by support while a human decides.
+    OrderStatusEnum.PENDING_REVIEW: {
+        OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED, OrderStatusEnum.CANCELLED,
+    },
+    OrderStatusEnum.MISMATCH_PENDING: {
+        OrderStatusEnum.PICKED_UP, OrderStatusEnum.DELIVERED, OrderStatusEnum.CANCELLED,
+    },
+    OrderStatusEnum.DELIVERED: set(),
+    OrderStatusEnum.CANCELLED: set(),
+    OrderStatusEnum.REJECTED: set(),
 }
 
+#: Nothing moves out of these. Money has settled and stock has moved.
+TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        OrderStatusEnum.DELIVERED.value,
+        OrderStatusEnum.CANCELLED.value,
+        OrderStatusEnum.REJECTED.value,
+    }
+)
+
+
 def validate_status_transition(current: str, new: str) -> bool:
-    """Returns True if the transition is valid per the state machine."""
+    """True if the state machine permits `current -> new`."""
     try:
         current_enum = OrderStatusEnum(current)
         new_enum = OrderStatusEnum(new)
     except ValueError:
         return False
     return new_enum in VALID_TRANSITIONS.get(current_enum, set())
+
+
+def apply_status_transition(order, new_status: str, *, reason: str | None = None) -> str:
+    """Move an order to `new_status`, or refuse.
+
+    **The only place `order_status` is assigned.** It was assigned directly in
+    twelve places across six modules, each with its own idea of what was legal,
+    and two of those consulted a table that disagreed with the other ten. A
+    guard that most writers skip is not a guard — it is a comment that runs.
+
+    Raises 409 rather than 400: the caller's request was well-formed, the order
+    had simply moved on. That distinction matters to a rider whose tap raced the
+    vendor's, and to a client deciding whether retrying is worth anything.
+
+    Returns the status the order was in before, so callers that need to undo
+    something conditionally do not have to read it first.
+    """
+    previous = order.order_status
+    if previous == new_status:
+        return previous
+
+    if not validate_status_transition(previous, new_status):
+        detail = (
+            f"This order is already {previous} and cannot be changed."
+            if previous in TERMINAL_ORDER_STATUSES
+            else f"An order cannot go from '{previous}' to '{new_status}'."
+        )
+        raise HTTPException(status_code=409, detail=detail)
+
+    order.order_status = new_status
+    if reason is not None:
+        order.cancellation_reason = reason
+    return previous
+
 
 # ── Revenue splits ────────────────────────────────────────────────────────
 #
@@ -166,42 +272,20 @@ def _haversine_km(lat_from: float, lng_from: float, lat_to: float, lng_to: float
     return round(EARTH_RADIUS_KM * c, 2)
 
 
-def calculate_cart_payload(items) -> dict:
-    """Sum the total weight of all cart items to determine required vehicle class.
-    Returns { 'total_weight_kg': float, 'required_vehicle': str, 'total_quantity': int }
-    """
-    total_weight_kg = 0.0
-    total_quantity = 0
-    for item in items:
-        product = item.product
-        total_quantity += item.quantity
-        if product and hasattr(product, 'weight_kg'):
-            total_weight_kg += float(product.weight_kg) * item.quantity
-
-    if total_weight_kg > 0:
-        if total_weight_kg <= 100.0:
-            required_vehicle = "motorbike"
-        elif total_weight_kg <= 400.0:
-            required_vehicle = "tuktuk"
-        else:
-            required_vehicle = "truck"
-    else:
-        # Fallback to quantity based capacity logic from DispatchPolicy
-        required_vehicle = DispatchPolicy.get_vehicle_class(total_quantity)
-
-    return {"total_weight_kg": round(total_weight_kg, 2), "required_vehicle": required_vehicle, "total_quantity": total_quantity}
-
-
 def calculate_delivery_fee(
     lat_from: float, lng_from: float,
     lat_to: float, lng_to: float,
     vendor_type: str = "retail_refill",
     vehicle_class: str = "motorbike",
-    wholesale_base: float = 0.0,
-    wholesale_per_km: float = 0.0,
+    wholesale_base: MoneyIn = 0,
+    wholesale_per_km: MoneyIn = 0,
     delivery_type: str = "quick_swap"
 ) -> dict:
-    """Returns { 'distance_km': float, 'fee': float, 'estimated_minutes': int, 'vehicle_class': str }"""
+    """`{ 'distance_km': float, 'fee': Decimal, 'estimated_minutes': int, 'vehicle_class': str }`
+
+    The fee is `Decimal` — it is money. The distance is `float` and stays one:
+    it is a measurement, and nothing is charged per metre.
+    """
     if not all([lat_from, lng_from, lat_to, lng_to]):
         return {"distance_km": 0.0, "fee": DispatchPolicy.get_delivery_fee(0.0, vendor_type, vehicle_class, wholesale_base, wholesale_per_km, delivery_type), "estimated_minutes": 15, "vehicle_class": vehicle_class}
 
@@ -218,23 +302,35 @@ def calculate_delivery_fee(
 
 
 def calculate_revenue_splits(
-    product_total: float,
-    delivery_fee: float,
+    product_total: MoneyIn,
+    delivery_fee: MoneyIn,
     vendor_type: str = "retail_refill",
-    bottle_deposit: float = 0.0,
-    rider_surcharges: float = 0.0,
+    bottle_deposit: MoneyIn = 0,
+    rider_surcharges: MoneyIn = 0,
     delivery_type: str = "quick_swap",
-    welcome_discount: float = 0.0,
-    debt_settlement: float = 0.0
-) -> dict:
+    welcome_discount: MoneyIn = 0,
+    debt_settlement: MoneyIn = 0,
+    payment_method: str = "mpesa",
+) -> dict[str, Decimal]:
     """Calculate platform revenue splits for a single order.
     FIN-01 FIX: Uses Decimal for currency precision to prevent ledger drift.
+    Takes and returns `Decimal` — anything `Decimal(str(...))` accepts goes in.
     Returns { 'vendor_commission', 'service_fee', 'rider_commission', 'platform_total',
               'vendor_net', 'rider_net', 'surge_fee', 'delivery_markup' }
 
     The three components sum to the order's gross by construction:
 
         vendor_net + rider_net + platform_total == gross_before_discounts − welcome_discount
+
+    `delivery_markup` is taken **out of** the delivery fee, not added beside it,
+    so the fee the customer is shown is the fee they pay. It used to be additive
+    on wholesale: the cart rendered `delivery_fee` and charged
+    `delivery_fee + markup`, so the line item understated itself.
+
+    `platform_cost` sits outside that identity on purpose — it is money that
+    never reaches the platform (Safaricom's tariff, or the cost of handling
+    cash), not a share of what the customer paid. `platform_net` is the figure
+    the business actually keeps.
 
     A test asserts that identity across every combination of vendor type,
     delivery type and surcharge, because a split that does not add up is money
@@ -269,16 +365,23 @@ def calculate_revenue_splits(
         rider_commission = Decimal("0.00")
     else:
         # keep_my_bottle carries a premium for the extra bottle handling.
+        from services import delivery_types
+
         commission_rate = _config.get_decimal("gig_rider_commission_rate")
-        if delivery_type == "keep_my_bottle":
-            commission_rate += _config.get_decimal("keep_my_bottle_commission_premium")
+        if delivery_types.is_round_trip(delivery_type):
+            commission_rate += _config.get_decimal("refill_mine_commission_premium")
         rider_commission = (_df * commission_rate).quantize(TWO, rounding=ROUND_HALF_UP)
 
-    # ── Wholesale Delivery Markup ──
-    if vendor_type == "wholesale_b2b":
-        delivery_markup = (_df * _config.get_decimal("wholesale_delivery_markup_rate")).quantize(TWO, rounding=ROUND_HALF_UP)
-    else:
-        delivery_markup = Decimal("0.00")
+    # ── Delivery Markup ──
+    # Platform margin taken *inside* the delivery fee rather than added beside
+    # it. Retail had none: on the side of the business with a rider to pay, cash
+    # to police and the thinnest basket, the platform's entire margin was a flat
+    # service fee and a percentage of one bottle of water.
+    markup_key = (
+        "wholesale_delivery_markup_rate" if vendor_type == "wholesale_b2b"
+        else "retail_delivery_markup_rate"
+    )
+    delivery_markup = (_df * _config.get_decimal(markup_key)).quantize(TWO, rounding=ROUND_HALF_UP)
 
     # ── Surge Pricing ──
     surge_fee = _config.get_decimal("surge_fee") if is_surge_active() else Decimal("0.00")
@@ -304,21 +407,44 @@ def calculate_revenue_splits(
     # understated what the platform had actually retained. `rider_net` is now
     # zero on wholesale, which is what the settlement path has always assumed.
     if vendor_type == "wholesale_b2b":
-        vendor_net = (_pt - vendor_commission + _df + _bd + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
+        vendor_net = (_pt - vendor_commission + _df - delivery_markup + _bd + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
         rider_net = Decimal("0.00")
     else:
         vendor_net = (_pt - vendor_commission + _bd).quantize(TWO, rounding=ROUND_HALF_UP)
-        rider_net = (_df - rider_commission + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
+        rider_net = (_df - rider_commission - delivery_markup + _rs).quantize(TWO, rounding=ROUND_HALF_UP)
 
+    # ── What the order actually costs the platform ──
+    # Safaricom charges the business on collection, and a cash order costs
+    # reconciliation and float risk instead. Neither was modelled anywhere, so
+    # every margin figure on the console was gross dressed up as net — on a
+    # KSH 442 order the M-Pesa tariff alone is a large share of the whole cut.
+    #
+    # Deliberately **outside** the split identity: this is money that never
+    # reaches the platform, not a share of what the customer paid. The three
+    # nets still sum to the gross; `platform_net` is what is left afterwards.
+    if payment_method == "cash":
+        platform_cost = _config.get_decimal("cash_handling_cost")
+    else:
+        platform_cost = _config.get_decimal("mpesa_collection_cost")
+    platform_cost = platform_cost.quantize(TWO, rounding=ROUND_HALF_UP)
+    platform_net = (platform_total - platform_cost).quantize(TWO, rounding=ROUND_HALF_UP)
+
+    # `Decimal`, not `float`. Every one of these is written to a `Numeric(10, 2)`
+    # column and read back into the order's frozen breakdown, and every caller
+    # was wrapping the result straight back up in `Decimal(str(...))` — a float
+    # round trip in the middle of the one path that decides what a vendor, a
+    # rider and the platform are each owed.
     return {
-        "vendor_commission": float(vendor_commission),
-        "service_fee": float(service_fee),
-        "rider_commission": float(rider_commission),
-        "platform_total": float(platform_total),
-        "vendor_net": float(vendor_net),
-        "rider_net": float(rider_net),
-        "surge_fee": float(surge_fee),
-        "delivery_markup": float(delivery_markup),
+        "vendor_commission": vendor_commission,
+        "service_fee": service_fee,
+        "rider_commission": rider_commission,
+        "platform_total": platform_total,
+        "platform_cost": platform_cost,
+        "platform_net": platform_net,
+        "vendor_net": vendor_net,
+        "rider_net": rider_net,
+        "surge_fee": surge_fee,
+        "delivery_markup": delivery_markup,
     }
 
 
@@ -603,8 +729,8 @@ async def dispatch_order_to_riders(
                                 "lng": order.vendor.lng,
                             },
                             "payment_method": order.payment_method,
-                            "vendor_net": float(order.vendor_net or 0),
-                            "platform_total": float(order.platform_total or 0),
+                            "vendor_net": money_str(order.vendor_net),
+                            "platform_total": money_str(order.platform_total),
                             "distance_km": order.distance_km,
                             "lat_from": order.lat_from,
                             "lng_from": order.lng_from,
@@ -796,8 +922,8 @@ async def broadcast_trip_radar(
                                 "lng": order.vendor.lng,
                             },
                             "payment_method": order.payment_method,
-                            "vendor_net": float(order.vendor_net or 0),
-                            "platform_total": float(order.platform_total or 0),
+                            "vendor_net": money_str(order.vendor_net),
+                            "platform_total": money_str(order.platform_total),
                             "distance_km": order.distance_km,
                             "lat_from": order.lat_from,
                             "lng_from": order.lng_from,
@@ -902,6 +1028,7 @@ async def create_order(
           lat=lat,
           lng=lng,
           wallet_balance_override=locked_balance,
+          payment_method=payment_method,
       )
   elif quote.wallet_discount > locked_balance:
       # The balance moved between pricing and creation (a concurrent order or
@@ -912,9 +1039,15 @@ async def create_order(
           detail="Your wallet balance changed while checking out. Please review your cart and try again.",
       )
 
-  # Re-run every gate under the lock — stock and debt can move between pricing
-  # and creation even though the cart itself is locked.
-  validate_quote(quote, pre_order_items, user=user)
+  # Re-run every gate under the lock — stock, debt and the store's own opening
+  # state can all move between pricing and creation even though the cart itself
+  # is locked. This is the last check before an order exists, and it is the one
+  # that has to hold: everything after it is a refund.
+  validate_quote(quote, pre_order_items, user=user, vendor=vendor)
+
+  from services import vendor_availability
+
+  await vendor_availability.assert_store_accepting(session, vendor)
 
   import h3
   order_h3_index = h3.latlng_to_cell(lat, lng, 8)
@@ -949,6 +1082,11 @@ async def create_order(
       service_fee=revenue["service_fee"],
       rider_commission=revenue["rider_commission"],
       platform_total=revenue["platform_total"],
+      # What this order cost the platform to process, and what survived it.
+      # Frozen here like every other split: changing the tariff setting tomorrow
+      # must not restate what yesterday's orders earned.
+      platform_cost=revenue["platform_cost"],
+      platform_net=revenue["platform_net"],
       vendor_net=revenue["vendor_net"],
       rider_net=revenue["rider_net"],
       surge_fee=quote.surge_fee,
@@ -1541,11 +1679,56 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
     # cancellation carries a fee. It is added to the customer's debt balance,
     # which their next order collects as a visible line item — the balance is no
     # longer a permanent block on the account.
-    if order.order_status == "accepted" and user:
-        penalty = _config.get_decimal("late_cancellation_penalty")
-        if penalty > 0:
+    #
+    # Two figures, not one. Cancelling before pickup costs the rider a wasted
+    # approach; cancelling after costs the vendor an order they have already
+    # prepared *and* the rider a full trip. A single flat penalty is unfair at
+    # one end and toothless at the other.
+    #
+    # And the first cancellation in a rolling window is free. Genuine mistakes
+    # happen, and a support ticket arguing about KSH 50 costs more to handle
+    # than the penalty collects.
+    PENALISED_STATUSES = {
+        "accepted": "late_cancellation_penalty",
+        "preparing": "late_cancellation_penalty",
+        "ready": "late_cancellation_penalty",
+        "picked_up": "late_cancellation_penalty_after_pickup",
+    }
+    if order.order_status in PENALISED_STATUSES and user:
+        penalty = _config.get_decimal(PENALISED_STATUSES[order.order_status])
+        allowance = _config.get_int("free_cancellations_per_month")
+
+        recent = 0
+        if allowance > 0:
+            from datetime import datetime as _dt, timezone as _tz
+
+            window_start = _dt.now(_tz.utc) - timedelta(days=30)
+            # Counted by `cancellation_reason`, which `revert_order_side_effects`
+            # writes — the customer's own cancellations only. A vendor rejecting
+            # an order is not the customer's mistake and must not consume their
+            # allowance.
+            recent = (
+                await session.execute(
+                    select(func.count(Order.id)).where(
+                        Order.customer_id == user_id,
+                        Order.order_status == "cancelled",
+                        Order.cancellation_reason == "cancelled_by_customer",
+                        Order.updated_at >= window_start,
+                    )
+                )
+            ).scalar() or 0
+
+        if recent < allowance:
+            logger.info(
+                "Cancellation by user %s waived: %s of %s free cancellations used.",
+                user_id, recent, allowance,
+            )
+        elif penalty > 0:
             user.debt_balance = Decimal(str(user.debt_balance or 0)) + penalty
-            logger.info("Cancellation penalty of KSH %s applied to user %s", penalty, user_id)
+            logger.info(
+                "Cancellation penalty of KSH %s applied to user %s (status %s)",
+                penalty, user_id, order.order_status,
+            )
 
     # Release rider availability if one was already assigned
     if order.deliverer_id:
@@ -1553,7 +1736,7 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
         if deliverer:
             deliverer.is_available = True
 
-    order.order_status = "cancelled"
+    apply_status_transition(order, "cancelled")
 
     await revert_order_side_effects(
         session, order, reason="cancelled_by_customer", customer=user
@@ -1806,7 +1989,7 @@ async def resolve_address_mismatch(session: AsyncSession, user_id: UUID, order_i
         raise HTTPException(status_code=400, detail="Invalid action")
 
     # Transition back to picked_up so rider can complete delivery
-    order.order_status = "picked_up"
+    apply_status_transition(order, "picked_up")
     await session.commit()
 
     # Notify Rider

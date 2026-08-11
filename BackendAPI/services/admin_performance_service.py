@@ -28,9 +28,9 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.deliverer_model import Deliverer, KYCStatus
 from models.order_model import Order
 from models.vendor_model import Vendor
+from models.deliverer_model import Deliverer, KYCStatus
 
 #: Below this, a rate is noise. One delivery and one cancellation is 100%.
 MIN_ORDERS_FOR_RANKING = 5

@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field
 from uuid import UUID
 from typing import Optional, List
 from schemas.order_schema import OrderWithDetails
-from schemas.order_schema import OrderWithDetails
 from schemas.deliverer_schemas import DelivererProfileResponse
+from utils.money import money_str
 from dependencies.auth_dependencies import (
     authorise_order_access,
     get_current_rider,
@@ -121,8 +121,29 @@ async def rider_profile(
     deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=clerk_id)
     if not deliverer:
         raise HTTPException(status_code=404, detail="Rider not found. Please register first.")
-    
-    return deliverer
+
+    from models.vendor_model import Vendor
+    from services.dispatch_policy import DispatchPolicy
+
+    payload = DelivererProfileResponse.model_validate(deliverer)
+
+    # The radius the rider is actually searched within, read from the configured
+    # setting rather than written as a literal in the app.
+    #
+    # `rider_search_bounds` picks the radius from the *order's* vendor type, so
+    # a gig rider is searched at 2.5 km for a retail order and 15 km for a
+    # wholesale one. A fleet rider only ever gets their employer's work, so for
+    # them there is a single honest answer and it is their employer's type —
+    # worth one row on a profile fetch to avoid telling a wholesale fleet rider
+    # their range is 2.5 km.
+    vendor_type = "retail_refill"
+    if deliverer.employer_vendor_id:
+        employer = await db.get(Vendor, deliverer.employer_vendor_id)
+        if employer and employer.vendor_type:
+            vendor_type = employer.vendor_type
+
+    payload.operation_radius_km = DispatchPolicy.max_distance_km(vendor_type)
+    return payload
 
 
 @router.put("/profile")
@@ -400,6 +421,7 @@ async def rider_bottle_debt(
     silently on every quick_swap delivery and only the vendor could see it. A rider
     cannot return bottles they do not know they have.
     """
+    from services.admin_bottle_service import STALE_AFTER_DAYS
     from services.bottle_ledger_service import get_rider_outstanding
 
     deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
@@ -410,6 +432,10 @@ async def rider_bottle_debt(
     return {
         "vendors": vendors,
         "total_bottles": sum(v["total_bottles"] for v in vendors),
+        # The threshold the rider is actually judged against, so the app states
+        # the platform's number rather than one of its own.
+        "stale_after_days": STALE_AFTER_DAYS,
+        "stale_vendors": sum(1 for v in vendors if v["is_stale"]),
     }
 
 
@@ -432,6 +458,68 @@ async def rider_bottle_ledger(
     }
 
 
+@router.get("/cash-eligibility")
+async def rider_cash_eligibility(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_rider),
+):
+    """Whether this rider may take cash orders, and how far off they are.
+
+    Deliberately `get_current_rider`, not `get_verified_rider`: an unverified
+    rider is exactly the person who needs to read this, and gating the
+    explanation behind the thing being explained is how a rider ends up
+    watching cash orders they cannot accept with no idea why.
+
+    Every threshold comes back with the measurement beside it. A verdict on its
+    own — "not eligible" — is a support ticket; "you have 11 of 25 deliveries"
+    is something a rider can go and do.
+    """
+    from services import cod_policy, platform_config_service as config
+
+    deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
+    if not deliverer:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    await config.ensure_fresh(db)
+    assessment = await cod_policy.assess_rider(db, deliverer)
+    carrying = await cod_policy.open_cash_orders(db, deliverer.id)
+    taken_today = await cod_policy.cash_taken_today(db, deliverer.id)
+
+    return {
+        "cash_enabled_on_platform": config.get_bool("cod_enabled"),
+        "eligible": assessment.eligible,
+        "tier": assessment.tier,
+        "reasons": assessment.reasons,
+        "max_order_value": money_str(assessment.max_order_value),
+        # Measured against required, so the app renders progress rather than a
+        # verdict. None of these is ever a literal in the app.
+        "requirements": {
+            "deliveries": {
+                "have": assessment.deliveries,
+                "need": config.get_int("cod_min_rider_deliveries"),
+            },
+            "completion_rate": {
+                "have": round(assessment.completion_rate, 4),
+                "need": float(config.get("cod_min_rider_completion_rate")),
+            },
+            "rating": {
+                "have": round(assessment.rating, 2),
+                "need": float(config.get("cod_min_rider_rating")),
+            },
+            "account_age_days": {
+                "have": assessment.account_age_days,
+                "need": config.get_int("cod_min_rider_account_age_days"),
+            },
+        },
+        "limits": {
+            "carrying_now": carrying,
+            "max_concurrent": config.get_int("cod_max_concurrent_orders"),
+            "taken_today": money_str(taken_today),
+            "daily_cap": money_str(config.get_decimal("cod_max_daily_exposure")),
+        },
+    }
+
+
 @router.get("/wallet-summary")
 async def rider_wallet_summary(
     db: AsyncSession = Depends(get_db),
@@ -445,7 +533,11 @@ async def rider_wallet_summary(
     `wallet_balance` made a refused withdrawal look arbitrary.
     """
     from decimal import Decimal
-    from services.settlement_service import available_for_payout, committed_cash_float
+    from services.settlement_service import (
+        available_for_payout,
+        committed_cash_float,
+        withdrawal_terms,
+    )
 
     deliverer = await get_deliverer_by_clerk_id(session=db, clerk_id=user["sub"])
     if not deliverer:
@@ -456,12 +548,25 @@ async def rider_wallet_summary(
     available = await available_for_payout(
         db, provider_id=deliverer.id, provider_type="rider", wallet_balance=balance,
     )
+    minimum, fee, waiver = await withdrawal_terms(db, provider_type="rider")
 
     return {
-        "wallet_balance": float(balance),
-        "committed_cash_float": float(committed),
-        "available_for_withdrawal": float(available),
+        "wallet_balance": money_str(balance),
+        "committed_cash_float": money_str(committed),
+        "available_for_withdrawal": money_str(available),
         # Negative means the rider owes the platform — settle before they can
         # accept further cash orders.
         "is_in_arrears": balance < 0,
+        # The rules the withdrawal will actually be judged by, from the same
+        # `withdrawal_terms` the withdrawal itself uses. The app had all three
+        # as literals — a minimum of 500, a fee of 15 and a waiver at 1,000 —
+        # so editing any of them on the console changed what was charged and
+        # not what the rider was told. Business values are rows, not constants.
+        "withdrawal": {
+            "minimum": money_str(minimum),
+            "fee": money_str(fee),
+            # Compared against the **amount withdrawn**, never the balance held.
+            # See `settlement_service.fee_for`.
+            "fee_waiver_threshold": money_str(waiver),
+        },
     }

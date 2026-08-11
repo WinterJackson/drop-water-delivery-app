@@ -196,6 +196,13 @@ const RiderApiRoutes = {
    * withdrawn. `wallet_balance` alone is misleading: a rider carrying cash orders
    * holds money that settles the vendor and platform cuts on delivery.
    */
+  // Whether this rider may take cash orders, and how far off they are. Every
+  // threshold comes back measured against the requirement, so the app never
+  // states a number of its own — the same rule the withdrawal terms follow.
+  CashEligibility: {
+    path: `${BASE_URL}/api/rider/cash-eligibility`,
+    method: "GET",
+  } as const satisfies ApiRoute,
   WalletSummary: {
     path: `${BASE_URL}/api/rider/wallet-summary`,
     method: "GET",
@@ -210,6 +217,24 @@ const RiderApiRoutes = {
   BottleLedger: (limit = 50, offset = 0): ApiRoute => ({
     path: `${BASE_URL}/api/rider/bottle-ledger?limit=${limit}&offset=${offset}`,
     method: "GET",
+  }),
+  // --- Deposit collections ---
+  // Collecting a customer's bottles so their deposit can be returned. The
+  // rider's confirmation is one of the two counts that release the money, and
+  // it also makes them the holder of those bottles on the ledger above — which
+  // is why this needs a destination store, not just a number.
+  /** Unclaimed collections, plus anything this rider has already taken on. */
+  BottleCollections: {
+    path: `${BASE_URL}/api/rider/bottle-returns`,
+    method: "GET",
+  } as const satisfies ApiRoute,
+  ClaimBottleCollection: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/rider/bottle-returns/${id}/claim`,
+    method: "POST",
+  }),
+  ConfirmBottleCollection: (id: string): ApiRoute => ({
+    path: `${BASE_URL}/api/rider/bottle-returns/${id}/confirm`,
+    method: "POST",
   }),
   // --- Maps ---
   /**
@@ -261,8 +286,17 @@ const RiderApiRoutes = {
     method: "POST",
   } as const satisfies ApiRoute,
   /** Detach it. Must run *before* sign-out — the endpoint is authenticated. */
+  /**
+   * `?app_type=rider` is not optional. The endpoint defaults to `customer`,
+   * looks up a `User` row by this clerk id, finds none — a rider has no `User`
+   * row — clears nothing, commits and answers 200. So the call *looked* like it
+   * worked while `Deliverer.push_token` stayed registered, and on a shared
+   * device the next rider to sign in kept receiving the previous rider's
+   * delivery offers. The vendor app hit the same default and fixed it; this
+   * copy stayed broken.
+   */
   DeletePushToken: {
-    path: `${BASE_URL}/api/auth/push-token`,
+    path: `${BASE_URL}/api/auth/push-token?app_type=rider`,
     method: "DELETE",
   } as const satisfies ApiRoute,
   /** Whether this Clerk account already has a rider profile. */
@@ -307,5 +341,17 @@ const RiderApiRoutes = {
     method: "DELETE",
   } as const satisfies ApiRoute,
 };
+
+/**
+ * The socket origin, derived from the one BASE_URL.
+ *
+ * `useWebSocket` used to derive this itself, by splitting a REST path on
+ * `/api/` and calling `.replace('http', 'ws')` unanchored. Both halves are
+ * traps: a base URL that stops containing `/api/` silently yields the whole
+ * REST URL, and the unanchored replace rewrites the first `http` anywhere in
+ * the string. One declaration, next to the paths it shares an origin with.
+ */
+export const WS_BASE_URL =
+  process.env.EXPO_PUBLIC_WS_BASE_URL || BASE_URL.replace(/^http/, "ws");
 
 export default RiderApiRoutes;

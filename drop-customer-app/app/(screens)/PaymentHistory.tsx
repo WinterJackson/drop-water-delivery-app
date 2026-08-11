@@ -2,30 +2,30 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentRecordSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { usePaymentHistory } from "@/hooks/queries/useOrders";
+import { usePaymentHistory, type PaymentHistoryEntry } from "@/hooks/queries/useOrders";
+import { formatMoney } from "@/utils/money";
 import { useRouter } from "expo-router";
 import { useContext } from "react";
 import { PressableScale } from "@/components/ui/PressableScale";
 import {
     RefreshControl,
     StatusBar,
-    Text,
-    View
+    View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BRAND } from "@/constants/brandColors";
 
 const FlashList = OriginalFlashList as any;
 
-interface PaymentRecord {
-    id: string;
-    order_id: string;
-    total_price: number;
-    order_status: string;
-    created_at: string;
-    vendor?: { business_name: string };
-}
+/**
+ * The shape here is `PaymentHistoryEntry` from the hook — the endpoint's own
+ * contract. This screen used to declare its own `PaymentRecord` with
+ * `total_price`, `order_status` and a nested `vendor`, none of which
+ * `/api/payments/history` has ever sent. Every row rendered "KSH 0.00" under an
+ * unmatched status, and tapping one opened the *payment's* id as an order.
+ */
 
 export default function PaymentHistory() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -34,20 +34,26 @@ export default function PaymentHistory() {
     const insets = useSafeAreaInsets();
     const { data: payments = [], isLoading: loading, refetch: fetchPayments } = usePaymentHistory();
 
+    // These are *payment* statuses — the values `Payment.status` and the cash
+    // branch of `/api/payments/history` actually take. The screen previously
+    // switched on order statuses ("delivered", "rejected"), which this endpoint
+    // has never sent, so every row fell through to the default.
     const getStatusColor = (status: string) => {
         switch (status) {
-            case "delivered": return "text-green-500";
-            case "cancelled": return "text-red-500";
-            case "rejected": return "text-red-500";
+            case "paid": return "text-green-500";
+            case "failed":
+            case "refund_failed": return "text-red-500";
+            case "refunded": return "text-blue-400";
             default: return "text-yellow-500";
         }
     };
 
     const getStatusIcon = (status: string) => {
         switch (status) {
-            case "delivered": return "✅";
-            case "cancelled": return "❌";
-            case "rejected": return "❌";
+            case "paid": return "✅";
+            case "failed":
+            case "refund_failed": return "❌";
+            case "refunded": return "↩️";
             case "pending": return "⏳";
             default: return "🔄";
         }
@@ -71,7 +77,7 @@ export default function PaymentHistory() {
                 <PressableScale onPress={() => router.back()} activeOpacity={0.7}>
                     <BackButtonMinimal />
                 </PressableScale>
-                <Text className={`font-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+                <Text className={`font-sans-bold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
                     Payment History
                 </Text>
             </View>
@@ -107,7 +113,7 @@ export default function PaymentHistory() {
                         if (loading && payments.length === 0) {
                             return <PaymentRecordSkeleton />;
                         }
-                        const payment = item as PaymentRecord;
+                        const payment = item as PaymentHistoryEntry;
                         return (
                             <PressableScale
                                 key={payment.id}
@@ -115,7 +121,10 @@ export default function PaymentHistory() {
                                 onPress={() =>
                                     router.push({
                                         pathname: "/(screens)/OrderDetail",
-                                        params: { orderId: payment.id },
+                                        // `order_id`, never `id`: a cash entry's id is
+                                        // `cash-<order id>` and an M-Pesa entry's is the
+                                        // payment row's, neither of which opens an order.
+                                        params: { orderId: payment.order_id },
                                     })
                                 }
                                 className="mb-3"
@@ -125,27 +134,44 @@ export default function PaymentHistory() {
                                 >
                                     <View className="flex-row justify-between items-center mb-2">
                                         <View className="flex-row items-center gap-2">
-                                            <Text style={{ fontSize: 18 }}>{getStatusIcon(payment.order_status)}</Text>
-                                            <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
-                                                {payment.vendor?.business_name || "Vendor"}
+                                            <Text style={{ fontSize: 18 }}>{getStatusIcon(payment.status)}</Text>
+                                            <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-black"}`}>
+                                                {payment.vendor_name || "Vendor"}
                                             </Text>
                                         </View>
-                                        <Text className={`font-bold text-lg text-green-500`}>
-                                            KSH {payment.total_price?.toFixed(2) || "0.00"}
+                                        <Text className={`font-sans-bold text-lg text-green-500`}>
+                                            {formatMoney(payment.amount)}
                                         </Text>
                                     </View>
-                                    <View className="flex-row justify-between items-center">
+                                    <View className="flex-row justify-between items-center gap-2">
                                         <Text className={`text-sm ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
-                                            {new Date(payment.created_at).toLocaleDateString("en-US", {
-                                                day: "numeric",
-                                                month: "short",
-                                                year: "numeric",
-                                            })}
+                                            {payment.created_at
+                                                ? new Date(payment.created_at).toLocaleDateString("en-US", {
+                                                      day: "numeric",
+                                                      month: "short",
+                                                      year: "numeric",
+                                                  })
+                                                : "—"}
+                                            {"  ·  "}
+                                            {payment.payment_method === "cash" ? "Cash" : "M-PESA"}
                                         </Text>
-                                        <Text className={`text-sm font-semibold capitalize ${getStatusColor(payment.order_status)}`}>
-                                            {payment.order_status.replace("_", " ")}
+                                        <Text className={`text-sm font-sans-semibold capitalize ${getStatusColor(payment.status)}`}>
+                                            {payment.status.replace(/_/g, " ")}
                                         </Text>
                                     </View>
+                                    {/* The receipt is what a customer is asked for when
+                                        they query a charge, and the failure reason is
+                                        the backend's own words. Both were dropped. */}
+                                    {payment.mpesa_receipt ? (
+                                        <Text className={`text-xs mt-2 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                            Receipt {payment.mpesa_receipt}
+                                        </Text>
+                                    ) : null}
+                                    {payment.failure_reason ? (
+                                        <Text className="text-xs mt-2 text-red-400">
+                                            {payment.failure_reason}
+                                        </Text>
+                                    ) : null}
                                 </View>
                             </PressableScale>
                         );

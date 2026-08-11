@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { Ionicons } from '@expo/vector-icons';
 import PressableScale from '@/components/ui/PressableScale';
 import { UIThemeContext } from '@/context/ThemeContext';
@@ -28,7 +29,7 @@ export default function StatCard({ title, value, icon, color }: StatCardProps) {
         <Ionicons name={icon} size={20} color={color || BRAND.primary} />
       </View>
       <View>
-        <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`} numberOfLines={1}>
+        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`} numberOfLines={1}>
           {value}
         </Text>
         <Text className={`text-xs mt-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`} numberOfLines={1}>

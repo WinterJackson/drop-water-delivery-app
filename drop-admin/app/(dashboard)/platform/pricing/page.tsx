@@ -4,6 +4,8 @@ import { Badge, Card, CardHeader, EmptyState, ErrorState } from "@/components/ui
 import { ApiError, get } from "@/lib/api/server";
 import { formatDateTime } from "@/lib/utils/format";
 import { PricingEditor, type Setting } from "./PricingEditor";
+import { NoAccess } from "@/components/shell/NoAccess";
+import { pageAccess } from "@/lib/page-access";
 
 export const metadata = { title: "Pricing & business rules" };
 
@@ -28,6 +30,13 @@ function describe(value: unknown): string {
 }
 
 export default async function PricingPage() {
+  // Gated on the capability `nav-config` declares for `/platform/pricing` — the
+  // same declaration that hides this entry in the sidebar, so the two can
+  // never disagree. The backend enforces it again regardless.
+  const access = await pageAccess("/platform/pricing");
+  if (!access.allowed) return <NoAccess permission={access.permission} />;
+
+
   let config: ConfigResponse;
   let history: { items: HistoryEntry[] };
   try {

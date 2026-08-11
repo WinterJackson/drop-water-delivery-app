@@ -6,8 +6,6 @@ from fastapi import HTTPException
 from uuid import UUID
 
 from models.order_model import Order
-from models.vendor_model import Vendor
-from models.deliverer_model import Deliverer
 from schemas.contact_schemas import OrderContactsResponse, ContactInfo
 
 logger = logging.getLogger(__name__)

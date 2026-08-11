@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
-import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
+import { View, ScrollView, ActivityIndicator } from 'react-native';
+import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +9,7 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { RiderOrder, useAcceptOrder } from '@/hooks/queries/useRiderData';
 import { useToastStore } from '@/stores/toastStore';
 import { HorizontalListSkeleton } from '../skeletons/ContextualSkeletons';
+import { formatMoney } from "@/utils/money";
 
 interface TripRadarListProps {
   orders: RiderOrder[];
@@ -28,7 +30,7 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
         <View className="px-5 flex-row items-center justify-between mb-3">
           <View className="flex-row items-center gap-2">
             <Ionicons name="pulse-outline" size={24} color={BRAND.primary} />
-            <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
+            <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
           </View>
         </View>
         <View className="pl-5">
@@ -43,7 +45,7 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
       <View className="mt-4 mb-2 px-5">
         <View className="flex-row items-center gap-2 mb-3">
           <Ionicons name="pulse-outline" size={24} color={BRAND.primary} />
-          <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
+          <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
         </View>
         <View 
           className={`w-full rounded-2xl p-6 items-center justify-center border border-dashed ${darkTheme ? "bg-surface-container border-gray-700" : "bg-white border-gray-300"}`}
@@ -51,7 +53,7 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
           <View className={`w-12 h-12 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-blue-900/20" : "bg-blue-50"}`}>
             <Ionicons name="planet-outline" size={24} color={BRAND.primary} />
           </View>
-          <Text className={`font-bold text-base mb-1 ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>Scanning for orders...</Text>
+          <Text className={`font-sans-bold text-base mb-1 ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>Scanning for orders...</Text>
           <Text className={`text-xs text-center px-4 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
             There are currently no delivery requests in your area. Keep your app open to receive new requests.
           </Text>
@@ -81,10 +83,10 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
       <View className="px-5 flex-row items-center justify-between mb-3">
         <View className="flex-row items-center gap-2">
           <Ionicons name="pulse-outline" size={24} color={BRAND.primary} />
-          <Text className={`font-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
+          <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Trip Radar</Text>
         </View>
         <View className={`px-2 py-0.5 rounded-full ${darkTheme ? "bg-blue-900/40" : "bg-blue-100"}`}>
-          <Text className="text-xs font-bold text-[#0295f7]">{orders.length} Available</Text>
+          <Text className="text-xs font-sans-bold text-[#0295f7]">{orders.length} Available</Text>
         </View>
       </View>
 
@@ -96,8 +98,8 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
             style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
           >
             <View className="flex-row justify-between items-start mb-2">
-              <Text className={`font-black text-xl ${darkTheme ? "text-white" : "text-black"}`}>
-                KSH {Number(order?.total_amount ?? 0).toString()}
+              <Text className={`font-sans-extrabold text-xl ${darkTheme ? "text-white" : "text-black"}`}>
+                {formatMoney(order?.total_amount)}
               </Text>
             </View>
 
@@ -125,7 +127,7 @@ export default function TripRadarList({ orders, isLoading }: TripRadarListProps)
                   <ActivityIndicator color={BRAND.white} size="small" />
                 ) : (
                   <>
-                    <Text className="text-white font-bold mr-1">Accept Delivery</Text>
+                    <Text className="text-white font-sans-bold mr-1">Accept Delivery</Text>
                     <Ionicons name="checkmark-circle-outline" size={18} color={BRAND.white} />
                   </>
                 )}

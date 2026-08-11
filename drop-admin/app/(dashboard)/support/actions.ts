@@ -62,6 +62,28 @@ export async function setTicketStatus(
   return { ok: true };
 }
 
+/**
+ * Escalate or de-escalate.
+ *
+ * The column existed, the queue filtered on it and the badge was coloured from
+ * it, but nothing on the platform could ever write it — so every ticket was
+ * `normal` and the filter could only return everything or nothing.
+ */
+export async function setTicketPriority(
+  ticketId: string,
+  priority: string,
+): Promise<ActionResult> {
+  try {
+    await post(`/api/admin/support/tickets/${ticketId}/priority`, { priority });
+  } catch (error) {
+    return fail(error);
+  }
+
+  revalidatePath("/support");
+  revalidatePath(`/support/${ticketId}`);
+  return { ok: true };
+}
+
 export async function takeTicket(ticketId: string): Promise<ActionResult> {
   try {
     await post(`/api/admin/support/tickets/${ticketId}/assign`);

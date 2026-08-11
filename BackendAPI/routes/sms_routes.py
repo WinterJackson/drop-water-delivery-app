@@ -91,13 +91,20 @@ async def process_sms_webhook(
             logger.warning(f"SMS Webhook: Unrecognized order {order_suffix} for {deliverer.name}")
             return {"status": "error", "message": "order not found"}
             
-        # BUG-SMS-01 FIX: Apply validate_status_transition state machine guard
-        from services.order_service import validate_status_transition
-        if not validate_status_transition(order.order_status, "delivered"):
-            logger.warning(f"SMS Webhook: Invalid state transition for {order.id} from {order.order_status} to delivered")
-            return {"status": "error", "message": "invalid state transition"}
+        # A webhook, so a refusal is answered rather than raised — Africa's
+        # Talking retries a non-2xx, and retrying an order that has already
+        # moved on will never succeed.
+        from fastapi import HTTPException as _HTTPException
+        from services.order_service import apply_status_transition
 
-        order.order_status = "delivered"
+        try:
+            apply_status_transition(order, "delivered")
+        except _HTTPException as refusal:
+            logger.warning(
+                "SMS Webhook: refused %s -> delivered for order %s: %s",
+                order.order_status, order.id, refusal.detail,
+            )
+            return {"status": "error", "message": "invalid state transition"}
         await session.commit()
         
         # Broadcast real-time order status update via WebSocket for SMS completion

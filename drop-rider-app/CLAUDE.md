@@ -32,6 +32,30 @@ Key Business Workflows:
 - Maintain dark mode compatibility across all screens.
 - Use `SafeAreaView` from `react-native-safe-area-context` to prevent UI clipping on notched devices.
 
+#### Typography
+
+`Text` and `TextInput` come from `@/components/ui/Text`, never from
+`react-native`. React Native has no cascade — an element that names no family
+renders in the OS font — so the wrapper attaches `font-sans` whenever the class
+string names none. It decides at render time because a class string is often
+built elsewhere (`<Text className={labelStyle}>`), where no static rewrite could
+reach it.
+
+- **Never `font-bold`.** A bare weight utility sets `fontWeight` and no family,
+  so the OS thickens its own font: right-looking in review, different on every
+  handset. Use `font-sans-bold` / `-semibold` / `-medium` / `-extrabold`, which
+  name Karla's real files. Same for `fontWeight` in a `StyleSheet` — name the
+  face (`fontFamily: 'Karla_700Bold'`).
+- **Fredoka is for headings and stops at 600.** `font-heading`,
+  `font-heading-medium`, `font-heading-semibold` — a screen, sheet or modal
+  title, or an entity's name. There is no `font-heading-bold`.
+- **Figures stay in Karla.** A balance, total or count is not a heading.
+- `font-mono` for references and identifiers.
+
+Every face must be registered in `app/_layout.tsx`; naming an unregistered one
+falls back to the system font in silence. `BackendAPI/tests/test_typography.py`
+fails the build on all of the above.
+
 ### 3. Location Tracking
 `services/locationTracking.ts` owns this. Do not add another `watchPositionAsync`
 loop.
@@ -86,6 +110,55 @@ the **Pending Sync** screen with the server's reason — it is not dropped. For 
 `delivered` action, dropping it destroys the rider's proof of work and their pay.
 Only an explicit tap in that screen discards one.
 
+### 3d. Money rules come from the server, and they are about the *amount*
+
+`GET /api/rider/wallet-summary` returns a `withdrawal` block —
+`minimum`, `fee`, `fee_waiver_threshold` — read from `Platform_Settings` by
+`settlement_service.withdrawal_terms`, which is the same function the withdrawal
+itself calls. Never restate any of them as a literal.
+
+`Cashout.tsx` had all three hardcoded (500, 15, 1000), so the console could
+change what a rider was charged and not what they were told. The *rule* was also
+wrong: `fee_for` waives the fee on the **amount withdrawn**, and the screen
+measured the **balance held** — a progress bar of `balance / threshold` under
+"Keep KSH X more in your float balance to unlock zero-fee withdrawals". A rider
+holding KSH 1,200 who withdrew KSH 600 saw "Zero Network Fee Applied!" and was
+charged. It also inverts the waiver's purpose: the platform pays one M-Pesa B2C
+tariff per disbursement, so it wants fewer, larger withdrawals — not larger idle
+balances.
+
+Measure progress against `available_for_withdrawal`, never `wallet_balance`.
+Float committed to open cash orders cannot be withdrawn at any size.
+
+### 3e. Platinum is two settings, not two literals
+
+`platinum_min_deliveries` over `platinum_window_days`, both rows in
+`Platform_Settings` and both read by `jobs/rider_tier_job.py`. The *reward*
+(`gig_platinum_rider_commission_rate`) had always been configurable while the
+*requirement* was `>= 20` over `days=7` in the job, with `Performance.tsx`
+stating `20` and "7 days" of its own — so raising the bar would have kept
+quoting riders the old number while demoting them against the new one.
+
+`GET /earnings` returns `platinum_target`, `platinum_window_days` and
+`deliveries_in_window`, and counts that window with the same setting the job
+evaluates on. Counting progress over a different period from the one that
+decides the tier is how a rider hits the target on screen and is demoted anyway.
+
+### 3f. Bottle debt has an age, and the rider can see it
+
+`GET /api/rider/bottle-debt` carries `held_days` and `is_stale` per vendor, plus
+`stale_after_days` for the platform's own threshold
+(`admin_bottle_service.STALE_AFTER_DAYS`). The debt list is sorted **oldest
+first**, not largest first — a debt about to be escalated should not sit under a
+bigger one that is fine.
+
+The rider was shown the quantity and never the clock, while
+`stale_asset_monitor` swept nightly and the console flagged them at 14 days. The
+first they knew of the threshold was being flagged against it.
+
+`BackendAPI/tests/test_withdrawal_terms_surface.py` fails the build if any of
+these figures becomes a literal again.
+
 ### 4. Maps keys and Google web services
 - The Maps key is **not** in `app.json`. `app.config.js` injects
   `GOOGLE_MAPS_ANDROID_API_KEY` / `GOOGLE_MAPS_IOS_API_KEY` from the environment at
@@ -119,6 +192,19 @@ Only an explicit tap in that screen discards one.
 - **`user_type=rider` is on every call.** One Clerk identity can be a rider and a
   customer; the account being acted on is stated, never guessed.
 
+### The operation radius comes from the server
+`GET /rider/profile` returns `operation_radius_km` — the radius dispatch
+actually searches from a rider's base, 2.5 km for retail work and 15 km for a
+wholesale fleet rider. `OperationBase.tsx` draws its circle from it, sizes the
+map span from it, and states it in words from it.
+
+All three were hardcoded: a `2` km polygon, a `0.045` map delta "tuned to always
+show the full 2KM radius circle", and the sentence "you will receive requests
+from vendors within a 2KM radius". A business figure written into an app is one
+an administrator cannot move — and here moving it would have left a rider
+looking at a map, and reading a promise, that were both a kilometre short of
+what the platform was doing. Same rule, same reason, as the withdrawal fee.
+
 ### Session teardown
 `hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
 state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:
@@ -129,3 +215,44 @@ cache fully populated for the next account on the device.
 `clearPushToken()` is the exception that must stay in the handlers: the endpoint
 is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
 device receiving the previous account's notifications.
+
+It must send **`?app_type=rider`**, and it is declared with the path in
+`RiderApiRoutes.DeletePushToken` for that reason. The endpoint defaults to
+`customer`: without the parameter it looked up a `User` row by this clerk id,
+found none — a rider has no `User` row — cleared nothing, committed, and
+answered `200`. So every rider sign-out *looked* like it worked while
+`Deliverer.push_token` stayed registered. Riders share devices more than anyone
+else on this platform, which is the whole reason the call exists: the rider who
+signed out kept receiving delivery offers, and so did the next rider to sign in
+on the same handset. `BackendAPI/tests/test_session_teardown.py` fails the build
+if any app clears the wrong kind of account, or signs out before clearing.
+
+
+### Money is a decimal string
+
+Every monetary field the backend sends is a **decimal string**, not a number —
+`"1234.50"`. The columns behind them are Postgres `NUMERIC` and Python
+`Decimal`, and `BackendAPI/utils/money.py` serialises them that way for one
+reason: parsing them into a JS number to add or format them puts back exactly
+the binary floating-point error the backend goes out of its way to avoid.
+
+`utils/money.ts` is the only place digits are touched:
+
+- `formatMoney(v)` → `"KSH 1,234.50"`; `formatMoneyShort(v)` → `"KSH 1,235"`.
+- `sumMoney([...])`, `subtractMoney(a, b)`, `multiplyMoney(v, count)` — all in
+  integer cents via `BigInt`.
+- `compareMoney(a, b)`, `isZeroMoney(v)`, `isNegativeMoney(v)` — never
+  `Number(a) > Number(b)`, and never `{fee > 0 && …}` on a money field.
+- `moneyRatio(part, whole)` is the **only** sanctioned conversion to a number,
+  and only for a progress bar's width or a "near the cap" threshold — output
+  that is a pixel count, not a figure anybody reads.
+
+`BackendAPI/tests/test_money_serialisation.py` fails the build if a money field
+goes back to a float on the server side.
+
+**The float a cash order commits** is `vendor_net + platform_total` — summed
+with `sumMoney` and compared with `compareMoney`. `TripRadar` had six copies of
+that expression in float, deciding both what the rider was told and whether the
+Accept button worked. The server refuses regardless (`cod_policy`); the screen
+only decides what it says before they tap.
+

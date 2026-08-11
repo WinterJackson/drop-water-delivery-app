@@ -8,6 +8,7 @@ import { PERMISSIONS, can, type AdminMe, type Permission } from "@/lib/permissio
 import { formatDateTime, formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
 import { AccountActions } from "./AccountActions";
 import { CustomerBalancesPanel } from "./CustomerBalancesPanel";
+import { StorefrontPanel, type Storefront } from "./StorefrontPanel";
 
 const KINDS = {
   customers: { kind: "customer", label: "Customer", suspend: PERMISSIONS.customersSuspend },
@@ -34,6 +35,8 @@ type Detail = {
   rating?: number | null;
   wallet_balance?: string;
   debt_balance?: string;
+  /** Vendors only. What the store has set for itself — see `StorefrontPanel`. */
+  storefront?: Storefront | null;
   orders: { paid_count: number; lifetime_value: string; last_order_at: string | null };
   recent_orders: {
     id: string; status: string; payment_status: string; total: string; created_at: string | null;
@@ -210,6 +213,11 @@ export default async function PersonPage({
           walletBalance={person.wallet_balance ?? "0.00"}
         />
       </div>
+
+      {/* ── Vendor-only: what the store has set for itself ────── */}
+      {config.kind === "vendor" && person.storefront ? (
+        <StorefrontPanel storefront={person.storefront} />
+      ) : null}
 
       {/* ── Customer-only: debt and deposit panels ────────────── */}
       {config.kind === "customer" ? (

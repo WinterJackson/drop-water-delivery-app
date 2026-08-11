@@ -6,7 +6,7 @@ from models.vendor_favorite_model import VendorFavorite
 from models.user_model import User
 from models.vendor_model import Vendor
 from models.order_model import Order, OrderItem
-from models.product_model import Product
+from utils.money import money_str
 
 
 async def _get_user_id_from_clerk(session: AsyncSession, clerk_id: str):
@@ -29,6 +29,17 @@ async def get_vendor_favorites(session: AsyncSession, clerk_id: str):
     )
     result = await session.execute(query)
     favorites = result.scalars().all()
+
+    # `is_online` alone answers one of the five reasons a store may not be
+    # taking orders, so a favourites list built on it showed a paused, suspended
+    # or out-of-hours shop as open — on precisely the screen a customer opens
+    # when they already know which store they want.
+    from services import vendor_availability
+
+    await vendor_availability.annotate(
+        session, [fav.vendor for fav in favorites if fav.vendor]
+    )
+
     return [
         {
             "id": str(fav.id),
@@ -41,6 +52,12 @@ async def get_vendor_favorites(session: AsyncSession, clerk_id: str):
                 "location_address": fav.vendor.location_address,
                 "rating": float(fav.vendor.rating) if fav.vendor.rating else 0,
                 "is_online": fav.vendor.is_online,
+                "is_accepting_orders": fav.vendor.is_accepting_orders,
+                "store_state": fav.vendor.store_state,
+                "store_reason": fav.vendor.store_reason,
+                "reopens_at": (
+                    fav.vendor.reopens_at.isoformat() if fav.vendor.reopens_at else None
+                ),
                 "vendor_type": fav.vendor.vendor_type.value if fav.vendor.vendor_type else None,
                 "shift_start": fav.vendor.shift_start.strftime("%H:%M") if fav.vendor.shift_start else None,
                 "shift_end": fav.vendor.shift_end.strftime("%H:%M") if fav.vendor.shift_end else None,
@@ -120,30 +137,42 @@ async def get_last_order_to_vendor(session: AsyncSession, clerk_id: str, vendor_
     if not order:
         return None
 
+    # This feeds a Reorder button. Offering it against a store that is shut
+    # produces a full basket and a refusal at the last step.
+    from services import vendor_availability
+
+    await vendor_availability.annotate(session, [order.vendor] if order.vendor else [])
+
     return {
         "id": str(order.id),
         "order_status": order.order_status,
-        "total_amount": float(order.total_amount),
-        "delivery_fee": float(order.delivery_fee) if order.delivery_fee else 0,
+        "total_amount": money_str(order.total_amount),
+        "delivery_fee": money_str(order.delivery_fee),
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "vendor": {
             "id": str(order.vendor.id),
             "business_name": order.vendor.business_name,
             "profile_pic": order.vendor.profile_pic,
             "is_online": order.vendor.is_online,
+            "is_accepting_orders": order.vendor.is_accepting_orders,
+            "store_state": order.vendor.store_state,
+            "store_reason": order.vendor.store_reason,
+            "reopens_at": (
+                order.vendor.reopens_at.isoformat() if order.vendor.reopens_at else None
+            ),
         } if order.vendor else None,
         "items": [
             {
                 "id": str(item.id),
                 "product_id": str(item.product_id),
                 "quantity": item.quantity,
-                "price_at_order": float(item.price),
-                "subtotal_at_order": float(item.Subtotal),
+                "price_at_order": money_str(item.price),
+                "subtotal_at_order": money_str(item.Subtotal),
                 "product": {
                     "id": str(item.product.id),
                     "name": item.product.name,
-                    "price": float(item.product.price),
-                    "discount": float(item.product.discount) if item.product.discount else 0,
+                    "price": money_str(item.product.price),
+                    "discount": money_str(item.product.discount),
                     "image_url": item.product.image_url,
                     "is_available": item.product.is_available if hasattr(item.product, 'is_available') else True,
                     "stock_quantity": item.product.stock,

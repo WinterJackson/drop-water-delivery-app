@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect, useRef } from "react";
-import { View, Text, StatusBar, Platform, StyleSheet, Dimensions, Linking } from "react-native";
+import { View, StatusBar, Platform, StyleSheet, Dimensions, Linking } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { errorMessage } from "@/API/errors";
@@ -98,6 +99,22 @@ export default function OperationBase() {
   const [liveAddress, setLiveAddress] = useState<string>("Locating...");
   const [zoneChanges, setZoneChanges] = useState<number>(0);
   const [riderId, setRiderId] = useState<string>("");
+  /**
+   * Null until the profile answers. The circle and the sentence below both read
+   * it, so neither states a range before the server has given one — a figure
+   * this screen guesses is exactly the defect being fixed here.
+   */
+  const [operationRadiusKm, setOperationRadiusKm] = useState<number | null>(null);
+
+  /**
+   * A map span that fits the whole circle with a margin, whatever the radius.
+   *
+   * This was a hardcoded `0.045` "tuned to always show the full 2KM radius
+   * circle" — roughly 5 km of latitude, so at 2.5 km the circle would have
+   * touched both edges, and any further widening on the console would have
+   * cropped it with nothing to say why. One degree of latitude is ~111 km.
+   */
+  const mapDelta = ((operationRadiusKm ?? 2.5) * 2 * 1.3) / 111;
 
   /**
    * Load the rider's saved base and their remaining zone-change allowance.
@@ -110,6 +127,12 @@ export default function OperationBase() {
     const data = await get<any>(RiderApiRoutes.GetProfile.path);
     setZoneChanges(data.zone_changes_this_month || 0);
     setRiderId(data.id);
+    // The radius dispatch actually searches, from the server. This screen used
+    // to draw a hardcoded 2 km circle and promise "within a 2KM radius" in
+    // words — a business figure written into an app, so moving
+    // `retail_max_distance_km` on the console left the map and the promise a
+    // kilometre short of the truth.
+    if (data.operation_radius_km) setOperationRadiusKm(Number(data.operation_radius_km));
     if (data.operation_lat && data.operation_lng) {
       setLocation({ latitude: data.operation_lat, longitude: data.operation_lng });
       reverseGeocode(data.operation_lat, data.operation_lng);
@@ -160,8 +183,8 @@ export default function OperationBase() {
         mapRef.current.animateToRegion({
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
-          latitudeDelta: 0.045,
-          longitudeDelta: 0.045,
+          latitudeDelta: mapDelta,
+          longitudeDelta: mapDelta,
         });
       }
     } catch (e: unknown) {
@@ -296,8 +319,8 @@ export default function OperationBase() {
             initialRegion={{
               latitude: location.latitude,
               longitude: location.longitude,
-              latitudeDelta: 0.045, // Tuned to always show the full 2KM radius circle
-              longitudeDelta: 0.045,
+              latitudeDelta: mapDelta,
+              longitudeDelta: mapDelta,
             }}
             onRegionChangeComplete={(region: import("@/types/models").MapRegion) => {
               setLocation({ latitude: region.latitude, longitude: region.longitude });
@@ -313,11 +336,11 @@ export default function OperationBase() {
                 SHARED OVERLAYS — identical for both OSM & Google
                 ══════════════════════════════════════════════════ */}
 
-            {/* 2KM Operation Radius — ALWAYS visible */}
+            {/* Operation radius — the server's figure, always visible */}
             {/* Uses Polygon instead of Circle so it renders ABOVE UrlTile on Android */}
-            {Polygon && location && (
+            {Polygon && location && operationRadiusKm && (
               <Polygon
-                coordinates={generateCirclePolygon(location, 2)}
+                coordinates={generateCirclePolygon(location, operationRadiusKm)}
                 fillColor={BRAND.primary + "30"}
                 strokeColor={BRAND.primary}
                 strokeWidth={2.5}
@@ -327,7 +350,7 @@ export default function OperationBase() {
             {/* When switching to Google Maps, you can use Circle instead:
             <Circle
               center={location}
-              radius={2000}
+              radius={(operationRadiusKm ?? 2.5) * 1000}
               fillColor={BRAND.primary + "30"}
               strokeColor={BRAND.primary}
               strokeWidth={2.5}
@@ -398,8 +421,8 @@ export default function OperationBase() {
                   mapRef.current.animateToRegion({
                     latitude: details.geometry.location.lat,
                     longitude: details.geometry.location.lng,
-                    latitudeDelta: 0.05,
-                    longitudeDelta: 0.05,
+                    latitudeDelta: mapDelta,
+                    longitudeDelta: mapDelta,
                   });
                 }
               }}
@@ -424,14 +447,14 @@ export default function OperationBase() {
               className={`w-10 h-10 rounded-full items-center justify-center shadow-md border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}
               style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
             >
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>+</Text>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>+</Text>
             </PressableScale>
             <PressableScale
               onPress={() => handleZoom(false)}
               className={`w-10 h-10 rounded-full items-center justify-center shadow-md border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}
               style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
             >
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>−</Text>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-800"}`}>−</Text>
             </PressableScale>
           </View>
         </View>
@@ -440,7 +463,7 @@ export default function OperationBase() {
         {distanceToBase && Number(distanceToBase) > 0.5 && (
           <View className="absolute top-[130px] self-center z-40">
             <View className={`px-4 py-2 rounded-full shadow-md ${darkTheme ? "bg-[#201f1f]" : "bg-white"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
-              <Text className={`text-sm font-semibold ${darkTheme ? "text-white" : "text-gray-800"}`}>
+              <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-800"}`}>
                 {distanceToBase} km from your physical location
               </Text>
             </View>
@@ -464,23 +487,26 @@ export default function OperationBase() {
             <View className="w-16 h-2 rounded-full bg-gray-300" style={{ backgroundColor: darkTheme ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
         </View>
 
-        <Text className={`text-2xl font-black mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+        <Text className={`text-2xl font-heading-semibold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
           Working Zone
         </Text>
 
         <Text className={`text-sm mb-6 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-          Drag the map to set your central delivery area. You will receive requests from vendors within a 2KM radius.
+          Drag the map to set your central delivery area.
+          {operationRadiusKm
+            ? ` You will receive requests from vendors within ${operationRadiusKm} km.`
+            : ""}
         </Text>
 
         <View className={`p-4 rounded-2xl mb-6 border ${darkTheme ? "bg-[#111] border-gray-800" : "bg-white border-gray-200"}`}>
-          <Text className={`text-xs uppercase tracking-widest font-bold mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Selected Base Location</Text>
-          <Text numberOfLines={2} className={`text-base font-semibold ${darkTheme ? "text-white" : "text-black"}`}>{liveAddress}</Text>
+          <Text className={`text-xs uppercase tracking-widest font-sans-bold mb-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Selected Base Location</Text>
+          <Text numberOfLines={2} className={`text-base font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>{liveAddress}</Text>
         </View>
 
         {/* Zone Limit Status */}
         <View className="flex-row items-center mb-6 px-1">
           <View className="w-2 h-2 rounded-full mr-3" style={{ backgroundColor: zoneChanges >= 2 ? "#EF4444" : "#10B981" }} />
-          <Text className={`text-sm font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+          <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
             {zoneChanges >= 2 ? "Monthly update limit reached." : `Updates remaining this month: ${2 - zoneChanges}`}
           </Text>
         </View>
@@ -492,7 +518,7 @@ export default function OperationBase() {
               className="py-4 rounded-xl items-center shadow-sm"
               style={{ backgroundColor: "#1F2937" }}
             >
-              <Text className="text-white font-bold text-lg">Contact Support to Change</Text>
+              <Text className="text-white font-sans-bold text-lg">Contact Support to Change</Text>
             </PressableScale>
           ) : (
             <PressableScale
@@ -501,7 +527,7 @@ export default function OperationBase() {
               className="py-4 rounded-xl items-center shadow-sm"
               style={{ backgroundColor: BRAND.primary }}
             >
-              <Text className="text-white font-bold text-lg">{saving ? "Saving..." : "Confirm Zone"}</Text>
+              <Text className="text-white font-sans-bold text-lg">{saving ? "Saving..." : "Confirm Zone"}</Text>
             </PressableScale>
           )}
         </View>

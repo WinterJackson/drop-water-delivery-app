@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useMemo, useState, memo } from "react";
-import { RefreshControl, ScrollView, StatusBar, Text, View } from "react-native";
+import { RefreshControl, ScrollView, StatusBar, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { format } from "date-fns";
@@ -8,6 +9,7 @@ import * as Haptics from "expo-haptics";
 import { BRAND } from "@/constants/brandColors";
 import { Skeleton } from "@/components/ui/Skeleton";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { CollectionsSection } from "@/components/bottles/CollectionsSection";
 import { UIThemeContext } from "@/context/ThemeContext";
 import {
     useBottleDebt,
@@ -48,17 +50,35 @@ const VendorDebtCard = memo(({ item, darkTheme }: { item: VendorBottleDebt; dark
         >
             <View className="flex-row items-center justify-between mb-3">
                 <Text
-                    className={`text-base font-bold flex-1 pr-3 ${darkTheme ? "text-white" : "text-slate-900"}`}
+                    className={`text-base font-sans-bold flex-1 pr-3 ${darkTheme ? "text-white" : "text-slate-900"}`}
                     numberOfLines={1}
                 >
                     {item.business_name || "Vendor"}
                 </Text>
-                <View className="px-3 py-1 rounded-full bg-orange-500/20">
-                    <Text className="text-orange-600 font-bold text-xs">
+                <View className={`px-3 py-1 rounded-full ${item.is_stale ? "bg-red-500/20" : "bg-orange-500/20"}`}>
+                    <Text className={`font-sans-bold text-xs ${item.is_stale ? "text-red-600" : "text-orange-600"}`}>
                         {item.total_bottles} owed
                     </Text>
                 </View>
             </View>
+
+            {/* The clock the platform judges this by. The screen showed the
+                quantity and never the age, so the first a rider knew of the
+                threshold was being flagged against it. */}
+            {item.held_days !== null && item.held_days !== undefined ? (
+                <Text
+                    className={`text-xs mb-3 ${
+                        item.is_stale
+                            ? "text-red-500 font-sans-semibold"
+                            : darkTheme ? "text-gray-400" : "text-slate-500"
+                    }`}
+                >
+                    {item.held_days === 0
+                        ? "Picked up today"
+                        : `Held ${item.held_days} day${item.held_days === 1 ? "" : "s"}`}
+                    {item.is_stale ? " — overdue, return these first" : ""}
+                </Text>
+            ) : null}
 
             <View className="flex-row gap-3">
                 <View className={`flex-1 p-3 rounded-xl ${darkTheme ? "bg-black/30" : "bg-slate-50"}`}>
@@ -66,7 +86,7 @@ const VendorDebtCard = memo(({ item, darkTheme }: { item: VendorBottleDebt; dark
                         10L empties
                     </Text>
                     <Text
-                        className={`text-xl font-bold ${
+                        className={`text-xl font-sans-bold ${
                             item.pending_10L_empties > 0
                                 ? "text-orange-500"
                                 : darkTheme
@@ -82,7 +102,7 @@ const VendorDebtCard = memo(({ item, darkTheme }: { item: VendorBottleDebt; dark
                         20L empties
                     </Text>
                     <Text
-                        className={`text-xl font-bold ${
+                        className={`text-xl font-sans-bold ${
                             item.pending_20L_empties > 0
                                 ? "text-orange-500"
                                 : darkTheme
@@ -130,14 +150,14 @@ const LedgerRow = memo(({ item, darkTheme }: { item: BottleLedgerEntry; darkThem
                 />
             </View>
             <View className="flex-1">
-                <Text className={`text-sm font-semibold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-slate-900"}`}>
                     {ENTRY_LABEL[item.entry_type] || "Movement"}
                 </Text>
                 <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-slate-500"}`}>
                     {item.created_at ? format(new Date(item.created_at), "d MMM yyyy, HH:mm") : "—"}
                 </Text>
             </View>
-            <Text className={`text-sm font-bold ${isReturn ? "text-green-600" : "text-orange-600"}`}>
+            <Text className={`text-sm font-sans-bold ${isReturn ? "text-green-600" : "text-orange-600"}`}>
                 {isReturn ? "" : "+"}
                 {item.quantity} × {item.capacity_litres}L
             </Text>
@@ -170,7 +190,7 @@ export default function BottleDebt() {
             <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : "bg-slate-50"}`}>
                 <View className="flex-row items-center px-4 pb-4">
                     <BackButtonMinimal />
-                    <Text className={`text-xl font-bold ml-4 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                    <Text className={`text-xl font-sans-bold ml-4 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                         Bottles I'm Holding
                     </Text>
                 </View>
@@ -191,10 +211,21 @@ export default function BottleDebt() {
                         {isLoading ? (
                             <Skeleton width={80} height={36} borderRadius={8} />
                         ) : (
-                            <Text className={`text-4xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                            <Text className={`text-4xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
                                 {data?.total_bottles ?? 0}
                             </Text>
                         )}
+                        {(data?.stale_vendors ?? 0) > 0 ? (
+                            <View className={`mt-3 p-3 rounded-xl border ${darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-200"}`}>
+                                <Text className={`text-xs font-sans-bold ${darkTheme ? "text-red-400" : "text-red-700"}`}>
+                                    {data?.stale_vendors} vendor{(data?.stale_vendors ?? 0) === 1 ? "" : "s"} overdue
+                                </Text>
+                                <Text className={`text-xs mt-0.5 ${darkTheme ? "text-red-300/80" : "text-red-700/80"}`}>
+                                    Empties held longer than {data?.stale_after_days ?? 14} days are
+                                    flagged to the platform. Return those first.
+                                </Text>
+                            </View>
+                        ) : null}
                         <Text className={`text-xs mt-2 ${darkTheme ? "text-gray-500" : "text-slate-400"}`}>
                             Hand these back to the vendor to clear your balance. The vendor confirms
                             the count on their side.
@@ -222,7 +253,7 @@ export default function BottleDebt() {
                                 size={48}
                                 color={darkTheme ? "#334155" : "#cbd5e1"}
                             />
-                            <Text className={`mt-3 font-semibold ${darkTheme ? "text-gray-300" : "text-slate-600"}`}>
+                            <Text className={`mt-3 font-sans-semibold ${darkTheme ? "text-gray-300" : "text-slate-600"}`}>
                                 All clear
                             </Text>
                             <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-500" : "text-slate-400"}`}>
@@ -235,10 +266,14 @@ export default function BottleDebt() {
                         ))
                     )}
 
+                    {/* Collections add to what this rider is holding, so they
+                        belong on this screen rather than one of their own. */}
+                    <CollectionsSection vendors={vendors} />
+
                     {entries.length > 0 && (
                         <View className="mt-4">
                             <Text
-                                className={`text-sm font-bold mb-1 ${darkTheme ? "text-gray-300" : "text-slate-700"}`}
+                                className={`text-sm font-sans-bold mb-1 ${darkTheme ? "text-gray-300" : "text-slate-700"}`}
                             >
                                 Recent activity
                             </Text>

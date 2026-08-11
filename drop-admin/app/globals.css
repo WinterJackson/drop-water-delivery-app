@@ -21,8 +21,17 @@
   --color-brand-800: oklch(0.37 0.10 235);
   --color-brand-900: oklch(0.30 0.07 235);
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Loaded by `next/font/google` in `app/layout.tsx`, which puts each variable
+   * on the <html> element. The fallback chains matter: if the font request ever
+   * fails the page still renders in a sane system face rather than whatever the
+   * browser picks.
+   *
+   * `--font-sans` used to point at `--font-inter`, which nothing anywhere
+   * defined — so every fallback chain below was doing the real work and the
+   * console had never actually rendered in its intended face. */
+  --font-sans: var(--font-karla), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: var(--font-fredoka), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -114,11 +123,39 @@
     border-color: var(--border);
   }
 
+  html {
+    font-family: var(--font-sans);
+  }
+
   body {
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* Headings are Fredoka, and never a faked weight.
+   *
+   * Fredoka is loaded at 400/500/600 only. Without `font-synthesis-weight`,
+   * a `font-bold` utility on a heading makes the browser thicken the 600
+   * strokes algorithmically — which looks smeared next to the real face and
+   * undoes the point of capping the weight in the first place. With it, a
+   * "bold" heading renders as the genuine 600 SemiBold.
+   *
+   * This console has no shadcn/ui — `components/ui` is a single hand-written
+   * `primitives.tsx` with no `data-slot` attributes — so there are no dialog
+   * or card title slots to add here. `CardHeader` already renders a real
+   * `<h2>`. `Stat` deliberately does not: its label and value are `<p>`, so
+   * figures stay in Karla with tabular numerals rather than becoming
+   * headings. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-synthesis-weight: none;
   }
 
   /* Visible only for keyboard users. Every action in this console must be

@@ -7,17 +7,16 @@ import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
 import {
-  FlatList,
-  RefreshControl,
-  Text,
-  View,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  ActivityIndicator,
-  StatusBar,
-  Platform,
+    FlatList,
+    RefreshControl,
+    View,
+    TouchableOpacity,
+    ScrollView,
+    ActivityIndicator,
+    StatusBar,
+    Platform,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -30,19 +29,20 @@ import { Ionicons } from "@expo/vector-icons";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
+import { compareMoney, formatMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RadarOrder {
   id: string;
   order_status: string;
-  total_amount: number;
-  delivery_fee: number;
+  total_amount: string;
+  delivery_fee: string;
   distance_km: number;
   estimated_minutes: number;
   items_count: number;
   weight_kg: number;
-  vendor_net?: number;
-  platform_total?: number;
+  vendor_net?: string;
+  platform_total?: string;
   delivery_type: "quick_swap" | "keep_my_bottle";
   payment_method: "cash" | "mpesa";
   vehicle_class: string;
@@ -78,7 +78,7 @@ export default function TripRadar() {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
 
   const { data: profile } = useRiderProfile();
-  const walletBalance = profile?.wallet_balance || 0;
+  const walletBalance = profile?.wallet_balance ?? "0";
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
@@ -88,6 +88,17 @@ export default function TripRadar() {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ["60%", "90%"], []);
   const [selectedOrder, setSelectedOrder] = useState<RadarOrder | null>(null);
+  /**
+   * The float a cash order commits: the vendor's cut plus the platform's, held
+   * until the rider delivers. Summed in cents and compared in cents — this was
+   * six copies of `(vendor_net || 0) + (platform_total || 0)` in float, deciding
+   * both what the rider was told and whether the Accept button worked.
+   *
+   * The server refuses regardless (`cod_policy`); this only decides what the
+   * screen says before they tap.
+   */
+  const cashFloatRequired = sumMoney([selectedOrder?.vendor_net, selectedOrder?.platform_total]);
+  const cashFloatShort = compareMoney(walletBalance, cashFloatRequired) < 0;
 
   // ── Fetch unassigned orders from REST ────────────────────────────────
   const fetchRadarOrders = useCallback(async () => {
@@ -230,7 +241,8 @@ export default function TripRadar() {
     if (activeFilter === "< 5KM") {
       result = result.filter(o => o.distance_km < 5);
     } else if (activeFilter === "HIGH PAYOUT") {
-      result = result.filter(o => o.delivery_fee >= 200); 
+      // The threshold is a filter label, not a charge — compared in cents all the same.
+      result = result.filter(o => compareMoney(o.delivery_fee, "200") >= 0);
     } else if (activeFilter === "QUICK SWAP") {
       result = result.filter(o => o.delivery_type === "quick_swap");
     } else if (activeFilter === "KEEP MY BOTTLE") {
@@ -265,7 +277,7 @@ export default function TripRadar() {
               <BackButtonMinimal />
             </TouchableOpacity>
             <View>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                 Trip Radar
               </Text>
               <View className="flex-row items-center gap-1 mt-0.5">
@@ -299,7 +311,7 @@ export default function TripRadar() {
           onChangeText={setSearchQuery}
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery("")}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear the search" onPress={() => setSearchQuery("")}>
             <Ionicons name="close-circle" size={20} color={BRAND.primary} />
           </TouchableOpacity>
         )}
@@ -315,7 +327,7 @@ export default function TripRadar() {
               onPress={() => setActiveFilter(filter)}
               className={`px-4 py-2 rounded-full border ${isActive ? (darkTheme ? "bg-primary border-primary" : "bg-primary border-primary") : (darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200")}`}
             >
-              <Text className={`text-xs font-bold ${isActive ? "text-white" : (darkTheme ? "text-gray-300" : "text-gray-700")}`}>
+              <Text className={`text-xs font-sans-bold ${isActive ? "text-white" : (darkTheme ? "text-gray-300" : "text-gray-700")}`}>
                 {filter}
               </Text>
             </TouchableOpacity>
@@ -331,7 +343,7 @@ export default function TripRadar() {
       className={`mx-4 mb-4 p-4 rounded-2xl border flex-row items-center justify-between ${darkTheme ? "bg-blue-900/20 border-blue-900/40" : "bg-blue-50 border-blue-100"}`}
     >
       <View className="flex-1 mr-3">
-        <Text className={`text-base font-bold mb-1 ${darkTheme ? "text-blue-400" : "text-blue-700"}`}>
+        <Text className={`text-base font-sans-bold mb-1 ${darkTheme ? "text-blue-400" : "text-blue-700"}`}>
           Looking for consistent work?
         </Text>
         <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
@@ -369,7 +381,7 @@ export default function TripRadar() {
     >
       <View className="flex-row justify-between items-start">
         <View className="flex-1">
-          <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
+          <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
             {item.vendor?.business_name || "Unknown Vendor"}
           </Text>
           <Text className={`text-sm mt-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -377,7 +389,7 @@ export default function TripRadar() {
           </Text>
         </View>
         <View className="items-end">
-          <Text className={`text-lg font-black text-primary`}>KSH {item.delivery_fee}</Text>
+          <Text className={`text-lg font-sans-extrabold text-primary`}>{formatMoney(item.delivery_fee)}</Text>
           <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
             {timeAgo(item.created_at)}
           </Text>
@@ -387,19 +399,19 @@ export default function TripRadar() {
       <View className="flex-row flex-wrap gap-3 mt-4">
         <View className="flex-row items-center gap-1">
           <Ionicons name="navigate-outline" size={14} color={BRAND.primary} />
-          <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+          <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
             {item.distance_km?.toFixed(1)} km
           </Text>
         </View>
         <View className="flex-row items-center gap-1">
           <Ionicons name="time-outline" size={14} color={BRAND.primary} />
-          <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+          <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
             {item.estimated_minutes} min
           </Text>
         </View>
         <View className="flex-row items-center gap-1">
           <Ionicons name="water-outline" size={14} color={BRAND.primary} />
-          <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+          <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
             {item.items_count} items ({item.weight_kg}kg)
           </Text>
         </View>
@@ -469,8 +481,8 @@ export default function TripRadar() {
         </View>
 
         <BottomSheetScrollView contentContainerStyle={{ padding: 20 }}>
-          <Text className={`text-2xl font-black mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
-            KSH {selectedOrder.delivery_fee}
+          <Text className={`text-2xl font-sans-extrabold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+            {formatMoney(selectedOrder.delivery_fee)}
           </Text>
           <Text className={`text-base mb-5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
             {selectedOrder.distance_km?.toFixed(1)} km • {selectedOrder.estimated_minutes} min total est.
@@ -480,8 +492,8 @@ export default function TripRadar() {
             <View className="flex-row items-start mb-4">
               <Ionicons name="storefront-outline" size={20} color={BRAND.primary} style={{ marginTop: 2, marginRight: 12 }} />
               <View className="flex-1">
-                <Text className={`text-xs font-bold uppercase mb-0.5 text-primary`}>Pickup</Text>
-                <Text className={`text-base font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.vendor?.business_name}</Text>
+                <Text className={`text-xs font-sans-bold uppercase mb-0.5 text-primary`}>Pickup</Text>
+                <Text className={`text-base font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.vendor?.business_name}</Text>
               </View>
             </View>
 
@@ -490,8 +502,8 @@ export default function TripRadar() {
             <View className="flex-row items-start">
               <Ionicons name="location" size={20} color={TOAST.success} style={{ marginTop: 2, marginRight: 12 }} />
               <View className="flex-1">
-                <Text className={`text-xs font-bold uppercase mb-0.5 text-green-500`}>Dropoff</Text>
-                <Text className={`text-base font-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.delivery_location?.street || "Customer Location"}</Text>
+                <Text className={`text-xs font-sans-bold uppercase mb-0.5 text-green-500`}>Dropoff</Text>
+                <Text className={`text-base font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.delivery_location?.street || "Customer Location"}</Text>
               </View>
             </View>
           </View>
@@ -499,13 +511,13 @@ export default function TripRadar() {
           <View className="flex-row justify-between mb-8">
             <View className="items-center flex-1">
               <Ionicons name="cube-outline" size={24} color={BRAND.primary} />
-              <Text className={`text-sm font-semibold mt-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.items_count} Items</Text>
+              <Text className={`text-sm font-sans-semibold mt-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>{selectedOrder.items_count} Items</Text>
               <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{selectedOrder.weight_kg}kg</Text>
             </View>
             <View className={`w-px ${darkTheme ? "bg-gray-800" : "bg-white"}`} />
             <View className="items-center flex-1">
               <Ionicons name="swap-horizontal-outline" size={24} color={BRAND.primary} />
-              <Text className={`text-sm font-semibold mt-1 capitalize ${darkTheme ? "text-white" : "text-gray-900"}`}>
+              <Text className={`text-sm font-sans-semibold mt-1 capitalize ${darkTheme ? "text-white" : "text-gray-900"}`}>
                 {selectedOrder.delivery_type.replace('_', ' ')}
               </Text>
               <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Type</Text>
@@ -513,7 +525,7 @@ export default function TripRadar() {
             <View className={`w-px ${darkTheme ? "bg-gray-800" : "bg-white"}`} />
             <View className="items-center flex-1">
               <Ionicons name="bicycle-outline" size={24} color={BRAND.primary} />
-              <Text className={`text-sm font-semibold mt-1 capitalize ${darkTheme ? "text-white" : "text-gray-900"}`}>
+              <Text className={`text-sm font-sans-semibold mt-1 capitalize ${darkTheme ? "text-white" : "text-gray-900"}`}>
                 {selectedOrder.vehicle_class}
               </Text>
               <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Required</Text>
@@ -524,20 +536,20 @@ export default function TripRadar() {
             <View className={`p-4 rounded-xl border mb-6 ${darkTheme ? "bg-amber-900/20 border-amber-500/30" : "bg-amber-50 border-amber-200"}`}>
                <View className="flex-row items-center mb-2">
                  <Ionicons name="warning" size={20} color="#f59e0b" style={{ marginRight: 8 }} />
-                 <Text className={`font-bold text-sm ${darkTheme ? "text-amber-500" : "text-amber-700"}`}>Cash Order</Text>
+                 <Text className={`font-sans-bold text-sm ${darkTheme ? "text-amber-500" : "text-amber-700"}`}>Cash Order</Text>
                </View>
                <Text className={`text-xs mb-2 ${darkTheme ? "text-amber-200/70" : "text-amber-700/80"}`}>
-                 You must have enough funds in your Wallet to cover the vendor net pay and platform's commission (KSH {((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)).toFixed(2)}) to accept this cash order.
+                 You must have enough funds in your Wallet to cover the vendor net pay and platform&apos;s commission ({formatMoney(cashFloatRequired)}) to accept this cash order.
                </Text>
                <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-amber-500/20">
-                 <Text className={`text-xs font-semibold ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>Your Wallet Balance:</Text>
-                 <Text className={`text-sm font-bold ${walletBalance >= ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)) ? (darkTheme ? "text-green-400" : "text-green-600") : "text-red-500"}`}>
-                   KSH {walletBalance.toFixed(2)}
+                 <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>Your Wallet Balance:</Text>
+                 <Text className={`text-sm font-sans-bold ${!cashFloatShort ? (darkTheme ? "text-green-400" : "text-green-600") : "text-red-500"}`}>
+                   {formatMoney(walletBalance)}
                  </Text>
                </View>
-               {walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)) && (
-                 <Text className="text-red-500 text-xs font-bold mt-2">
-                   Shortfall: KSH {(((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)) - walletBalance).toFixed(2)}. Please top up or complete cashless orders.
+               {cashFloatShort && (
+                 <Text className="text-red-500 text-xs font-sans-bold mt-2">
+                   Shortfall: {formatMoney(subtractMoney(cashFloatRequired, walletBalance))}. Please top up or complete cashless orders.
                  </Text>
                )}
             </View>
@@ -545,18 +557,18 @@ export default function TripRadar() {
 
           <TouchableOpacity
             onPress={() => acceptOrder(selectedOrder.id)}
-            disabled={acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)))}
-            className={`py-4 rounded-2xl items-center flex-row justify-center mb-10 ${(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)))) ? (darkTheme ? "bg-gray-800" : "bg-gray-300") : "bg-primary"}`}
+            disabled={acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && cashFloatShort)}
+            className={`py-4 rounded-2xl items-center flex-row justify-center mb-10 ${(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && cashFloatShort)) ? (darkTheme ? "bg-gray-800" : "bg-gray-300") : "bg-primary"}`}
             style={{ elevation: 2, shadowColor: BRAND.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 }}
           >
             {acceptingId === selectedOrder.id ? (
               <ActivityIndicator color={BRAND.white} />
             ) : (
               <>
-                <Text className={`text-lg font-bold mr-2 ${(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)))) ? (darkTheme ? "text-gray-500" : "text-gray-500") : "text-white"}`}>
-                  {selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)) ? "Insufficient Float" : "Accept Trip"}
+                <Text className={`text-lg font-sans-bold mr-2 ${(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && cashFloatShort)) ? (darkTheme ? "text-gray-500" : "text-gray-500") : "text-white"}`}>
+                  {selectedOrder.payment_method === "cash" && cashFloatShort ? "Insufficient Float" : "Accept Trip"}
                 </Text>
-                <Ionicons name={(selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0))) ? "lock-closed" : "checkmark-circle-outline"} size={20} color={(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && walletBalance < ((selectedOrder.vendor_net || 0) + (selectedOrder.platform_total || 0)))) ? (darkTheme ? "#6b7280" : "#6b7280") : BRAND.white} />
+                <Ionicons name={(selectedOrder.payment_method === "cash" && cashFloatShort) ? "lock-closed" : "checkmark-circle-outline"} size={20} color={(acceptingId === selectedOrder.id || (selectedOrder.payment_method === "cash" && cashFloatShort)) ? (darkTheme ? "#6b7280" : "#6b7280") : BRAND.white} />
               </>
             )}
           </TouchableOpacity>

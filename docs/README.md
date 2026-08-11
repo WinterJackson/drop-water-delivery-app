@@ -57,7 +57,12 @@ Why the console is built the way it is, decision by decision: the BFF transport
 and why the browser never holds a token, capabilities rather than job titles,
 the four authorisation layers and which one actually decides, how personal data
 is revealed, and a running log of the defects found while building each screen.
-The longest document here and the one worth reading before changing anything.
+Section 16 covers the later pass over the **join** between the console and the
+apps — a support reply that recorded and emailed but never pushed, a deep link
+pointing at this application rather than an app route, a `priority` column every
+layer read and no layer wrote, and three screens sending none of the filters
+their endpoints already accepted. The longest document here and the one worth
+reading before changing anything.
 
 ### [maps-architecture.md](./maps-architecture.md)
 Six mobile keys restricted to the Maps SDK, one IP-restricted server key, and one
@@ -74,7 +79,9 @@ rather than a bug.
 ### [push-notifications.md](./push-notifications.md)
 The two sanctioned push paths — `queue_push` before a commit, `dispatch_background`
 after — why `asyncio.create_task` is neither, the preference model, and which
-message types are transactional and therefore unmutable.
+message types are transactional and therefore unmutable. Also why `action_url`
+must be an Expo Router path: it is read by three apps and by nothing else, and a
+console URL there fails silently in three different ways.
 
 ### [cron-jobs.md](./cron-jobs.md)
 The scheduled sweeps, their cadences, and how they are triggered in an
@@ -116,6 +123,7 @@ and what was done about it; the findings marked done have shipped.
 | [vendor-app-remediation-plan.md](./vendor-app-remediation-plan.md) | Vendor app findings and the plan that followed |
 | [audit/phase1-backend-customer-audit.md](./audit/phase1-backend-customer-audit.md) | The first backend and customer-app pass |
 | [audit/phase1-implementation-plan.md](./audit/phase1-implementation-plan.md) | What that pass turned into |
+| [audit/codebase-wide-remediation.md](./audit/codebase-wide-remediation.md) | All five surfaces at once: money serialisation across the whole API and the three apps, a `NameError` live on the customer cancellation path, an unvalidated rider drop reason, four screens re-deriving the order total, the vendor app reporting no crashes, dead routes and dead modules. Closed, each with a guard — and it names what it did *not* cover |
 
 ---
 

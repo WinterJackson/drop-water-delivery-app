@@ -6,7 +6,8 @@ import { UIThemeContext } from "@/context/ThemeContext";
 import { useSearchProducts, useSearchVendors } from "@/hooks/queries/useSearch";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useContext, useEffect, useState } from "react";
-import { Image, Keyboard, Linking, Modal, Platform, ScrollView, StatusBar, Text, View } from "react-native";
+import { Image, Keyboard, Linking, Modal, Platform, ScrollView, StatusBar, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BRAND } from "@/constants/brandColors";
@@ -16,6 +17,8 @@ import { trackEvent } from "@/utils/analytics";
 import { useLocation } from "@/hooks/useLocation";
 import { Ionicons } from "@expo/vector-icons";
 import { useDebounce } from "@/hooks/useDebounce";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { formatMoney } from "@/utils/money";
 
 const PRODUCT_CATEGORIES = [
 	{ id: 'all', label: 'All Products' },
@@ -221,9 +224,9 @@ export default function Search() {
 				{showHistory && history.length > 0 && !hasSearched && (
 					<View className="py-4">
 						<View className="flex-row justify-between items-center mb-4">
-							<Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>Recent Searches</Text>
+							<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>Recent Searches</Text>
 							<PressableScale onPress={clearHistory}>
-								<Text className="text-red-400 font-semibold text-sm">Clear</Text>
+								<Text className="text-red-400 font-sans-semibold text-sm">Clear</Text>
 							</PressableScale>
 						</View>
 						<View className="flex-row flex-wrap gap-2">
@@ -260,7 +263,7 @@ export default function Search() {
 					<>
 		{/* Results Header */}
 						<View className="py-4">
-							<Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+							<Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
 								{searchMode === "deals" ? `Deals & Offers (${totalResults})` 
 								: searchMode === "refill_wholesale" ? `Refill & Wholesale (${totalResults})` 
 								: `Search Results (${totalResults})`}
@@ -291,7 +294,7 @@ export default function Search() {
 										className={`px-4 py-2 rounded-full border ${productCategoryFilter === cat.id ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
 										style={darkTheme || productCategoryFilter === cat.id ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 									>
-										<Text className={`font-semibold text-sm ${productCategoryFilter === cat.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+										<Text className={`font-sans-semibold text-sm ${productCategoryFilter === cat.id ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
 											{cat.label}
 										</Text>
 									</PressableScale>
@@ -309,7 +312,7 @@ export default function Search() {
 										className={`px-4 py-2 rounded-full border ${selectedResultTab === "products" ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
 										style={darkTheme || selectedResultTab === "products" ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 									>
-										<Text className={`font-semibold text-sm ${selectedResultTab === "products" ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+										<Text className={`font-sans-semibold text-sm ${selectedResultTab === "products" ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
 											Products ({productResults.length})
 										</Text>
 									</PressableScale>
@@ -319,7 +322,7 @@ export default function Search() {
 										className={`px-4 py-2 rounded-full border ${selectedResultTab === "vendors" ? "bg-accentbg border-accentbg" : darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}
 										style={darkTheme || selectedResultTab === "vendors" ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 									>
-										<Text className={`font-semibold text-sm ${selectedResultTab === "vendors" ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+										<Text className={`font-sans-semibold text-sm ${selectedResultTab === "vendors" ? "text-white" : darkTheme ? "text-gray-300" : "text-gray-600"}`}>
 											Vendors ({vendorResults.length})
 										</Text>
 									</PressableScale>
@@ -390,15 +393,15 @@ export default function Search() {
 															</View>
 														)}
 														<View className="flex-1">
-															<Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
+															<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
 															<Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`} numberOfLines={1}>
 																{product.description || "Water product"}
 															</Text>
 														</View>
 														<View className="items-end">
-															<Text className="font-bold text-green-500">KSH {displayPrice}</Text>
+															<Text className="font-sans-bold text-green-500">{formatMoney(displayPrice)}</Text>
 															{product.discount > 0 && (
-																<Text className="text-xs text-red-400 line-through">KSH {product.price}</Text>
+																<Text className="text-xs text-red-400 line-through">{formatMoney(product.price)}</Text>
 															)}
 														</View>
 													</View>
@@ -419,16 +422,22 @@ export default function Search() {
 															</View>
 														)}
 														<View className="flex-1">
-															<Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{vendor.business_name}</Text>
+															<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>{vendor.business_name}</Text>
 															<View className="flex-row items-center mt-1">
 																<Ionicons name="location" size={16} color={BRAND.primary} />
 																<Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`} numberOfLines={1}>
 																	{vendor.location_address || "Water Vendor"}
 																</Text>
 															</View>
+															{/* Searching for a shop by name is the surface where
+															    "is it open" matters most — the customer already
+															    knows which one they want. */}
+															<View className="mt-1">
+																<StoreClosedNotice store={vendor} compact />
+															</View>
 														</View>
 														<View className="items-end">
-															<Text className="font-bold text-yellow-500">⭐ {vendor.rating?.toFixed(1) || "5.0"}</Text>
+															<Text className="font-sans-bold text-yellow-500">⭐ {vendor.rating?.toFixed(1) || "5.0"}</Text>
 														</View>
 													</View>
 												</PressableScale>
@@ -460,7 +469,7 @@ export default function Search() {
 								<View className="w-16 h-16 rounded-full bg-primary/20 items-center justify-center mb-4">
 									<Ionicons name="location" size={24} color={BRAND.primary} />
 								</View>
-								<Text className={`text-xl font-bold text-center mb-2 ${darkTheme ? "text-white" : "text-black"}`}>
+								<Text className={`text-xl font-sans-bold text-center mb-2 ${darkTheme ? "text-white" : "text-black"}`}>
 									Location Required
 								</Text>
 								<Text className={`text-center text-sm ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
@@ -474,14 +483,14 @@ export default function Search() {
 								}}
 								className="bg-primary py-3 rounded-xl items-center mb-3"
 							>
-								<Text className="text-white font-bold">Open Settings</Text>
+								<Text className="text-white font-sans-bold">Open Settings</Text>
 							</PressableScale>
 							
 							<PressableScale
 								onPress={() => requestLocation()}
 								className={`py-3 rounded-xl items-center ${darkTheme ? "bg-gray-800" : "bg-white"}`}
 							>
-								<Text className={`font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>I've enabled it, try again</Text>
+								<Text className={`font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>I've enabled it, try again</Text>
 							</PressableScale>
 						</View>
 					</View>

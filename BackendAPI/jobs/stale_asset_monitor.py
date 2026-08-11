@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from sqlalchemy.sql.expression import text
 from dependencies.dependencies import get_db_session

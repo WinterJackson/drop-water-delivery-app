@@ -1,4 +1,5 @@
-import { View, Text, TextInput, Image } from "react-native";
+import { View, Image } from "react-native";
+import { Text, TextInput, type TextInputRef } from '@/components/ui/Text';
 import React, { useContext, useEffect, useRef } from "react";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
@@ -11,7 +12,7 @@ type Props = {
 };
 
 const SearchBar = ({ width, buttonStyle, height, setFunc }: Props) => {
-	const inputRef = useRef<TextInput>(null);
+	const inputRef = useRef<TextInputRef>(null);
 	const {currentTheme} = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark"
 

@@ -1,6 +1,7 @@
 import { errorMessage } from "@/API/errors";
 import React, { useContext, useState } from "react";
-import { View, Text, StatusBar, ScrollView, ActivityIndicator } from "react-native";
+import { View, StatusBar, ScrollView, ActivityIndicator } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +16,6 @@ import { BRAND } from "@/constants/brandColors";
 import { Toast } from "@/lib/toast";
 import { SavedLocationSkeleton } from '@/components/skeletons/ContextualSkeletons';
 import { Ionicons } from "@expo/vector-icons";
-
 
 export default function LocationSearch() {
 	const router = useRouter();
@@ -131,7 +131,7 @@ export default function LocationSearch() {
 					</View>
 					<View className="flex-1">
 						{loc.label && (
-							<Text className={`text-sm font-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+							<Text className={`text-sm font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
 								{loc.label}
 							</Text>
 						)}
@@ -147,12 +147,12 @@ export default function LocationSearch() {
 							{isActive ? (
 								<PressableScale onPress={(e) => { e.stopPropagation?.(); handleRevokeLocation(loc); }}>
 									<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-red-500/20" : "bg-red-100"}`}>
-										<Text className={`text-xs font-bold ${darkTheme ? "text-red-400" : "text-red-600"}`}>Revoke</Text>
+										<Text className={`text-xs font-sans-bold ${darkTheme ? "text-red-400" : "text-red-600"}`}>Revoke</Text>
 									</View>
 								</PressableScale>
 							) : (
 								<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-accentbg/10" : "bg-accentbg/10"}`}>
-									<Text className={`text-xs font-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>Use</Text>
+									<Text className={`text-xs font-sans-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>Use</Text>
 								</View>
 							)}
 
@@ -185,7 +185,7 @@ export default function LocationSearch() {
 					<PressableScale onPress={() => router.back()} className="mr-4">
 						<BackButtonMinimal />
 					</PressableScale>
-					<Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+					<Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
 						Enter delivery address
 					</Text>
 				</View>
@@ -239,7 +239,7 @@ export default function LocationSearch() {
 									<Ionicons name="locate" size={24} color={BRAND.primary} />
 								)}
 							</View>
-							<Text className={`text-base font-semibold ${darkTheme ? "text-accenttxt" : "text-accenttxt"}`}>
+							<Text className={`text-base font-sans-semibold ${darkTheme ? "text-accenttxt" : "text-accenttxt"}`}>
 								Use current location
 							</Text>
 						</View>
@@ -254,7 +254,7 @@ export default function LocationSearch() {
 							<View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${darkTheme ? "bg-surface-variant" : "bg-white"}`}>
 								<Ionicons name="location" size={24} color={BRAND.primary} />
 							</View>
-							<Text className={`text-base font-semibold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
+							<Text className={`text-base font-sans-semibold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
 								Choose on map
 							</Text>
 						</View>
@@ -270,14 +270,14 @@ export default function LocationSearch() {
 					</View>
 				) : savedLocations.length === 1 ? (
 					<View className="mt-4 px-4">
-						<Text className={`text-xs font-bold tracking-wider uppercase mb-2 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+						<Text className={`text-xs font-sans-bold tracking-wider uppercase mb-2 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
 							Quick Select
 						</Text>
 						<SavedLocationCard loc={savedLocations[0]} single />
 					</View>
 				) : savedLocations.length > 1 ? (
 					<View className="mt-8 px-4">
-						<Text className={`text-xs font-bold tracking-wider uppercase mb-3 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+						<Text className={`text-xs font-sans-bold tracking-wider uppercase mb-3 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
 							Saved Places
 						</Text>
 						<View className="gap-2">

@@ -2,12 +2,13 @@ from pydantic import BaseModel
 from uuid import UUID
 from decimal import Decimal
 from schemas.user_schemas import CustomerPublicProfile
-from schemas.vendor_schemas import BaseVendor
-from schemas.product_schemas import ProductFull, OrderProductDetail
-from typing import List, Optional, Any
 from datetime import datetime
 from pydantic import field_validator
 from utils.s3_utils import generate_presigned_url
+from utils.money import MoneyField, OptionalMoneyField
+from schemas.vendor_schemas import BaseVendor
+from schemas.product_schemas import ProductFull, OrderProductDetail
+from typing import List, Optional, Any
 
 
 class OrderItemBase(BaseModel):
@@ -15,8 +16,8 @@ class OrderItemBase(BaseModel):
   order_id: UUID
   product_id: UUID
   quantity: int
-  price: float
-  Subtotal: float
+  price: MoneyField
+  Subtotal: MoneyField
   product: Optional[OrderProductDetail] = None
   
   model_config = {"from_attributes": True}
@@ -59,11 +60,11 @@ class BaseOrder(BaseModel):
   lng_from: float | None = None
   lat: float | None = None
   lng: float | None = None
-  total_amount: float | None = None
+  total_amount: OptionalMoneyField = None
   order_status: str | None = None
   payment_status: str | None = None
   payment_method: str | None = None
-  delivery_fee: float | None = None
+  delivery_fee: OptionalMoneyField = None
   delivery_time: int | None = None
   delivery_type: str | None = "quick_swap"
   bottle_source: str | None = "platform"
@@ -72,23 +73,23 @@ class BaseOrder(BaseModel):
   proof_url: str | None = None
 
   # ── Financial Breakdown ──
-  rider_net: float | None = 0.0
-  rider_commission: float | None = 0.0
-  vendor_commission: float | None = 0.0
-  service_fee: float | None = 0.0
-  surge_fee: float | None = 0.0
-  delivery_markup: float | None = 0.0
-  platform_total: float | None = 0.0
-  vendor_net: float | None = 0.0
-  payload_surcharge: float | None = 0.0
-  staircase_surcharge: float | None = 0.0
+  rider_net: MoneyField = Decimal("0")
+  rider_commission: MoneyField = Decimal("0")
+  vendor_commission: MoneyField = Decimal("0")
+  service_fee: MoneyField = Decimal("0")
+  surge_fee: MoneyField = Decimal("0")
+  delivery_markup: MoneyField = Decimal("0")
+  platform_total: MoneyField = Decimal("0")
+  vendor_net: MoneyField = Decimal("0")
+  payload_surcharge: MoneyField = Decimal("0")
+  staircase_surcharge: MoneyField = Decimal("0")
   distance_km: float | None = 0.0
   vehicle_class: str | None = "motorbike"
 
   # ── Discount Audit Trail (H-07 FIX) ──
-  wallet_discount: float | None = 0.0
-  welcome_discount: float | None = 0.0
-  product_subtotal: float | None = 0.0
+  wallet_discount: MoneyField = Decimal("0")
+  welcome_discount: MoneyField = Decimal("0")
+  product_subtotal: MoneyField = Decimal("0")
 
   # ── Review state ──
   # The client has always typed `is_rated` on its Order interface, but nothing

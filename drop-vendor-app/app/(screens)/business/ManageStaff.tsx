@@ -7,10 +7,9 @@ import {
     Platform,
     ScrollView,
     Switch,
-    Text,
-    TextInput,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Toast } from "@/lib/toast";
@@ -160,7 +159,7 @@ export default function ManageStaff() {
                         <PressableScale onPress={() => router.back()} className="mr-4">
                             <BackButtonMinimal />
                         </PressableScale>
-                        <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Manage Staff
                         </Text>
                     </View>
@@ -168,7 +167,7 @@ export default function ManageStaff() {
 
                 <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
                     {/* ── Current staff ─────────────────────────────────── */}
-                    <Text className={`font-bold text-lg mb-3 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                    <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                         People with access
                     </Text>
 
@@ -182,7 +181,7 @@ export default function ManageStaff() {
                                 {errorMessage(error, "Couldn't load your staff list.")}
                             </Text>
                             <PressableScale onPress={() => refetch()} className="bg-accentbg px-5 py-2.5 rounded-xl self-start">
-                                <Text className="text-white font-bold">Try again</Text>
+                                <Text className="text-white font-sans-bold">Try again</Text>
                             </PressableScale>
                         </View>
                     ) : staff.length === 0 ? (
@@ -191,7 +190,7 @@ export default function ManageStaff() {
                             style={cardStyle}
                         >
                             <Ionicons name="people-outline" size={36} color={darkTheme ? BRAND.gray500 : BRAND.gray400} />
-                            <Text className={`mt-3 font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                            <Text className={`mt-3 font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
                                 Just you, for now
                             </Text>
                             <Text className={`mt-1 text-center text-sm ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
@@ -207,7 +206,7 @@ export default function ManageStaff() {
                             >
                                 <View className="flex-row items-center justify-between mb-1">
                                     <View className="flex-1 mr-3">
-                                        <Text numberOfLines={1} className={`font-bold text-base ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                                        <Text numberOfLines={1} className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-slate-900"}`}>
                                             {member.name || member.email}
                                         </Text>
                                         {member.name ? (
@@ -216,7 +215,7 @@ export default function ManageStaff() {
                                             </Text>
                                         ) : null}
                                     </View>
-                                    <PressableScale
+                                    <PressableScale accessibilityLabel={`Remove ${member.name || member.email} from this store`}
                                         onPress={() => handleRevoke(member)}
                                         className={`w-10 h-10 rounded-full items-center justify-center ${darkTheme ? "bg-red-900/20" : "bg-red-50"}`}
                                     >
@@ -229,7 +228,7 @@ export default function ManageStaff() {
                                     left wondering why nothing happened. */}
                                 {member.is_pending && (
                                     <View className={`self-start px-2.5 py-1 rounded-md mb-3 ${darkTheme ? "bg-amber-500/15" : "bg-amber-50"}`}>
-                                        <Text className="text-amber-600 text-[10px] font-bold uppercase tracking-wider">
+                                        <Text className="text-amber-600 text-[10px] font-sans-bold uppercase tracking-wider">
                                             Waiting for them to sign in
                                         </Text>
                                     </View>
@@ -260,7 +259,7 @@ export default function ManageStaff() {
                         className={`p-5 rounded-[20px] mt-6 border ${darkTheme ? "bg-surface-container border-transparent" : "bg-white border-gray-100"}`}
                         style={cardStyle}
                     >
-                        <Text className={`font-bold text-lg mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`font-sans-bold text-lg mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Add someone
                         </Text>
                         <Text className={`text-xs mb-4 leading-5 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
@@ -279,7 +278,7 @@ export default function ManageStaff() {
                                     setIsFocused(true);
                                 }}
                                 onBlur={() => setIsFocused(false)}
-                                className={`flex-1 ml-3 text-base font-bold ${darkTheme ? "text-white" : "text-black"}`}
+                                className={`flex-1 ml-3 text-base font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}
                                 placeholder="assistant@example.com"
                                 placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
                                 autoCapitalize="none"
@@ -288,7 +287,7 @@ export default function ManageStaff() {
                             />
                         </View>
 
-                        <Text className={`font-semibold text-sm mt-5 mb-1 ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
+                        <Text className={`font-sans-semibold text-sm mt-5 mb-1 ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
                             What they can do
                         </Text>
                         {available.map((permission) => (
@@ -311,7 +310,7 @@ export default function ManageStaff() {
                                 {invite.isPending ? (
                                     <ActivityIndicator color="#fff" />
                                 ) : (
-                                    <Text className="text-white text-lg font-bold">Send invitation</Text>
+                                    <Text className="text-white text-lg font-sans-bold">Send invitation</Text>
                                 )}
                             </View>
                         </PressableScale>

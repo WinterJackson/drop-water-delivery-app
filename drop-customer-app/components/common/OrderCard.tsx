@@ -5,18 +5,19 @@ import { useAuth } from "@clerk/clerk-expo";
 import { format, parseISO } from 'date-fns';
 import { useRouter } from "expo-router";
 import React, { useContext, useState, useMemo } from "react";
-import { Image, Text, View } from "react-native";
+import { Image, View } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 import { errorMessage } from "@/API/errors";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Ionicons } from "@expo/vector-icons";
+import { formatMoney, isZeroMoney, multiplyMoney, sumMoney } from "@/utils/money";
 
 type Props = {
   order: any;
 };
-
 
 // FIX-RERENDER-08: Extract LiveETA into its own React.memo component.
 const LiveETA = React.memo(({ createdAt, status, deliveryTime }: { createdAt: string, status: string, deliveryTime?: number }) => {
@@ -54,8 +55,8 @@ const LiveETA = React.memo(({ createdAt, status, deliveryTime }: { createdAt: st
 
    return (
        <View className="flex-row items-center bg-sky-500/10 px-2 py-1 rounded-md border border-sky-500/20">
-         <Text className="text-sky-600 dark:text-sky-400 font-bold mr-1 text-[10px] uppercase tracking-wider">ETA</Text>
-         <Text className="text-sky-600 dark:text-sky-400 font-bold text-xs">{timeLeft}</Text>
+         <Text className="text-sky-600 dark:text-sky-400 font-sans-bold mr-1 text-[10px] uppercase tracking-wider">ETA</Text>
+         <Text className="text-sky-600 dark:text-sky-400 font-sans-bold text-xs">{timeLeft}</Text>
        </View>
    )
 });
@@ -188,22 +189,19 @@ const OrderCard = React.memo(({ order }: Props) => {
         {/* HEADER: Date & Total */}
         <View className="flex-row justify-between items-start mb-3">
           <View className="flex-1 mr-2">
-            <Text className={`text-[10px] uppercase tracking-wider font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Date</Text>
-            <Text className={`text-sm font-semibold mt-0.5 ${darkTheme ? "text-white" : "text-black"}`}>{dateStr}</Text>
+            <Text className={`text-[10px] uppercase tracking-wider font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Date</Text>
+            <Text className={`text-sm font-sans-semibold mt-0.5 ${darkTheme ? "text-white" : "text-black"}`}>{dateStr}</Text>
           </View>
           <View className="items-end flex-shrink-0">
-            <Text className={`text-[10px] uppercase tracking-wider font-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Total Amt</Text>
-            <Text className={`text-sm font-bold mt-0.5 ${darkTheme ? "text-white" : "text-black"}`}>
-              Ksh {(
-                Number((Number(order.product_subtotal) > 0 ? order.product_subtotal : order.order_item?.reduce((sum: number, item: any) => sum + (Number(item.quantity || 0) * Number(item.price || 0)), 0)) || 0) +
-                Number(order.delivery_fee || 0) +
-                Number(order.service_fee || 0) +
-                Number(order.surge_fee || 0) +
-                Number(order.payload_surcharge || 0) +
-                Number(order.staircase_surcharge || 0) -
-                Number(order.welcome_discount || 0) -
-                Number(order.wallet_discount || 0)
-              ).toFixed(2)}
+            <Text className={`text-[10px] uppercase tracking-wider font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Total Amt</Text>
+            <Text className={`text-sm font-sans-bold mt-0.5 ${darkTheme ? "text-white" : "text-black"}`}>
+              {/* `total_amount` is the figure the customer was actually charged,
+                  frozen on the order at creation. This used to re-add the
+                  components — a second pricing formula on the client, and one
+                  that omitted the bottle deposit and any settled balance, so a
+                  customer comparing this card with their M-Pesa message saw two
+                  different numbers for the same order. */}
+              {formatMoney(order.total_amount, "Ksh")}
             </Text>
           </View>
         </View>
@@ -212,7 +210,7 @@ const OrderCard = React.memo(({ order }: Props) => {
         <View className="flex-row items-center justify-between mb-3">
           <View className="flex-row items-center flex-wrap gap-2 flex-1 mr-2">
             <View className={`px-2 py-1 rounded-md border ${getStatusStyle(order.order_status).badge}`}>
-              <Text className={`text-[10px] font-bold uppercase tracking-wider ${getStatusStyle(order.order_status).text}`}>
+              <Text className={`text-[10px] font-sans-bold uppercase tracking-wider ${getStatusStyle(order.order_status).text}`}>
                 {order.order_status.replace('_', ' ')}
               </Text>
             </View>
@@ -220,7 +218,7 @@ const OrderCard = React.memo(({ order }: Props) => {
                <LiveETA createdAt={order.created_at} status={order.order_status} deliveryTime={order.delivery_time} />
             )}
           </View>
-          <Text className={`text-xs font-semibold flex-shrink-0 ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+          <Text className={`text-xs font-sans-semibold flex-shrink-0 ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
             {order?.order_item?.length || 0} item{(order?.order_item?.length !== 1) ? 's' : ''}
           </Text>
         </View>
@@ -229,8 +227,8 @@ const OrderCard = React.memo(({ order }: Props) => {
         {!showItems && (
           <View className={`p-3 rounded-xl flex-row justify-between items-center mb-3 ${darkTheme ? "bg-white/5" : "bg-gray-50"}`}>
             <View className="flex-1">
-              <Text className={`text-[10px] uppercase tracking-wider font-bold mb-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Vendor Location</Text>
-              <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-200" : "text-gray-800"}`} numberOfLines={1}>
+              <Text className={`text-[10px] uppercase tracking-wider font-sans-bold mb-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Vendor Location</Text>
+              <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-200" : "text-gray-800"}`} numberOfLines={1}>
                 {order.vendor?.location_address || 'Location not available'}
               </Text>
             </View>
@@ -240,8 +238,8 @@ const OrderCard = React.memo(({ order }: Props) => {
         {/* PAYMENT & ACTIONS */}
         <View className="flex-row items-center justify-between">
           <View className="flex-1 mr-2">
-            <Text className={`text-[10px] uppercase tracking-wider font-bold mb-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Payment Status</Text>
-            <Text className={`text-xs font-bold uppercase tracking-wider ${order.payment_status === 'paid' ? 'text-green-500' : 'text-amber-500'}`}>
+            <Text className={`text-[10px] uppercase tracking-wider font-sans-bold mb-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Payment Status</Text>
+            <Text className={`text-xs font-sans-bold uppercase tracking-wider ${order.payment_status === 'paid' ? 'text-green-500' : 'text-amber-500'}`}>
               {order.payment_status}
             </Text>
           </View>
@@ -261,10 +259,10 @@ const OrderCard = React.memo(({ order }: Props) => {
                 {action === "Cancel Order" && cancelLoading ? (
                   <View className="flex-row items-center gap-2">
                      <Skeleton width={12} height={12} borderRadius={6} />
-                    <Text className={`text-xs font-bold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Wait...</Text>
+                    <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Wait...</Text>
                   </View>
                 ) : (
-                  <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-800"}`}>{action}</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-800"}`}>{action}</Text>
                 )}
               </View>
             </PressableScale>
@@ -283,9 +281,9 @@ const OrderCard = React.memo(({ order }: Props) => {
               {reorderLoading ? (
                  <Skeleton width={14} height={14} borderRadius={7} />
               ) : (
-                 <Text className="text-sky-500 font-bold text-lg leading-none mt-[-2px]">↻</Text>
+                 <Text className="text-sky-500 font-sans-bold text-lg leading-none mt-[-2px]">↻</Text>
               )}
-              <Text className={`font-bold text-xs text-sky-500`}>
+              <Text className={`font-sans-bold text-xs text-sky-500`}>
                 {reorderLoading ? "Reordering..." : "Re-Order Items"}
               </Text>
             </View>
@@ -305,15 +303,15 @@ const OrderCard = React.memo(({ order }: Props) => {
                   )}
                 </View>
                 <View className="flex-1 justify-center py-0.5">
-                  <Text className={`text-xs font-bold mb-1 ${darkTheme ? "text-gray-100" : "text-gray-800"}`} numberOfLines={2}>
+                  <Text className={`text-xs font-sans-bold mb-1 ${darkTheme ? "text-gray-100" : "text-gray-800"}`} numberOfLines={2}>
                     {item.product?.name || "Product"}
                   </Text>
                   <View className="flex-row justify-between items-end mt-1">
-                    <Text className={`text-[10px] font-semibold uppercase tracking-wider ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                    <Text className={`text-[10px] font-sans-semibold uppercase tracking-wider ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                       Qty: {item.quantity}  •  Ksh {item.price}
                     </Text>
-                    <Text className={`text-xs font-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                      Ksh {(Number(item.quantity || 0) * Number(item.price || 0)).toFixed(2)}
+                    <Text className={`text-xs font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                      {formatMoney(multiplyMoney(item.price, item.quantity ?? 0), "Ksh")}
                     </Text>
                   </View>
                 </View>
@@ -322,62 +320,56 @@ const OrderCard = React.memo(({ order }: Props) => {
 
             <View className={`mt-2 pt-3 border-t ${darkTheme ? "border-gray-800" : "border-gray-100"} gap-1.5`}>
               <View className="flex-row justify-between items-center">
-                <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
-                <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {Number((Number(order.product_subtotal) > 0 ? order.product_subtotal : order.order_item?.reduce((sum: number, item: any) => sum + (Number(item.quantity || 0) * Number(item.price || 0)), 0)) || 0).toFixed(2)}</Text>
+                <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
+                <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(!isZeroMoney(order.product_subtotal) ? order.product_subtotal : sumMoney((order.order_item ?? []).map((i: any) => multiplyMoney(i.price, i.quantity ?? 0))), "Ksh")}</Text>
               </View>
               <View className="flex-row justify-between items-center">
-                <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Delivery Fee</Text>
-                <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.delivery_fee ?? 0}</Text>
+                <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Delivery Fee</Text>
+                <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.delivery_fee ?? 0}</Text>
               </View>
               {order.service_fee ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Service Fee</Text>
-                  <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.service_fee}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Service Fee</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.service_fee}</Text>
                 </View>
               ) : null}
               {order.surge_fee ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Surge Pricing</Text>
-                  <Text className={`text-xs font-bold text-orange-500`}>Ksh {order.surge_fee}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Surge Pricing</Text>
+                  <Text className={`text-xs font-sans-bold text-orange-500`}>Ksh {order.surge_fee}</Text>
                 </View>
               ) : null}
               {order.payload_surcharge ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Large Order Surcharge</Text>
-                  <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.payload_surcharge}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Large Order Surcharge</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.payload_surcharge}</Text>
                 </View>
               ) : null}
               {order.staircase_surcharge ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Surcharge</Text>
-                  <Text className={`text-xs font-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.staircase_surcharge}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Surcharge</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.staircase_surcharge}</Text>
                 </View>
               ) : null}
               {order.welcome_discount ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Welcome Offer</Text>
-                  <Text className={`text-xs font-bold text-green-500`}>-Ksh {order.welcome_discount}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Welcome Offer</Text>
+                  <Text className={`text-xs font-sans-bold text-green-500`}>-Ksh {order.welcome_discount}</Text>
                 </View>
               ) : null}
               {order.wallet_discount ? (
                 <View className="flex-row justify-between items-center">
-                  <Text className={`text-xs font-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Applied</Text>
-                  <Text className={`text-xs font-bold text-green-500`}>-Ksh {order.wallet_discount}</Text>
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Applied</Text>
+                  <Text className={`text-xs font-sans-bold text-green-500`}>-{formatMoney(order.wallet_discount, "Ksh")}</Text>
                 </View>
               ) : null}
               <View className="flex-row justify-between items-center mt-1 pt-2 border-t border-gray-800/50 dark:border-gray-100/10">
-                <Text className={`text-sm font-bold ${darkTheme ? "text-white" : "text-black"}`}>Total Amount</Text>
-                <Text className={`text-sm font-bold text-sky-500`}>
-                  Ksh {(
-                    Number(order.product_subtotal || 0) +
-                    Number(order.delivery_fee || 0) +
-                    Number(order.service_fee || 0) +
-                    Number(order.surge_fee || 0) +
-                    Number(order.payload_surcharge || 0) +
-                    Number(order.staircase_surcharge || 0) -
-                    Number(order.welcome_discount || 0) -
-                    Number(order.wallet_discount || 0)
-                  ).toFixed(2)}
+                <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Total Amount</Text>
+                <Text className={`text-sm font-sans-bold text-sky-500`}>
+                  {/* The frozen figure the customer was charged, not a second
+                      sum of the lines above — that one omitted the deposit and
+                      any settled balance. */}
+                  {formatMoney(order.total_amount, "Ksh")}
                 </Text>
               </View>
             </View>
@@ -391,7 +383,7 @@ const OrderCard = React.memo(({ order }: Props) => {
           className="mt-4"
         >
           <View className={`py-3 px-4 rounded-xl flex-row justify-center items-center gap-2 ${darkTheme ? "bg-white/5 border border-white/10" : "bg-gray-50 border border-gray-100"}`}>
-             <Text className={`text-[11px] font-bold uppercase tracking-wider ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+             <Text className={`text-[11px] font-sans-bold uppercase tracking-wider ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
                {showItems ? "Hide Order Details" : "See Order Details"}
              </Text>
              <Ionicons name={showItems ? "chevron-up" : "chevron-down"} size={14} color={darkTheme ? "#d1d5db" : "#4b5563"} />

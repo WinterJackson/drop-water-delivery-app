@@ -5,6 +5,7 @@ import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primi
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
+import { CashExposurePanel, type CashExposure } from "./CashExposure";
 import { ResolveButton } from "./ResolveButton";
 
 export const metadata = { title: "Reconciliation" };
@@ -80,6 +81,25 @@ export default async function ReconciliationPage({
   const { items, summary } = data;
   const canResolve = can(me, PERMISSIONS.financeRead);
 
+  // Cash on the road, and the window after which the sweep takes it back. Both
+  // are separate calls and neither is worth an error page: a slow count must
+  // not blank a screen whose job is the failed callbacks above.
+  let exposure: CashExposure | null = null;
+  let releaseAfterMinutes: number | null = null;
+  try {
+    const [cash, config] = await Promise.all([
+      get<CashExposure>("/api/admin/finance/cash-exposure"),
+      get<{ settings: { key: string; value: unknown }[] }>("/api/admin/config").catch(
+        () => ({ settings: [] }),
+      ),
+    ]);
+    exposure = cash;
+    const row = config.settings.find((s) => s.key === "cod_unclaimed_release_minutes");
+    releaseAfterMinutes = row ? Number(row.value) : null;
+  } catch {
+    exposure = null;
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -90,6 +110,10 @@ export default async function ReconciliationPage({
           unpaid.
         </p>
       </div>
+
+      {exposure ? (
+        <CashExposurePanel data={exposure} releaseAfterMinutes={releaseAfterMinutes} />
+      ) : null}
 
       <section aria-label="Reconciliation summary">
         <h2 className="sr-only">Summary</h2>

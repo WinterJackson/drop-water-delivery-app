@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
-import { View, Text, ScrollView, RefreshControl, Image, TextInput, Alert, Modal } from "react-native";
+import { View, ScrollView, RefreshControl, Image, Alert, Modal } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -108,7 +109,19 @@ export default function BottleReconciliation() {
           <PressableScale onPress={() => router.back()} className="mr-4">
             <BackButtonMinimal />
           </PressableScale>
-          <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Bottle Reconciliation</Text>
+          <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Bottle Reconciliation</Text>
+          {/* The balances below are a running total. This is what produced them —
+              the answer to "did I already take those six back on Tuesday?", which
+              no counter can give. */}
+          <PressableScale
+            onPress={() => router.push("/(screens)/BottleLedger" as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Bottle history"
+            className={`flex-row items-center gap-1.5 px-3 py-2 rounded-full ${darkTheme ? "bg-slate-800" : "bg-slate-100"}`}
+          >
+            <Ionicons name="time-outline" size={16} color={BRAND.primary} />
+            <Text className="text-xs font-sans-bold" style={{ color: BRAND.primary }}>History</Text>
+          </PressableScale>
         </View>
       </View>
 
@@ -130,7 +143,7 @@ export default function BottleReconciliation() {
             <View className={`w-20 h-20 rounded-full items-center justify-center mb-4 ${darkTheme ? "bg-slate-800" : "bg-white border border-slate-100 shadow-sm"}`}>
               <Ionicons name="checkmark-circle-outline" size={40} color={BRAND.primary} />
             </View>
-            <Text className={`text-lg font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>All Clear!</Text>
+            <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>All Clear!</Text>
             <Text className={`text-center mt-2 px-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>No riders currently owe you any empty bottles.</Text>
           </View>
         ) : (
@@ -152,7 +165,7 @@ export default function BottleReconciliation() {
                     )}
                   </View>
                   <View>
-                    <Text className={`font-bold text-base ${darkTheme ? "text-white" : "text-slate-900"}`}>{rider.name || "Gig Rider"}</Text>
+                    <Text className={`font-sans-bold text-base ${darkTheme ? "text-white" : "text-slate-900"}`}>{rider.name || "Gig Rider"}</Text>
                     <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{rider.phone_number}</Text>
                   </View>
                 </View>
@@ -160,14 +173,14 @@ export default function BottleReconciliation() {
 
               <View className={`flex-row rounded-2xl p-3 mb-4 ${darkTheme ? "bg-black/30" : "bg-slate-50"}`}>
                 <View className="flex-1 items-center border-r border-slate-200 dark:border-slate-700">
-                  <Text className={`text-xs font-medium mb-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>10L Empties Owed</Text>
-                  <Text className={`text-xl font-bold ${rider.pending_10L_empties > 0 ? "text-orange-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
+                  <Text className={`text-xs font-sans-medium mb-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>10L Empties Owed</Text>
+                  <Text className={`text-xl font-sans-bold ${rider.pending_10L_empties > 0 ? "text-orange-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
                     {rider.pending_10L_empties || 0}
                   </Text>
                 </View>
                 <View className="flex-1 items-center">
-                  <Text className={`text-xs font-medium mb-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>20L Empties Owed</Text>
-                  <Text className={`text-xl font-bold ${rider.pending_20L_empties > 0 ? "text-orange-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
+                  <Text className={`text-xs font-sans-medium mb-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>20L Empties Owed</Text>
+                  <Text className={`text-xl font-sans-bold ${rider.pending_20L_empties > 0 ? "text-orange-500" : darkTheme ? "text-white" : "text-slate-900"}`}>
                     {rider.pending_20L_empties || 0}
                   </Text>
                 </View>
@@ -177,7 +190,7 @@ export default function BottleReconciliation() {
                 onPress={() => openReceiveModal(rider)}
                 className="w-full h-[45px] justify-center items-center rounded-xl bg-slate-900 dark:bg-white"
               >
-                <Text className="text-white dark:text-slate-900 font-bold">Receive Empties</Text>
+                <Text className="text-white dark:text-slate-900 font-sans-bold">Receive Empties</Text>
               </PressableScale>
             </View>
           ))
@@ -195,37 +208,37 @@ export default function BottleReconciliation() {
         <View className="flex-1 justify-end bg-black/50">
           <View className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
             <View className="flex-row justify-between items-center mb-6">
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Receive Empties</Text>
-              <PressableScale onPress={() => setModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Receive Empties</Text>
+              <PressableScale accessibilityLabel="Close the empties form" onPress={() => setModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
                 <Ionicons name="close" size={20} color={darkTheme ? "#fff" : "#0f172a"} />
               </PressableScale>
             </View>
 
             <Text className={`text-sm mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-              Enter the number of empties physically returned by <Text className="font-bold text-slate-900 dark:text-white">{selectedRider?.name}</Text>.
+              Enter the number of empties physically returned by <Text className="font-sans-bold text-slate-900 dark:text-white">{selectedRider?.name}</Text>.
             </Text>
 
             <View className="flex-row justify-between mb-6">
               <View className="flex-1 mr-2">
-                <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>10L BOTTLES</Text>
+                <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>10L BOTTLES</Text>
                 <TextInput
                   value={input10L}
                   onChangeText={setInput10L}
                   keyboardType="numeric"
                   placeholder={`Max: ${selectedRider?.pending_10L_empties || 0}`}
                   placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                  className={`p-4 rounded-xl border font-bold text-lg text-center ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                  className={`p-4 rounded-xl border font-sans-bold text-lg text-center ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
                 />
               </View>
               <View className="flex-1 ml-2">
-                <Text className={`text-xs font-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>20L BOTTLES</Text>
+                <Text className={`text-xs font-sans-bold mb-2 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>20L BOTTLES</Text>
                 <TextInput
                   value={input20L}
                   onChangeText={setInput20L}
                   keyboardType="numeric"
                   placeholder={`Max: ${selectedRider?.pending_20L_empties || 0}`}
                   placeholderTextColor={darkTheme ? "#64748b" : "#94a3b8"}
-                  className={`p-4 rounded-xl border font-bold text-lg text-center ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
+                  className={`p-4 rounded-xl border font-sans-bold text-lg text-center ${darkTheme ? "bg-black/30 border-transparent text-white" : "bg-slate-50 border-slate-200 text-slate-900"}`}
                 />
               </View>
             </View>
@@ -239,7 +252,7 @@ export default function BottleReconciliation() {
               {isSubmitting ? (
                 <Skeleton width={80} height={20} borderRadius={4} style={{ alignSelf: 'center' }} />
               ) : (
-                <Text className="text-white font-bold text-lg">Confirm Receipt</Text>
+                <Text className="text-white font-sans-bold text-lg">Confirm Receipt</Text>
               )}
             </PressableScale>
             <SafeAreaView />

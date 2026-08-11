@@ -11,10 +11,9 @@ import {
     Platform,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { apiFetch } from "@/API/apiFetch";
@@ -24,7 +23,6 @@ import VehicleDropdown from "@/components/ui/VehicleDropdown";
 import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import { RiderOnboardingSkeleton } from "@/components/skeletons/ContextualSkeletons";
-
 
 export default function RiderOnboarding() {
     const { currentTheme } = useContext(UIThemeContext);
@@ -140,7 +138,7 @@ export default function RiderOnboarding() {
                 <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                     
                     <View className="mt-8 mb-6 items-center">
-                        <Text className={`text-3xl text-center font-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
+                        <Text className={`text-3xl text-center font-heading-semibold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                             Rider Registration
                         </Text>
                         <Text className={`mt-3 text-center ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -151,7 +149,7 @@ export default function RiderOnboarding() {
                     <View className="gap-5">
                         {missingFields.includes("ID_number") && (
                             <View className={`p-5 rounded-3xl ${darkTheme ? "bg-white/5" : "bg-white border border-gray-100"}`}>
-                                <Text className={`text-base font-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     National ID Number
                                 </Text>
                                 <TextInput
@@ -167,12 +165,12 @@ export default function RiderOnboarding() {
 
                         {missingFields.includes("phone_number") && (
                             <View className={`p-5 rounded-3xl ${darkTheme ? "bg-white/5" : "bg-white border border-gray-100"}`}>
-                                <Text className={`text-base font-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Phone Number
                                 </Text>
                                 <View className={`flex-row items-center h-[55px] rounded-2xl px-4 ${darkTheme ? "bg-black border border-white/20" : "bg-white border border-gray-200"}`}>
                                     <Ionicons name="call" size={24} color={BRAND.primary} />
-                                    <Text className={`ml-3 mr-1 font-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
+                                    <Text className={`ml-3 mr-1 font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>+254</Text>
                                     <TextInput
                                         className={`flex-1 h-full ml-1 text-base ${darkTheme ? "text-white" : "text-black"}`}
                                         placeholder="712345678"
@@ -188,7 +186,7 @@ export default function RiderOnboarding() {
 
                         {(missingFields.includes("vehicle_type") || missingFields.includes("plate_number")) && (
                             <View className={`p-5 rounded-3xl ${darkTheme ? "bg-white/5" : "bg-white border border-gray-100"}`}>
-                                <Text className={`text-base font-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
+                                <Text className={`text-base font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-gray-800"}`}>
                                     Vehicle Details
                                 </Text>
                                 <View className="mb-4">
@@ -220,7 +218,7 @@ export default function RiderOnboarding() {
                         {submitting ? (
                             <ActivityIndicator color={BRAND.white} />
                         ) : (
-                            <Text className="text-white font-bold text-lg">Complete Registration</Text>
+                            <Text className="text-white font-sans-bold text-lg">Complete Registration</Text>
                         )}
                     </PressableScale>
 

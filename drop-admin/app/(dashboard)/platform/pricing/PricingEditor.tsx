@@ -14,7 +14,13 @@ export type Setting = {
   group_label: string;
   label: string;
   help: string;
-  kind: "rate" | "money" | "int" | "bool" | "windows" | "deposits";
+  /**
+   * `int` truncates on the server (`int(value)`), so it is only for quantities
+   * that cannot be fractional. `decimal` is its fractional counterpart — the
+   * delivery radii use it, because 2.5 km entered against an `int` would have
+   * been stored as 2 without a word.
+   */
+  kind: "rate" | "money" | "int" | "decimal" | "bool" | "windows" | "deposits";
   unit: string;
   value: unknown;
   default: unknown;
@@ -42,6 +48,22 @@ const QUOTE_ROWS: { key: string; label: string; emphasis?: boolean }[] = [
 
 function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * A setting's value as the owner reads it, not as JSON.
+ *
+ * Rates are stored as fractions and thought about as percentages, and showing
+ * `0.05` beside `0.025` on a screen where a typo moves real money is how the
+ * wrong one gets approved.
+ */
+function show(setting: Setting, value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (setting.kind === "bool") return value ? "on" : "off";
+  if (setting.kind === "rate") return `${(Number(value) * 100).toFixed(2)}%`;
+  if (setting.kind === "money") return formatMoney(String(value));
+  if (typeof value === "object") return JSON.stringify(value);
+  return `${String(value)}${setting.unit ? ` ${setting.unit}` : ""}`;
 }
 
 export function PricingEditor({ settings }: { settings: Setting[] }) {
@@ -187,6 +209,29 @@ export function PricingEditor({ settings }: { settings: Setting[] }) {
                       <p className="mt-1.5 text-xs text-muted">
                         {(Number(current) * 100).toFixed(2)}% — was{" "}
                         {(Number(setting.value) * 100).toFixed(2)}%
+                      </p>
+                    ) : null}
+
+                    {/*
+                      What the platform ships, whenever this row differs from it.
+                      "Customised" on its own could not distinguish a figure
+                      somebody chose from one left behind by an older release —
+                      and a stored value silently outranks a new default forever,
+                      so the second is invisible until a total comes out wrong.
+                    */}
+                    {!setting.is_default && !dirty ? (
+                      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                        <span>
+                          Set to {show(setting, setting.value)}. The platform ships{" "}
+                          {show(setting, setting.default)}.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => set(setting.key, setting.default)}
+                          className="rounded text-[var(--accent)] underline underline-offset-2 hover:no-underline"
+                        >
+                          Use the shipped value
+                        </button>
                       </p>
                     ) : null}
                   </div>
@@ -468,8 +513,16 @@ function SettingInput({
         type="number"
         inputMode="decimal"
         // A rate is a fraction of 1.0, so it needs four decimal places of
-        // resolution; money needs two.
-        step={setting.kind === "rate" ? 0.0001 : setting.kind === "int" ? 1 : 0.01}
+        // resolution; money needs two; a distance in km steps in halves.
+        step={
+          setting.kind === "rate"
+            ? 0.0001
+            : setting.kind === "int"
+              ? 1
+              : setting.kind === "decimal"
+                ? 0.1
+                : 0.01
+        }
         min={setting.minimum ?? undefined}
         max={setting.maximum ?? undefined}
         value={String(value ?? "")}

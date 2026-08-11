@@ -14,7 +14,7 @@ Aggregation happens in Postgres, not Python: pulling every order into the web
 process to sum it works at 14 orders and stops working long before it matters.
 """
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 

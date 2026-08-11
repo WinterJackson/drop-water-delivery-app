@@ -41,7 +41,10 @@ def _gross(product_total, delivery_fee, splits, bottle_deposit, surcharges, debt
         + _d(delivery_fee)
         + _d(splits["service_fee"])
         + _d(splits["surge_fee"])
-        + _d(splits["delivery_markup"])
+        # `delivery_markup` is deliberately absent: it is taken **out of** the
+    # delivery fee, which is already in this sum, rather than added beside it.
+    # Additive, the cart rendered `delivery_fee` and charged `delivery_fee +
+    # markup`, so the line item understated itself.
         + _d(surcharges)
         + _d(bottle_deposit)
         + _d(debt_settlement)
@@ -51,15 +54,15 @@ def _gross(product_total, delivery_fee, splits, bottle_deposit, surcharges, debt
 CASES = [
     # (label, vendor_type, delivery_type, product_total, delivery_fee,
     #  bottle_deposit, surcharges, welcome_discount, debt_settlement)
-    ("retail plain",            "retail_refill",  "quick_swap",     400, 68,   0,   0,  0,  0),
-    ("retail with surcharges",  "retail_refill",  "quick_swap",     400, 68,   0,  80,  0,  0),
-    ("retail keep-my-bottle",   "retail_refill",  "keep_my_bottle", 200, 107.5, 300, 0,  0,  0),
-    ("retail welcome offer",    "retail_refill",  "quick_swap",     200, 68,  300,  0, 90,  0),
-    ("retail debt settled",     "retail_refill",  "quick_swap",     400, 68,   0,   0,  0, 50),
-    ("retail everything",       "retail_refill",  "keep_my_bottle", 260, 107.5, 300, 130, 90, 30),
-    ("wholesale plain",         "wholesale_b2b",  "quick_swap",    5000, 950,  0,   0,  0,  0),
-    ("wholesale surcharges",    "wholesale_b2b",  "quick_swap",    5000, 950,  0,  80,  0,  0),
-    ("wholesale everything",    "wholesale_b2b",  "quick_swap",    5000, 950, 300, 230,  0, 50),
+    ("retail plain",            "retail_refill",  "exchange",     400, 68,   0,   0,  0,  0),
+    ("retail with surcharges",  "retail_refill",  "exchange",     400, 68,   0,  80,  0,  0),
+    ("retail keep-my-bottle",   "retail_refill",  "refill_mine", 200, 107.5, 300, 0,  0,  0),
+    ("retail welcome offer",    "retail_refill",  "exchange",     200, 68,  300,  0, 90,  0),
+    ("retail debt settled",     "retail_refill",  "exchange",     400, 68,   0,   0,  0, 50),
+    ("retail everything",       "retail_refill",  "refill_mine", 260, 107.5, 300, 130, 90, 30),
+    ("wholesale plain",         "wholesale_b2b",  "exchange",    5000, 950,  0,   0,  0,  0),
+    ("wholesale surcharges",    "wholesale_b2b",  "exchange",    5000, 950,  0,  80,  0,  0),
+    ("wholesale everything",    "wholesale_b2b",  "exchange",    5000, 950, 300, 230,  0, 50),
 ]
 
 
@@ -167,11 +170,11 @@ def test_the_welcome_discount_comes_out_of_platform_margin_only():
     like a bug to whoever next reads the ledger.
     """
     without = calculate_revenue_splits(
-        product_total=200, delivery_fee=107.5, bottle_deposit=300, delivery_type="keep_my_bottle"
+        product_total=200, delivery_fee=107.5, bottle_deposit=300, delivery_type="refill_mine"
     )
     with_offer = calculate_revenue_splits(
         product_total=200, delivery_fee=107.5, bottle_deposit=300,
-        delivery_type="keep_my_bottle", welcome_discount=90,
+        delivery_type="refill_mine", welcome_discount=90,
     )
 
     assert with_offer["vendor_net"] == without["vendor_net"]
@@ -194,20 +197,23 @@ def test_the_bottle_deposit_is_paid_to_the_vendor_untaxed():
     assert with_deposit["platform_total"] == without["platform_total"]
 
 
-def test_the_keep_my_bottle_premium_raises_only_the_rider_commission():
-    """The premium pays for extra bottle handling, so it moves the rider's rate.
+def test_the_round_trip_premium_raises_only_the_rider_commission():
+    """The premium pays for the extra journey, so it moves the rider's rate.
+
+    `refill_mine` is three legs of riding rather than one — collect the
+    customer's bottle, carry it to the station, bring it back.
 
     Asserted against the configured figures rather than the literals, so a rate
     change in the console does not silently make this test meaningless.
     """
     standard = calculate_revenue_splits(
-        product_total=200, delivery_fee=100, delivery_type="quick_swap"
+        product_total=200, delivery_fee=100, delivery_type="exchange"
     )
     premium = calculate_revenue_splits(
-        product_total=200, delivery_fee=100, delivery_type="keep_my_bottle"
+        product_total=200, delivery_fee=100, delivery_type="refill_mine"
     )
 
-    expected_gap = Decimal("100") * config.get_decimal("keep_my_bottle_commission_premium")
+    expected_gap = Decimal("100") * config.get_decimal("refill_mine_commission_premium")
     assert _d(premium["rider_commission"]) - _d(standard["rider_commission"]) == expected_gap
     # Whatever the rider pays extra, the platform receives.
     assert _d(premium["platform_total"]) - _d(standard["platform_total"]) == expected_gap

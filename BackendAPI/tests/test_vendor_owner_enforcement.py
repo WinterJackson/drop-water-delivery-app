@@ -166,6 +166,10 @@ OWNER_ONLY = {
     ("DELETE", "/staff/{staff_id}"),
     # Who may carry this store's goods and collect its cash.
     ("PUT", "/rider-action"),
+    # Terms of trade: whether the store takes cash at all, and the smallest
+    # order it will prepare. Alongside the payout account and the business
+    # name, not alongside the shop-floor pause below.
+    ("PUT", "/storefront"),
 }
 
 #: Day-to-day trading. A staff member must be able to do all of this, or the
@@ -195,6 +199,13 @@ STAFF_ALLOWED = {
     ("POST", "/upload-image"),
     # The assign-rider sheet in OrderDetail needs the roster to dispatch.
     ("GET", "/my-riders"),
+    # Pausing is the shop floor, not the business. Whoever has just run out of
+    # 20 L bottles at 11am is standing behind the counter; a pause they cannot
+    # apply until they reach the owner arrives after the orders do. Reading the
+    # storefront is open to any member — it is what the dashboard renders.
+    ("GET", "/storefront"),
+    ("POST", "/storefront/pause"),
+    ("POST", "/storefront/resume"),
 }
 
 

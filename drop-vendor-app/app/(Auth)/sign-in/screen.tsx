@@ -30,13 +30,12 @@ import {
     Modal,
     ScrollView,
     StatusBar,
-    Text,
-    View
+    View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { useWarmUpBrowser } from "../_layout";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
-
 
 const { width, height } = Dimensions.get("window");
 
@@ -57,7 +56,6 @@ export default function SignIn() {
 	const [AuthLoading, setAuthLoading] = useState(false);
 	const [errors, setErrors] = React.useState<ClerkAPIError[]>();
 
-
 	useEffect(() => {
 		const resetError = () => {
 			setErrors(undefined);
@@ -70,7 +68,6 @@ export default function SignIn() {
 	useWarmUpBrowser();
 
 	// <----------------------<FUNCTIONS>---------------------->
-
 
 	// SIGN IN ATTEMPT
 	const onSignInPress = async () => {
@@ -279,7 +276,7 @@ export default function SignIn() {
 												<Ionicons name="sync" size={32} color={"white"} />
 											</View>
 										) : (
-											<Text className={`text-white text-lg font-semibold`}>
+											<Text className={`text-white text-lg font-sans-semibold`}>
 												Log In
 											</Text>
 										)}
@@ -349,7 +346,6 @@ export default function SignIn() {
 						</View>
 					</View>
 				</Modal>
-
 
 			</View>
 		</>

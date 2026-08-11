@@ -6,12 +6,11 @@ import {
     Dimensions,
     ScrollView,
     StatusBar,
-    Text,
-    TextInput,
     View,
     KeyboardAvoidingView,
-    Platform
+    Platform,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import PressableScale from "@/components/ui/PressableScale";
 import { Image } from "react-native";
@@ -90,7 +89,7 @@ export default function ForgotPassword() {
             />
             <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
                 <View className="mb-8">
-                    <Text className={`text-3xl font-bold mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
+                    <Text className={`text-3xl font-heading-semibold mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>
                         Reset Password
                     </Text>
                     <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
@@ -102,7 +101,7 @@ export default function ForgotPassword() {
                     {!successfulCreation ? (
                         <>
                             <View>
-                                <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                                <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                                     Email
                                 </Text>
                                 <TextInput
@@ -124,7 +123,7 @@ export default function ForgotPassword() {
                                 onPress={onRequestReset}
                                 className={`w-full mt-4 py-4 rounded-2xl items-center ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}
                             >
-                                <Text className="text-white font-bold text-lg">
+                                <Text className="text-white font-sans-bold text-lg">
                                     {loading ? "Sending..." : "Send Reset Code"}
                                 </Text>
                             </PressableScale>
@@ -132,7 +131,7 @@ export default function ForgotPassword() {
                     ) : (
                         <>
                             <View>
-                                <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                                <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                                     Reset Code
                                 </Text>
                                 <TextInput
@@ -146,7 +145,7 @@ export default function ForgotPassword() {
                             </View>
                             
                             <View>
-                                <Text className={`text-sm font-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                                <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                                     New Password
                                 </Text>
                             <View className="relative justify-center">
@@ -159,7 +158,7 @@ export default function ForgotPassword() {
                                     onChangeText={setPassword}
                                 />
                                 <View className="absolute right-2 top-0 bottom-0 justify-center">
-                                    <PressableScale onPress={() => setShowPassword(!showPassword)} className="p-2">
+                                    <PressableScale accessibilityLabel={showPassword ? "Hide password" : "Show password"} onPress={() => setShowPassword(!showPassword)} className="p-2">
                                         {showPassword ? (
                                             <Ionicons name="eye-off" size={20} color={BRAND.primary} />
                                         ) : (
@@ -178,7 +177,7 @@ export default function ForgotPassword() {
                                 onPress={onReset}
                                 className={`w-full mt-4 py-4 rounded-2xl items-center ${loading ? "bg-accentbg/60" : "bg-accentbg"}`}
                             >
-                                <Text className="text-white font-bold text-lg">
+                                <Text className="text-white font-sans-bold text-lg">
                                     {loading ? "Resetting..." : "Set New Password"}
                                 </Text>
                             </PressableScale>
@@ -190,7 +189,7 @@ export default function ForgotPassword() {
                             Remembered?{" "}
                         </Text>
                         <PressableScale onPress={() => router.push("/(Auth)/sign-in/screen")}>
-                            <Text className="text-accentbg font-semibold">Back to Sign In</Text>
+                            <Text className="text-accentbg font-sans-semibold">Back to Sign In</Text>
                         </PressableScale>
                     </View>
                 </View>

@@ -6,12 +6,24 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 
 export interface WalletTransaction {
   id: string;
-  amount: number;
+  /** Decimal string — the ledger's own figure. */
+  amount: string;
   transaction_type: string;
   status: string;
   description?: string;
   mpesa_receipt_number?: string;
   reference_id?: string;
+  /**
+   * Why a failed movement failed, in Safaricom's own words.
+   *
+   * The B2C result callback writes this on every failure and the STK callback
+   * on every rejected top-up, and nothing rendered it — so a vendor whose
+   * withdrawal failed saw a red "failed" and no reason, with the balance
+   * silently restored. "Insufficient balance in the utility account" and "the
+   * phone number is not registered for M-Pesa" need very different responses
+   * from the vendor, and neither was reachable from the app.
+   */
+  failure_reason?: string | null;
   created_at?: string;
 }
 
@@ -79,6 +91,19 @@ export interface WalletSummary {
   available_for_withdrawal: number;
   /** Negative balance: the store owes the platform and must settle. */
   is_in_arrears: boolean;
+  /**
+   * The rules the withdrawal will be judged by, from `Platform_Settings` and
+   * scoped to this store's type — the wholesale minimum and waiver differ from
+   * the retail ones.
+   *
+   * `fee_waiver_threshold` is compared against the **amount withdrawn**, never
+   * the balance held; see `settlement_service.fee_for`.
+   */
+  withdrawal?: {
+    minimum: number;
+    fee: number;
+    fee_waiver_threshold: number;
+  };
 }
 
 /**

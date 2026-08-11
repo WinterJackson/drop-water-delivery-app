@@ -30,7 +30,10 @@ export function Header() {
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-default bg-surface/85 px-4 backdrop-blur lg:px-6">
       {/* The brand only appears where the sidebar is not showing it. */}
-      <Link href="/" className="shrink-0 text-base font-semibold tracking-tight lg:hidden">
+      <Link
+        href="/"
+        className="shrink-0 font-heading text-base font-semibold tracking-tight lg:hidden"
+      >
         Drop
       </Link>
 

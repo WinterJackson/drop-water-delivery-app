@@ -67,7 +67,7 @@ SUBADDRESS = "+clerk_test"
 DOMAIN = "example.com"
 
 #: Ngong Town, where the seeded vendors are. A test rider parked in Nairobi CBD
-#: is outside every retail store's 2 km radius and will never be offered work —
+#: is outside every retail store's retail radius and will never be offered work —
 #: which looks exactly like dispatch being broken.
 NGONG = (-1.3615, 36.6570)
 MATASIA = (-1.3850, 36.6667)
@@ -261,7 +261,6 @@ async def _upsert_vendor(
     row.location = geo["location"]
     row.h3_index_res8 = geo["h3_index_res8"]
     row.vendor_type = "wholesale_b2b" if wholesale else "retail_refill"
-    row.delivery_radius = 15.0 if wholesale else 2.0
     row.shift_start, row.shift_end = time(6, 0), time(19, 0)
     row.verification_status = "verified"
     row.is_active = True

@@ -1,7 +1,8 @@
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, Text, ScrollView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, KeyboardTypeOptions } from "react-native";
+import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, KeyboardTypeOptions } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
@@ -121,7 +122,7 @@ export default function PayoutSettings() {
 
     const InputBlock = ({ label, value, onChange, placeholder, keyboardType = "default", id, maxLength }: any) => (
         <View className="mb-4">
-            <Text className={`font-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{label}</Text>
+            <Text className={`font-sans-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{label}</Text>
             <View className={`flex-row items-center px-4 h-[55px] rounded-2xl border-2 ${isFocused === id ? "border-green-500 bg-green-500/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
                 <TextInput
                     value={value}
@@ -129,7 +130,7 @@ export default function PayoutSettings() {
                     onFocus={() => handleFocus(id)}
                     onBlur={() => setIsFocused(null)}
                     keyboardType={keyboardType as KeyboardTypeOptions}
-                    className={`flex-1 text-base font-semibold tracking-wide ${darkTheme ? "text-white" : "text-black"}`}
+                    className={`flex-1 text-base font-sans-semibold tracking-wide ${darkTheme ? "text-white" : "text-black"}`}
                     placeholder={placeholder}
                     placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
                     maxLength={maxLength}
@@ -144,7 +145,7 @@ export default function PayoutSettings() {
             <PressableScale onPress={() => { Haptics.selectionAsync(); setActiveMethod(method); }} className="mr-3">
                 <View className={`px-4 py-3 rounded-2xl flex-row items-center border ${isActive ? (darkTheme ? "bg-accentbg/20 border-accentbg" : "bg-accentbg border-accentbg") : (darkTheme ? "bg-slate-800 border-gray-700" : "bg-white border-gray-200")}`}>
                     <Ionicons name={icon} size={18} color={isActive ? (darkTheme ? BRAND.primary : "#fff") : (darkTheme ? "#9ca3af" : "#6b7280")} style={{ marginRight: 6 }} />
-                    <Text className={`font-bold text-sm ${isActive ? (darkTheme ? "text-accenttxt" : "text-white") : (darkTheme ? "text-gray-300" : "text-gray-600")}`}>{title}</Text>
+                    <Text className={`font-sans-bold text-sm ${isActive ? (darkTheme ? "text-accenttxt" : "text-white") : (darkTheme ? "text-gray-300" : "text-gray-600")}`}>{title}</Text>
                 </View>
             </PressableScale>
         );
@@ -167,7 +168,7 @@ export default function PayoutSettings() {
                         <PressableScale onPress={() => router.back()} className="mr-4">
                             <BackButtonMinimal />
                         </PressableScale>
-                        <Text className={`text-xl font-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                        <Text className={`text-xl font-sans-bold flex-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                             Payout Settings
                         </Text>
                     </View>
@@ -177,7 +178,7 @@ export default function PayoutSettings() {
                     <View className={`p-4 rounded-2xl mb-6 flex-row items-start ${darkTheme ? "bg-slate-800" : "bg-blue-50"}`}>
                         <Ionicons name="information-circle" size={24} color={BRAND.primary} />
                         <View className="flex-1 ml-3">
-                            <Text className={`font-bold text-sm mb-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>Automated Settlements</Text>
+                            <Text className={`font-sans-bold text-sm mb-1 ${darkTheme ? "text-white" : "text-gray-900"}`}>Automated Settlements</Text>
                             <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"} leading-5`}>
                                 Drop automatically reconciles and settles your funds to your preferred channel. Select your business payment method below.
                             </Text>
@@ -229,7 +230,7 @@ export default function PayoutSettings() {
                             {isSaving ? (
                                 <ActivityIndicator color={BRAND.white} />
                             ) : (
-                                <Text className="text-white text-lg font-bold">Save Payout Details</Text>
+                                <Text className="text-white text-lg font-sans-bold">Save Payout Details</Text>
                             )}
                         </View>
                     </PressableScale>

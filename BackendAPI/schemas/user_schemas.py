@@ -1,9 +1,11 @@
-from pydantic import BaseModel, EmailStr
 from uuid import UUID
-from datetime import time
-from typing import List, Optional, Any
 from pydantic import field_validator
 from utils.s3_utils import generate_presigned_url
+from decimal import Decimal
+from utils.money import MoneyField
+from pydantic import BaseModel, EmailStr
+from datetime import time
+from typing import List, Optional, Any
 
 class BaseUser(BaseModel):
     clerk_id: str | None = None
@@ -32,12 +34,29 @@ class BasicUser(BaseUser):
     id: UUID
     bottle_purchased_at: str | None = None
     bottle_refill_count: int | None = 0
-    wallet_balance: float | None = 0.0
+    wallet_balance: MoneyField = Decimal("0")
     floor_level: int | None = 0
     has_elevator: bool | None = False
     preferences: dict | None = None
     payment_methods: list | None = None
-    
+
+    #: What the platform **owes** this customer against bottles they are holding,
+    #: and how many that is. `customer_bottle_service` moves the two together.
+    #:
+    #: Both columns existed and neither was on the wire, so the deposit — a
+    #: liability the platform can return — was invisible to the only person with
+    #: a claim on it, and the app's own "Bottle Wallet" screen showed a cash
+    #: balance and no bottles.
+    bottle_deposit_balance: MoneyField = Decimal("0")
+    bottles_held: int | None = 0
+
+    #: An unpaid balance carried from an earlier order — a staircase surcharge
+    #: agreed after an M-Pesa order was already paid, most often. It is charged
+    #: on the next order as `debt_settlement` and refuses checkout at the
+    #: ceiling. Neither the amount nor the ceiling reached the customer, so the
+    #: first they knew of either was a larger total or a 402.
+    debt_balance: MoneyField = Decimal("0")
+
     model_config = {"from_attributes": True}
 
 class CustomerPublicProfile(BaseModel):

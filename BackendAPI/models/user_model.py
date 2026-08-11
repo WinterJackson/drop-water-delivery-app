@@ -65,9 +65,50 @@ class User(Base):
   #: nothing. The job now reads this column.
   bottles_held = Column(Integer, nullable=False, server_default="0", default=0)
 
+  #: An office or a shop legitimately holds more bottles than a household, and
+  #: the ceiling that protects the platform from one account farming deposits
+  #: would otherwise refuse them at four. Set by an administrator; there is no
+  #: self-service path to it, because it is a limit on our own exposure.
+  is_commercial = Column(Boolean, nullable=False, server_default="false", default=False)
+
+  #: The part of `wallet_balance` that may be **spent** but not **withdrawn**.
+  #:
+  #: A returned deposit is the platform giving back money it was holding, and if
+  #: it came back as cash the deposit would be a money-transfer service: pay
+  #: KSH 300 by M-Pesa, hand the bottle back, take KSH 300 out to a different
+  #: phone. With the welcome discount on top it was profitable — 300 in, less a
+  #: 90 discount, 300 back out. Credit that can buy water and cannot buy a
+  #: withdrawal closes that without ever taking value away from the customer.
+  #:
+  #: Withdrawable is `wallet_balance − non_withdrawable_balance`, exactly the
+  #: shape `settlement_service` already uses for a rider's committed cash float.
+  #: Spending consumes this portion first, so the money genuinely does turn into
+  #: water rather than sitting there restricting an ordinary top-up.
+  non_withdrawable_balance = Column(Numeric(10, 2), nullable=False, server_default="0", default=0)
+
+  #: Last time this customer's deposit position moved in either direction.
+  #: Dormancy is measured from here rather than from `last_order_date`: someone
+  #: who orders bottled water weekly on `exchange` never touches their deposit,
+  #: and converting it while they are an active customer would be indefensible.
+  deposit_last_activity_at = Column(TIMESTAMP(timezone=True), nullable=True)
+  #: Latches the dormancy warnings so the sweep sends each one once rather than
+  #: once per nightly run — the same mistake `low_stock_notified_at` exists to
+  #: prevent on the vendor side.
+  deposit_dormancy_warned_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
   # Welcome Offer (First-Time Customer Incentive)
   has_used_welcome_offer = Column(Boolean, nullable=False, default=False)
-  device_id = Column(String, nullable=True, unique=True, index=True)  # Anti-fraud: one offer per device
+  #: Anti-fraud: one welcome offer per handset.
+  #:
+  #: **Not unique.** It was, and that made the gate it exists for unreachable:
+  #: `welcome_offer_available` looks for *another* account sharing this device,
+  #: and a UNIQUE constraint guarantees there is never one. The check could not
+  #: fire under any circumstances. It also meant a second person registering on
+  #: a shared handset — a household with one phone, which is ordinary here —
+  #: hit an integrity error on signup.
+  #:
+  #: Indexed, because the gate queries it on every first quote.
+  device_id = Column(String, nullable=True, index=True)
 
   # Loyalty & Gamification (Anti-Poaching)
   wallet_balance = Column(Numeric(10, 2), nullable=False, default=0.0)

@@ -7,8 +7,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 export interface Order {
     id: string;
     order_status: string;
-    total_amount: number;
-    delivery_fee?: number;
+    total_amount: string;
+    delivery_fee?: string;
     vehicle_class?: string;
     created_at: string;
     payment_method: string;
@@ -18,19 +18,19 @@ export interface Order {
     delivery_type?: string;
     bottle_source?: string;
     customer_note?: string;
-    payload_surcharge?: number;
-    staircase_surcharge?: number;
+    payload_surcharge?: string;
+    staircase_surcharge?: string;
     /** True once the customer has reviewed this order. Served by BaseOrder. */
     is_rated?: boolean;
     lat?: number;
     lng?: number;
     lat_from?: number;
     lng_from?: number;
-    product_subtotal?: number;
-    wallet_discount?: number;
-    welcome_discount?: number;
-    service_fee?: number;
-    surge_fee?: number;
+    product_subtotal?: string;
+    wallet_discount?: string;
+    welcome_discount?: string;
+    service_fee?: string;
+    surge_fee?: string;
     distance_km?: number;
     vendor?: { id: string; business_name: string; location_address: string; profile_pic?: string; phone_number?: string; vendor_type?: string; lat?: number; lng?: number };
     deliverer?: { id: string; full_name: string; phone_number?: string; vehicle_details?: string };
@@ -40,7 +40,7 @@ export interface Order {
 export interface OrderItem {
     id: string;
     quantity: number;
-    price: number;
+    price: string;
     product?: { name: string; image_url: string };
 }
 
@@ -140,11 +140,16 @@ export function useResolveMismatch() {
 }
 
 export interface PaymentHistoryEntry {
+    /**
+     * The *payment's* id — `cash-<order id>` for a cash order, which produces
+     * no Payment row. Never route on it: use `order_id`.
+     */
     id: string;
     order_id: string;
     order_reference: string;
     vendor_name: string | null;
-    amount: number;
+    /** Decimal string. Render with `formatMoney`; never parse it to a number. */
+    amount: string;
     status: string;
     payment_method: string;
     mpesa_receipt: string | null;

@@ -1,4 +1,5 @@
 import { apiFetch } from '@/API/apiFetch';
+import VendorApiRoutes from '@/API/routes/VendorApiRoutes';
 import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
@@ -98,7 +99,7 @@ export function usePushNotifications(queryPrefix: string = 'vendor') {
             if (token) {
                 setExpoPushToken(token);
                 try {
-                    await apiFetch(`${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token`, {
+                    await apiFetch(VendorApiRoutes.RegisterPushToken.path, {
                         method: 'POST',
                         token: await getToken(),
                         body: { push_token: token, app_type: 'vendor' },
@@ -145,15 +146,12 @@ export function usePushNotifications(queryPrefix: string = 'vendor') {
         try {
             const authToken = await getToken();
             if (!authToken) return;
-            // `?app_type=vendor` is not optional: the endpoint defaults to
-            // `customer` and clears `User.push_token` for a clerk id that has no
-            // User row. Without it this call returned 404 and the vendor's token
-            // stayed registered — exactly the failure the docstring above
-            // describes it as preventing.
-            await apiFetch(
-                `${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/auth/push-token?app_type=vendor`,
-                { method: 'DELETE', token: authToken }
-            );
+            // The `?app_type=vendor` this depends on is declared with the path
+            // in the route table, where the reason it is mandatory is written.
+            await apiFetch(VendorApiRoutes.DeletePushToken.path, {
+                method: 'DELETE',
+                token: authToken,
+            });
             setExpoPushToken('');
         } catch (e) {
             if (__DEV__) console.warn('Push token de-registration failed:', e);

@@ -5,9 +5,9 @@ import {
     ImageBackground,
     ScrollView,
     StatusBar,
-    Text,
-    View
+    View,
 } from "react-native";
+import { Text } from '@/components/ui/Text';
 import HorizontalList from "@/components/common/HorizontalList";
 import Reviews from "@/components/common/Reviews";
 import { SkeletonCard } from "@/components/ui/Skeleton";
@@ -27,6 +27,8 @@ import { Popup } from "@/lib/popup";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { formatMoney, formatMoneyShort } from "@/utils/money";
 
 type Props = {};
 
@@ -146,7 +148,7 @@ const VendorDetails = (props: Props) => {
 						<BackButtonMinimal />
 					</PressableScale>
 					{/* LIKE BUTTON */}
-					<PressableScale activeOpacity={0.7} onPress={handleToggleVendorFavorite}>
+					<PressableScale accessibilityLabel={isVendorFavorite ? "Remove this shop from your favourites" : "Add this shop to your favourites"} activeOpacity={0.7} onPress={handleToggleVendorFavorite}>
 						<View 
 							className="w-10 h-10 items-center justify-center rounded-full"
 							style={{
@@ -190,11 +192,11 @@ const VendorDetails = (props: Props) => {
 						{/* Floating Vendor Name inside Hero */}
 						{VendorDetailsLoaded && VendorDetails && (
 							<View className="absolute bottom-6 left-5 right-5 z-20">
-								<Text className={`text-3xl font-bold mb-1 flex-row items-center ${darkTheme ? "text-white" : "text-black"}`}>
+								<Text className={`text-3xl font-heading-semibold mb-1 flex-row items-center ${darkTheme ? "text-white" : "text-black"}`}>
 									{VendorDetails?.business_name || "Vendor"}
 								</Text>
 								<View className="flex-row items-center gap-1">
-									<Text className="text-[#3498db] font-bold text-lg flex-row items-center">
+									<Text className="text-[#3498db] font-sans-bold text-lg flex-row items-center">
 										⭐ {Number(VendorDetails?.rating) || "4.8"}
 									</Text>
 								</View>
@@ -214,6 +216,11 @@ const VendorDetails = (props: Props) => {
 								}}
 							>
 								<View className="flex-col gap-3 mb-6">
+									{/* Whether this shop is actually taking orders, above everything
+									    else about it — a customer who reads the address, the delivery
+									    time and the rating before finding out it is shut has been
+									    sold something twice. Renders nothing when open. */}
+									<StoreClosedNotice store={VendorDetails as any} />
 									{/* Location */}
 									<View className="flex-row items-center gap-3">
 										<Image
@@ -221,17 +228,41 @@ const VendorDetails = (props: Props) => {
 											className="w-5 h-5"
 											tintColor={BRAND.primary}
 										/>
-										<Text className={`font-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+										<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 											{VendorDetails?.location_address || "Location not available"}
 										</Text>
 									</View>
 									{/* Delivery Time */}
 									<View className="flex-row items-center gap-3">
 										<Ionicons name="bicycle" size={20} color={BRAND.primary} />
-										<Text className={`font-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+										<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 											{VendorDetails?.delivery_time ? `Est. ${VendorDetails.delivery_time} min` : "Est. Delivery available"} • {VendorDetails?.delivery_fee ? `Fee: KSH ${VendorDetails.delivery_fee}` : "Delivery fee varies"}
 										</Text>
 									</View>
+									{/* This store's own minimum order.
+									    The server refuses a short basket at checkout with the exact
+									    shortfall, which is the right refusal — but a minimum a
+									    customer only meets by failing is the same trip wasted twice.
+									    Stated here, before anything is in the basket, the way a
+									    wholesale MOQ is. Rendered only when the store set one. */}
+									{Number(VendorDetails?.min_order_value ?? 0) > 0 ? (
+										<View className="flex-row items-center gap-3">
+											<Ionicons name="basket-outline" size={20} color={BRAND.primary} />
+											<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+												{formatMoneyShort(VendorDetails?.min_order_value)} minimum order
+											</Text>
+										</View>
+									) : null}
+									{/* And whether they take cash, which decides whether the
+									    customer needs their phone at the door. */}
+									{VendorDetails?.accepts_cash === false ? (
+										<View className="flex-row items-center gap-3">
+											<Ionicons name="phone-portrait-outline" size={20} color={BRAND.primary} />
+											<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+												M-Pesa only — this store is not taking cash
+											</Text>
+										</View>
+									) : null}
 								</View>
 								
 								{/* Add to Favourites Button */}
@@ -253,7 +284,7 @@ const VendorDetails = (props: Props) => {
 											color={isVendorFavorite ? BRAND.primary : (darkTheme ? BRAND.white : BRAND.bgDark)} 
 										/>
 										<Text 
-											className="font-bold text-sm whitespace-nowrap" 
+											className="font-sans-bold text-sm whitespace-nowrap" 
 											style={{ color: isVendorFavorite ? BRAND.primary : (darkTheme ? BRAND.white : BRAND.bgDark) }}
 										>
 											{isVendorFavorite ? "Remove from Favourites" : "Add to Favourites"}
@@ -283,7 +314,7 @@ const VendorDetails = (props: Props) => {
 
 					{/* <---------------------------------<PRODUCTS GRID>---------------------------------> */}
 					<View className="px-5 mt-8 gap-4">
-						<Text className={`text-xl font-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>Products</Text>
+						<Text className={`text-xl font-sans-bold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>Products</Text>
 						
 						{VendorDetailsLoaded ? (
 							<View className="flex-row flex-wrap justify-between gap-y-4">
@@ -318,15 +349,15 @@ const VendorDetails = (props: Props) => {
 													</View>
 													<View className="w-2/3 z-10 flex-col justify-between h-full py-1">
 														<View>
-															<Text className={`text-lg font-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
-															<Text className="text-[#3498db] text-xl font-bold">KSH {product.price}</Text>
+															<Text className={`text-lg font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>{product.name}</Text>
+															<Text className="text-[#3498db] text-xl font-sans-bold">{formatMoney(product.price)}</Text>
 														</View>
 														<PressableScale 
 															activeOpacity={0.8}
 															onPress={() => handleQuickAddToCart(product.id, product.name)}
 														>
 															<View className="w-10 h-10 rounded-full items-center justify-center" style={{ backgroundColor: 'rgba(52, 152, 219, 0.2)' }}>
-																<Text className="text-[#3498db] text-2xl font-bold">+</Text>
+																<Text className="text-[#3498db] text-2xl font-sans-bold">+</Text>
 															</View>
 														</PressableScale>
 													</View>
@@ -341,9 +372,9 @@ const VendorDetails = (props: Props) => {
 														/>
 													</View>
 													<View className="flex-1 justify-between">
-														<Text className={`font-bold text-sm ${darkTheme ? "text-white" : "text-black"}`} numberOfLines={1}>{product.name}</Text>
+														<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-black"}`} numberOfLines={1}>{product.name}</Text>
 														<View className="flex-row justify-between items-center mt-2">
-															<Text className="text-[#3498db] font-bold">KSH {product.price}</Text>
+															<Text className="text-[#3498db] font-sans-bold">{formatMoney(product.price)}</Text>
 															<PressableScale 
 																activeOpacity={0.8}
 																onPress={() => handleQuickAddToCart(product.id, product.name)}

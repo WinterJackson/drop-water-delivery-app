@@ -25,7 +25,10 @@ export function Sidebar({ me, counts }: { me: AdminMe; counts: NavCounts }) {
       className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-default bg-surface lg:flex"
     >
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-default px-5">
-        <span className="text-lg font-semibold tracking-tight">Drop</span>
+        {/* The wordmark, not a heading — so it needs the heading face named
+            explicitly. The `h1…h6` rule in `globals.css` cannot reach a span,
+            and this is the one piece of brand on the console. */}
+        <span className="font-heading text-lg font-semibold tracking-tight">Drop</span>
         <span className="text-sm text-muted">Admin</span>
       </div>
 

@@ -4,7 +4,7 @@ from sqlalchemy import select, and_
 from dependencies.dependencies import get_db_session
 from models.bottle_rejection_model import BottleRejectionTicket, RejectionStatus
 from models.order_model import Order
-from services.order_service import revert_order_side_effects
+from services.order_service import apply_status_transition, revert_order_side_effects
 from routes.websocket_routes import manager
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ async def run_auto_resolve_bottle_rejections(batch_size: int = 100):
 
                 order = await session.get(Order, rejection.order_id)
                 if order and order.order_status == "pending_review":
-                    order.order_status = "cancelled"
+                    apply_status_transition(order, "cancelled")
                     await revert_order_side_effects(
                         session, order, reason="bottle_rejection_timeout"
                     )

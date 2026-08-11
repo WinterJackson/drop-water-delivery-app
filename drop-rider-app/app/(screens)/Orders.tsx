@@ -8,12 +8,11 @@ import {
     FlatList,
     RefreshControl,
     StatusBar,
-    Text,
     View,
-    TextInput,
     Image,
-    TouchableOpacity
+    TouchableOpacity,
 } from "react-native";
+import { Text, TextInput } from '@/components/ui/Text';
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -31,6 +30,7 @@ import { Popup } from "@/lib/popup";
 import { useDebounce } from "@/hooks/useDebounce";
 import { RiderOrderCardSkeleton, RiderTripRadarSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { formatMoney } from "@/utils/money";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-500/20", accepted: "bg-accentbg/20",
@@ -174,7 +174,7 @@ export default function Orders() {
               <TouchableOpacity onPress={() => router.back()} className="mr-4">
                   <BackButtonMinimal />
               </TouchableOpacity>
-              <Text className={`text-xl font-bold ${darkTheme ? "text-white" : "text-black"}`}>
+              <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                   My Deliveries
               </Text>
           </View>
@@ -183,7 +183,7 @@ export default function Orders() {
       {!connected && (
           <View className={`px-4 py-2 flex-row justify-center items-center ${darkTheme ? "bg-red-900/50" : "bg-red-100"}`}>
              <Ionicons name="cloud-offline" size={16} color={darkTheme ? "#fca5a5" : "#ef4444"} />
-             <Text className={`ml-2 text-xs font-bold ${darkTheme ? "text-red-200" : "text-red-600"}`}>
+             <Text className={`ml-2 text-xs font-sans-bold ${darkTheme ? "text-red-200" : "text-red-600"}`}>
                 Offline Mode - Reconnecting...
              </Text>
           </View>
@@ -191,14 +191,14 @@ export default function Orders() {
 
       <View className="flex-row px-5 py-3">
          <PressableScale onPress={() => setTab("Incoming")} className="mr-4">
-             <Text className={`text-lg font-bold ${tab === "Incoming" ? (darkTheme ? "text-white" : "text-gray-900") : "text-gray-400"}`}>
+             <Text className={`text-lg font-sans-bold ${tab === "Incoming" ? (darkTheme ? "text-white" : "text-gray-900") : "text-gray-400"}`}>
                Incoming
              </Text>
              {tab === "Incoming" && <View className="h-1 bg-accentbg mt-1 rounded-full w-full" />}
          </PressableScale>
 
          <PressableScale onPress={() => setTab("History")} className="">
-             <Text className={`text-lg font-bold ${tab === "History" ? (darkTheme ? "text-white" : "text-gray-900") : "text-gray-400"}`}>
+             <Text className={`text-lg font-sans-bold ${tab === "History" ? (darkTheme ? "text-white" : "text-gray-900") : "text-gray-400"}`}>
                History
              </Text>
              {tab === "History" && <View className="h-1 bg-accentbg mt-1 rounded-full w-full" />}
@@ -214,7 +214,7 @@ export default function Orders() {
                   onChangeText={setSearchQuery}
                   placeholder={`Search ${tab} deliveries by ID...`}
                   placeholderTextColor={darkTheme ? BRAND.gray400 : BRAND.gray500}
-                  className={`flex-1 font-semibold ${darkTheme ? "text-white" : "text-black"}`}
+                  className={`flex-1 font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}
               />
           </View>
       </View>
@@ -225,11 +225,11 @@ export default function Orders() {
               <View className="flex-row items-center justify-between mb-2">
                 <View className="flex-row items-center gap-1">
                   <Ionicons name="radio-outline" size={18} color={BRAND.primary} />
-                  <Text className={`font-bold uppercase tracking-wider ${darkTheme ? "text-orange-400" : "text-orange-600"}`}>Live Trip Radar</Text>
+                  <Text className={`font-sans-bold uppercase tracking-wider ${darkTheme ? "text-orange-400" : "text-orange-600"}`}>Live Trip Radar</Text>
                 </View>
                 <View className="px-2 py-1 rounded bg-accentbg/20 flex-row items-center gap-1">
                   <Ionicons name={profile?.vehicle_type === 'truck' ? 'bus-outline' : profile?.vehicle_type === 'tuktuk' ? 'car-sport-outline' : 'bicycle-outline'} size={14} color={BRAND.primary} />
-                  <Text className="text-xs font-bold text-accentbg">
+                  <Text className="text-xs font-sans-bold text-accentbg">
                     {profile?.vehicle_type === 'truck' ? 'Wholesale' : profile?.vehicle_type === 'tuktuk' ? 'Medium Payload' : 'Standard Payload'}
                   </Text>
                 </View>
@@ -237,15 +237,15 @@ export default function Orders() {
               {radarOrders.map((radar) => (
                   <View key={radar.order_id} className={`p-4 rounded-xl border-l-4 border-orange-500 mb-2 ${darkTheme ? "bg-white/10" : "bg-orange-50"}`}>
                       <View className="flex-row justify-between items-center mb-2">
-                         <Text className={`font-bold ${darkTheme ? "text-white" : "text-black"}`}>Order #{radar.order_id.substring(0, 8)}</Text>
-                         <Text className="font-bold text-orange-600">New</Text>
+                         <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Order #{radar.order_id.substring(0, 8)}</Text>
+                         <Text className="font-sans-bold text-orange-600">New</Text>
                       </View>
-                      <Text className={`mb-3 font-medium ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>Estimated Fee: KSH {radar.fee}</Text>
+                      <Text className={`mb-3 font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>Estimated Fee: {formatMoney(radar.fee)}</Text>
                       <PressableScale 
                          onPress={() => handleAcceptRadar(radar.order_id)}
                          disabled={claimingOrder === radar.order_id}
                          className={`py-3 rounded-lg items-center ${claimingOrder === radar.order_id ? "bg-gray-400" : "bg-black dark:bg-white"}`}>
-                         <Text className={`font-bold text-base ${darkTheme ? "text-black" : "text-white"}`}>
+                         <Text className={`font-sans-bold text-base ${darkTheme ? "text-black" : "text-white"}`}>
                              {claimingOrder === radar.order_id ? "Claiming Lock..." : "Swipe to Accept"}
                          </Text>
                       </PressableScale>
@@ -274,11 +274,11 @@ export default function Orders() {
         renderItem={({ item }: { item: any }) => (
           <View className={`p-4 mb-4 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white border border-gray-100"}`}>
             <View className="flex-row justify-between items-center mb-2">
-              <Text className={`font-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>
+              <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-gray-900"}`}>
                 Order #{item.id?.substring(0, 8)}
               </Text>
               <View className={`px-3 py-1 rounded-full ${STATUS_COLORS[item.order_status] || "bg-gray-200"}`}>
-                <Text className={`text-xs font-bold capitalize ${STATUS_TEXT[item.order_status] || "text-gray-600"}`}>
+                <Text className={`text-xs font-sans-bold capitalize ${STATUS_TEXT[item.order_status] || "text-gray-600"}`}>
                   {item.order_status.replace("_", " ")}
                 </Text>
               </View>
@@ -287,7 +287,7 @@ export default function Orders() {
              {item.delivery_type && (
                 <View className="mb-2 flex-row items-center gap-1">
                   <Ionicons name={item.delivery_type === 'quick_swap' ? 'rocket-outline' : 'lock-closed-outline'} size={14} color={item.delivery_type === 'quick_swap' ? TOAST.info : '#a855f7'} />
-                  <Text className={`text-xs font-bold ${item.delivery_type === 'quick_swap' ? 'text-blue-500' : 'text-purple-500'}`}>
+                  <Text className={`text-xs font-sans-bold ${item.delivery_type === 'quick_swap' ? 'text-blue-500' : 'text-purple-500'}`}>
                      {item.delivery_type === 'quick_swap' ? 'Quick Swap (One-Way)' : 'Keep My Bottle (Round-Trip)'}
                   </Text>
                 </View>
@@ -296,7 +296,7 @@ export default function Orders() {
             <View className="flex-row justify-between">
               <View>
                 <Text className={`text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-                  <Text className="font-semibold">Fee: </Text>KSH {item.delivery_fee}
+                  <Text className="font-sans-semibold">Fee: </Text>{formatMoney(item.delivery_fee)}
                 </Text>
                 <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                   {item.order_item?.length || 0} items for {item.customer?.name || "Customer"}
@@ -312,14 +312,14 @@ export default function Orders() {
                       disabled={isRejecting}
                       className="flex-1 py-3 rounded-xl bg-red-500/10 items-center justify-center border border-red-500/20"
                    >
-                     <Text className="text-red-500 font-bold">{isRejecting ? "..." : "Reject"}</Text>
+                     <Text className="text-red-500 font-sans-bold">{isRejecting ? "..." : "Reject"}</Text>
                    </PressableScale>
                  )}
                  <PressableScale 
                     onPress={() => router.push("/(screens)/ActiveDelivery")}
                     className="flex-1 py-3 rounded-xl bg-accentbg items-center justify-center"
                  >
-                   <Text className="text-white font-bold text-base">Open Map</Text>
+                   <Text className="text-white font-sans-bold text-base">Open Map</Text>
                  </PressableScale>
               </View>
             )}

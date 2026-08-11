@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, StyleSheet } from "react-native";
+import { Text } from '@/components/ui/Text';
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { AVATAR, BRAND } from '@/constants/brandColors';
@@ -89,8 +90,7 @@ export default function UserAvatar({
                     {
                         color: AVATAR.text,
                         fontSize: size * 0.45,
-                        fontWeight: "700",
-                        fontFamily: "Inter_700Bold",
+                        fontFamily: "Karla_700Bold",
                         letterSpacing: 1,
                     },
                     textStyle,
