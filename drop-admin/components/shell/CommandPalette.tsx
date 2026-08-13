@@ -5,7 +5,20 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { searchEverything, type SearchHit } from "@/app/(dashboard)/search-action";
+import type { ControlTone } from "@/components/shell/ThemeToggle";
 import { useFocusTrap } from "@/lib/hooks/useFocusTrap";
+import { cn } from "@/lib/utils/cn";
+
+/** Only the closed trigger takes a tone. The dialog itself is a modal over the
+ *  page, on `--surface` like every other overlay in the console. */
+const TRIGGER_TONES: Record<ControlTone, string> = {
+  surface: "border-default text-muted hover:text-[var(--foreground)]",
+  chrome: "border-chrome-edge text-chrome-foreground hover:bg-[var(--chrome-hover)]",
+};
+
+/** Below this the server is not asked. Stated on screen rather than left as
+ *  silence, which reads as a box that does not work. */
+const MIN_TERM = 2;
 
 /**
  * ⌘K — one box that resolves a phone number, email, name, plate or order id to
@@ -18,7 +31,7 @@ import { useFocusTrap } from "@/lib/hooks/useFocusTrap";
  * Results are scoped by capability on the **server**, so this cannot be used to
  * enumerate a table whose detail page the caller is not allowed to open.
  */
-export function CommandPalette() {
+export function CommandPalette({ tone = "surface" }: { tone?: ControlTone }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
@@ -52,19 +65,45 @@ export function CommandPalette() {
       setTerm("");
       setHits([]);
       setActive(0);
+      setLoading(false);
     }
   }, [open]);
 
+  // The page behind a modal must not scroll under it — the same rule the
+  // mobile drawer follows, and the palette was missing it: a wheel over the
+  // scrim scrolled the console away behind the dialog.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
+  // Which request the answer on screen belongs to. Debouncing thins the
+  // requests out; it does not order the *replies*. "07" typed, then "0712"
+  // typed, and the first query — the broader one, so the slower one — can land
+  // second and replace the narrower results with results for a prefix the box
+  // no longer contains. The operator sees a list that does not match what they
+  // typed and no way to tell why.
+  const latest = useRef(0);
+
   const run = useCallback(async (value: string) => {
-    if (value.trim().length < 2) {
+    const ticket = ++latest.current;
+    if (value.trim().length < MIN_TERM) {
       setHits([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      setHits(await searchEverything(value));
+      const results = await searchEverything(value);
+      if (ticket !== latest.current) return; // superseded while in flight
+      setHits(results);
+      setActive(0);
     } finally {
-      setLoading(false);
+      if (ticket === latest.current) setLoading(false);
     }
   }, []);
 
@@ -75,10 +114,22 @@ export function CommandPalette() {
     return () => clearTimeout(timer);
   }, [term, run]);
 
+  // Keep the highlighted result on screen. The list scrolls at eight or so
+  // rows, and without this the highlight walks off the bottom and arrowing
+  // down appears to do nothing at all.
+  useEffect(() => {
+    if (!open) return;
+    document
+      .getElementById(`${listboxId}-${active}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [active, hits, open, listboxId]);
+
   function go(hit: SearchHit) {
     setOpen(false);
     router.push(hit.href);
   }
+
+  const termLength = term.trim().length;
 
   if (!open) {
     return (
@@ -88,11 +139,21 @@ export function CommandPalette() {
         // Square icon button on a phone, where the header has no width to
         // spare; a labelled control with its shortcut from `sm` up.
         aria-label="Search the platform"
-        className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-lg border border-default text-sm text-muted hover:text-[var(--foreground)] sm:w-auto sm:px-3"
+        className={cn(
+          "inline-flex h-9 w-9 items-center justify-center gap-2 rounded-lg border text-sm transition-colors sm:w-auto sm:px-3",
+          TRIGGER_TONES[tone],
+        )}
       >
         <Search className="h-4 w-4 shrink-0" aria-hidden />
         <span className="hidden sm:inline">Search</span>
-        <kbd className="hidden rounded border border-default px-1 text-[10px] sm:inline">⌘K</kbd>
+        <kbd
+          className={cn(
+            "hidden rounded border px-1 text-[10px] sm:inline",
+            tone === "chrome" ? "border-chrome-edge" : "border-default",
+          )}
+        >
+          ⌘K
+        </kbd>
       </button>
     );
   }
@@ -102,7 +163,13 @@ export function CommandPalette() {
       role="dialog"
       aria-modal="true"
       aria-label="Search the platform"
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
+      // Hangs from the header rather than from a fraction of the viewport.
+      // `--header-block` is the header's own drop plus its own height, so the
+      // panel opens exactly one `--chrome-inset` below the bar it belongs to,
+      // at every width, and cannot drift if the bar changes height. `12vh`
+      // put it at 61px on a laptop — under the header — and 130px on a tall
+      // monitor.
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 px-4 pt-[calc(var(--header-block)+var(--chrome-inset))]"
       onClick={(event) => {
         if (event.target === event.currentTarget) setOpen(false);
       }}
@@ -121,15 +188,26 @@ export function CommandPalette() {
               setActive(0);
             }}
             onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
+              // Wraps at both ends. A list this short is a ring, and the
+              // alternative is an arrow key that silently stops working.
+              if (event.key === "ArrowDown" && hits.length) {
                 event.preventDefault();
-                setActive((i) => Math.min(i + 1, hits.length - 1));
+                setActive((i) => (i + 1) % hits.length);
               }
-              if (event.key === "ArrowUp") {
+              if (event.key === "ArrowUp" && hits.length) {
                 event.preventDefault();
-                setActive((i) => Math.max(i - 1, 0));
+                setActive((i) => (i - 1 + hits.length) % hits.length);
+              }
+              if (event.key === "Home" && hits.length) {
+                event.preventDefault();
+                setActive(0);
+              }
+              if (event.key === "End" && hits.length) {
+                event.preventDefault();
+                setActive(hits.length - 1);
               }
               if (event.key === "Enter") {
+                event.preventDefault();
                 const hit = hits[active];
                 if (hit) go(hit);
               }
@@ -141,6 +219,16 @@ export function CommandPalette() {
             aria-controls={listboxId}
             aria-activedescendant={hits[active] ? `${listboxId}-${active}` : undefined}
             aria-autocomplete="list"
+            // A search box, told to the browser and the keyboard: no
+            // autocomplete history over an operator's shoulder, no red
+            // squiggle under a number plate, and a "search" key on a phone
+            // rather than a newline that does nothing.
+            type="search"
+            inputMode="search"
+            enterKeyHint="search"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted"
           />
           {loading ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted" aria-hidden /> : null}
@@ -151,12 +239,24 @@ export function CommandPalette() {
             ? "Searching"
             : hits.length > 0
               ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
-              : term.trim().length >= 2
+              : termLength >= MIN_TERM
                 ? "No results"
                 : ""}
         </p>
 
-        {term.trim().length >= 2 && !loading && hits.length === 0 ? (
+        {/* Three states, all written. A box that answers nothing until some
+            unstated number of characters have been typed reads as broken, and
+            the first thing an operator does with a broken search is stop
+            using it. */}
+        {termLength < MIN_TERM ? (
+          <p className="px-4 py-6 text-center text-sm text-muted">
+            {termLength === 0
+              ? "Search customers, riders, vendors and orders."
+              : `Keep typing — ${MIN_TERM} characters or more.`}
+          </p>
+        ) : null}
+
+        {termLength >= MIN_TERM && !loading && hits.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted">
             Nothing found. Only records you have permission to open are searched.
           </p>

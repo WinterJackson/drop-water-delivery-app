@@ -1,7 +1,14 @@
 # Native/postinstall builds, decided explicitly rather than left to a prompt.
 # sharp is Next's image optimiser; @clerk/shared's postinstall is trivial.
+#
+# @tsparticles/engine's `install` script compiles nothing: it prints a thank-you
+# banner and checks whether the legacy `particles.js` packages are also
+# installed, which they are not. Denied rather than allowed — a script that
+# produces no artefact has no reason to run, and it reads `package.json` from
+# INIT_CWD, which is not something an install needs to do.
 allowBuilds:
   '@clerk/shared': true
+  '@tsparticles/engine': false
   sharp: true
 
 # The npm registry is slow from here and the Next tarballs are ~35-45MB, which

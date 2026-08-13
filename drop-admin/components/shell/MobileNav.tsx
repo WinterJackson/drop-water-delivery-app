@@ -24,6 +24,16 @@ import { cn } from "@/lib/utils/cn";
  * "Ver…", "Dis…", "Pay…", which is worse than an icon. Each tab still carries a
  * real accessible name, so a screen reader announces the word the label would
  * have shown.
+ *
+ * Both surfaces here are `--chrome`, the same accent as the desktop sidebar,
+ * because that is what these *are* — this is the sidebar on a phone, not a
+ * separate piece of furniture. It is also forced: the drawer renders `NavList`,
+ * whose every colour is an on-accent one, so putting it on `--surface` would
+ * mean a second variant of every rule in that component.
+ *
+ * The bar is opaque rather than `bg-surface/95 backdrop-blur`. Text on this
+ * ground has 4.62:1 in light mode and no more, and 5% of an unknown colour
+ * scrolling underneath is not a risk that budget can absorb.
  */
 export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
   const pathname = usePathname();
@@ -79,20 +89,18 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
             role="dialog"
             aria-modal="true"
             aria-label="All pages"
-            className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col rounded-t-2xl border-t border-default bg-surface pb-safe shadow-2xl"
+            className="brand-chrome absolute bottom-0 left-[var(--chrome-inset)] right-[var(--chrome-inset)] flex max-h-[85dvh] flex-col rounded-t-[40px] bg-chrome pb-safe text-chrome-foreground shadow-2xl"
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-default px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-chrome px-5 py-3">
               <div className="min-w-0">
                 <p className="truncate font-semibold">{me.name ?? me.email}</p>
-                <p className="truncate text-xs capitalize text-muted">
-                  {me.role.replace(/_/g, " ")}
-                </p>
+                <p className="truncate text-xs capitalize">{me.role.replace(/_/g, " ")}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close navigation"
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-default"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-chrome-edge transition-colors hover:bg-[var(--chrome-hover)]"
               >
                 <X className="h-5 w-5" aria-hidden />
               </button>
@@ -110,12 +118,20 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
         </div>
       ) : null}
 
+      {/* Same two-element split as the header, mirrored. The outer element is
+          the fixed one and carries the page's own ground, so the 10px the bar
+          is lifted by is a solid strip rather than a window the page scrolls
+          through underneath it.
+
+          `pb-safe` stays on the *bar*, not on the drop. The home indicator has
+          to be cleared by the bar's own padding — moving it outward would lift
+          the bar 34px off the bottom of an iPhone instead of 10. */}
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-default bg-surface/95 pb-safe backdrop-blur lg:hidden"
+        className="brand-chrome fixed inset-x-0 bottom-0 z-40 bg-[var(--background)] pb-[var(--chrome-inset)] pl-[var(--chrome-inset)] lg:hidden"
       >
         <ul
-          className="grid"
+          className="grid rounded-l-[40px] bg-chrome pb-safe text-chrome-foreground"
           // One column per tab plus "More". Set inline because the count varies
           // with the caller's permissions, and Tailwind cannot emit a class for
           // a number it does not know at build time.
@@ -136,16 +152,31 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
                   className={cn(
                     // 56px tall: comfortably past the 44px minimum target, and
                     // the whole cell is the target rather than just the glyph.
-                    "relative flex h-14 flex-col items-center justify-center gap-1",
-                    active ? "text-[var(--accent)]" : "text-muted",
+                    "relative flex h-14 flex-col items-center justify-center",
                   )}
                 >
-                  <span className="relative">
+                  {/* The current tab is a filled plate, not a tinted glyph.
+                      That is the same inversion the sidebar's active row uses,
+                      and it is a *shape* — so the current tab survives a
+                      colour-vision difference without needing the separate dot
+                      marker this replaces. */}
+                  <span
+                    className={cn(
+                      "relative flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                      active
+                        ? "bg-[var(--chrome-active)] text-[var(--chrome-active-foreground)]"
+                        : "text-chrome-foreground",
+                    )}
+                  >
                     <Icon className="h-5 w-5" aria-hidden />
                     {count !== undefined && count > 0 ? (
                       <span
                         aria-hidden
-                        className="absolute -right-2 -top-1 min-w-4 rounded-full bg-[var(--warning)] px-1 text-center text-[10px] font-bold leading-4 text-[var(--accent-foreground)]"
+                        // Ringed in the bar's own colour so the chip separates
+                        // from *either* ground — the accent bar behind an
+                        // inactive tab, or the light plate behind an active
+                        // one. Amber on this panel measured 1.38:1.
+                        className="absolute -right-1.5 -top-0.5 min-w-4 rounded-full bg-[var(--chrome-foreground)] px-1 text-center text-[10px] font-bold leading-4 text-[var(--chrome)] ring-2 ring-[var(--chrome)]"
                       >
                         {count > 9 ? "9+" : count}
                       </span>
@@ -159,16 +190,6 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
                     {item.short}
                     {count !== undefined && count > 0 ? `, ${count} waiting` : ""}
                   </span>
-
-                  {/* The active marker is a shape, not just a colour, so the
-                      current tab survives a colour-vision difference. */}
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "h-1 w-1 rounded-full",
-                      active ? "bg-[var(--accent)]" : "bg-transparent",
-                    )}
-                  />
                 </Link>
               </li>
             );
@@ -181,17 +202,21 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
               aria-expanded={open}
               aria-haspopup="dialog"
               aria-label="More pages"
-              className={cn(
-                "relative flex h-14 w-full flex-col items-center justify-center gap-1",
-                moreActive ? "text-[var(--accent)]" : "text-muted",
-              )}
+              className="relative flex h-14 w-full flex-col items-center justify-center"
             >
-              <span className="relative">
+              <span
+                className={cn(
+                  "relative flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                  moreActive
+                    ? "bg-[var(--chrome-active)] text-[var(--chrome-active-foreground)]"
+                    : "text-chrome-foreground",
+                )}
+              >
                 <MoreHorizontal className="h-5 w-5" aria-hidden />
                 {hiddenBadgeTotal > 0 ? (
                   <span
                     aria-hidden
-                    className="absolute -right-2 -top-1 min-w-4 rounded-full bg-[var(--warning)] px-1 text-center text-[10px] font-bold leading-4 text-[var(--accent-foreground)]"
+                    className="absolute -right-1.5 -top-0.5 min-w-4 rounded-full bg-[var(--chrome-foreground)] px-1 text-center text-[10px] font-bold leading-4 text-[var(--chrome)] ring-2 ring-[var(--chrome)]"
                   >
                     {hiddenBadgeTotal > 9 ? "9+" : hiddenBadgeTotal}
                   </span>
@@ -200,13 +225,6 @@ export function MobileNav({ me, counts }: { me: AdminMe; counts: NavCounts }) {
               <span className="sr-only">
                 More{hiddenBadgeTotal > 0 ? `, ${hiddenBadgeTotal} waiting` : ""}
               </span>
-              <span
-                aria-hidden
-                className={cn(
-                  "h-1 w-1 rounded-full",
-                  moreActive ? "bg-[var(--accent)]" : "bg-transparent",
-                )}
-              />
             </button>
           </li>
         </ul>

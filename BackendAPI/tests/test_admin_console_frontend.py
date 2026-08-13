@@ -231,6 +231,155 @@ def test_wide_content_scrolls_inside_its_own_container():
     assert offenders == [], f"tables not wrapped in a horizontal scroll container: {offenders}"
 
 
+#: The navigation surfaces, all painted in `--chrome`.
+CHROME_SURFACES = ("Sidebar.tsx", "Header.tsx", "MobileNav.tsx", "NavList.tsx")
+
+#: Tokens whose *value is chosen against `--surface`*. Correct everywhere else
+#: in the console and wrong on any of the surfaces above.
+SURFACE_TUNED = ("text-muted", "border-default", "hover:bg-surface-muted")
+
+
+def test_the_chrome_surfaces_use_no_surface_tuned_token():
+    """`--chrome` is the accent, and text on it has 4.62:1 in light mode with
+    nothing to spare.
+
+    `text-muted` is `--foreground-muted`, a value picked to sit quietly on
+    `--surface`. On the accent panel it measures about 1.7:1 — not "a bit
+    low", unreadable. The same goes for `border-default`, which vanishes.
+
+    This is the failure mode that reappears every time somebody adds a row to
+    the sidebar by copying one from a page, because the class is right
+    everywhere else in the console and looks right in the diff.
+    """
+    offenders = []
+    for name in CHROME_SURFACES:
+        path = ADMIN / "components" / "shell" / name
+        text = _code_only(path)
+        for token in SURFACE_TUNED:
+            if re.search(rf"\b{re.escape(token)}\b", text):
+                offenders.append(f"{name}: {token}")
+    assert offenders == [], (
+        "surface-tuned tokens on the accent chrome — use the --chrome-* set: "
+        f"{offenders}"
+    )
+
+
+def test_every_chrome_token_resolves_in_both_themes():
+    """A chrome token either derives from something the dark blocks redefine,
+    or is redefined there itself.
+
+    `--chrome-hover` is the one written as a literal `oklch()`, because hover
+    has to move the ground *away* from the text and that is a different
+    direction in each theme — darker under light mode's near-white, lighter
+    under dark mode's near-black. Defined once, it would be a hover state that
+    reduces contrast in whichever theme it was not written for, which is
+    exactly the sort of thing that looks fine to whoever added it.
+    """
+    css = (ADMIN / "app" / "globals.css").read_text()
+
+    declared = re.findall(r"^\s*(--chrome[\w-]*):\s*([^;]+);", css, re.M)
+    assert declared, "the chrome token set has gone"
+
+    # Only the *colour* tokens. `--chrome-inset` is a length — one geometry for
+    # both themes is the point of it, and demanding a dark-mode value for it
+    # would be demanding the wrong thing. A token derived through `var()` or
+    # `color-mix()` re-resolves on its own, so only a literal colour needs
+    # saying twice.
+    literal = {
+        name
+        for name, value in declared
+        if re.match(r"(oklch|rgb|hsl|lab|lch|color)\(|#[0-9a-f]{3}", value.strip(), re.I)
+    }
+    assert literal, "no chrome colour is written as a literal; --chrome-hover must be"
+
+    dark_blocks = re.findall(
+        r"(?:@media \(prefers-color-scheme: dark\)|:root\[data-theme=\"dark\"\])(.*?)\n  \}",
+        css,
+        re.S,
+    )
+    assert len(dark_blocks) == 2, f"expected two dark blocks, found {len(dark_blocks)}"
+
+    for index, block in enumerate(dark_blocks):
+        missing = [name for name in literal if f"{name}:" not in block]
+        assert missing == [], (
+            f"dark block {index} never redefines {missing} — the light value "
+            "would be used on the dark panel"
+        )
+
+
+def test_a_variant_is_never_put_in_front_of_a_hand_written_class():
+    """Tailwind only generates variants for utilities it knows about.
+
+    A plain `.text-muted { … }` rule works written on its own and compiles to
+    **nothing at all** the moment a variant is put in front of it. There is no
+    error and nothing to see: the class is in the markup, the base class
+    exists, and the page looks right.
+
+    It was live in 35 places. `placeholder:text-muted` on the shared input
+    primitive, so every field in the console fell back to the browser's
+    washed-out default placeholder; and `hover:bg-surface-muted` on the row of
+    every list screen there is, so no table row had ever highlighted under the
+    pointer — on a console whose main activity is scanning a queue and clicking
+    the right line.
+
+    The fix is to declare them with `@utility`, which makes every variant work
+    at no call site's expense. This test is the thing that keeps the next
+    semantic utility from being added the old way.
+    """
+    css = re.sub(
+        r"/\*.*?\*/", "", (ADMIN / "app" / "globals.css").read_text(), flags=re.S
+    )
+
+    proper = set(re.findall(r"^@utility\s+([\w-]+)", css, re.M))
+    assert proper, "globals.css declares no @utility; they have been reverted"
+
+    # Bare class rules — anything Tailwind will not attach a variant to.
+    bare = set(re.findall(r"^\s*\.([a-z][\w-]*)\s*(?:,|\{)", css, re.M)) - proper
+
+    offenders = []
+    for path in _sources("**/*.tsx", "**/*.ts"):
+        text = _code_only(path)
+        for variant, name in re.findall(r"\b([a-z][\w-]*):([a-z][\w-]*)\b", text):
+            if name in bare:
+                offenders.append(f"{path.relative_to(ADMIN).as_posix()}: {variant}:{name}")
+
+    assert offenders == [], (
+        "variant applied to a hand-written class — it compiles to nothing. "
+        f"Declare it with @utility instead: {sorted(set(offenders))}"
+    )
+
+
+def test_the_thin_scrollbar_does_not_cancel_itself():
+    """`scrollbar-width` and `::-webkit-scrollbar` are mutually exclusive.
+
+    Chrome implements the standard properties, and the presence of
+    `scrollbar-width` makes it ignore the `::-webkit-` rules entirely — so
+    declaring both gives the browser's full default scrollbar, arrow buttons
+    included, which is what shipped the first time. The standard half has to
+    stay fenced behind a query that is false wherever the pseudo-element
+    exists.
+    """
+    # Comments stripped first, and for the usual reason: the stylesheet
+    # explains *why* `scrollbar-width` cannot sit outside the fence, naming it,
+    # so a plain scan flags the explanation as the offence. Same rule as
+    # `_code_only`, which only knows how to read TypeScript.
+    css = re.sub(
+        r"/\*.*?\*/", "", (ADMIN / "app" / "globals.css").read_text(), flags=re.S
+    )
+
+    assert "::-webkit-scrollbar" in css, "the 2px scrollbar rule has gone"
+
+    fence = r"@supports not selector\(::-webkit-scrollbar\)\s*\{.*?\n  \}"
+    assert re.search(fence, css, re.S), "scrollbar-width is not fenced behind @supports"
+
+    outside = re.sub(fence, "", css, flags=re.S)
+    for property_name in ("scrollbar-width", "scrollbar-color"):
+        assert property_name not in outside, (
+            f"{property_name} is declared outside the @supports fence; "
+            "Chrome will drop the ::-webkit-scrollbar sizing"
+        )
+
+
 def test_dark_mode_is_expressed_once_in_tokens_not_per_element():
     """Semantic tokens (`bg-surface`, `text-muted`) rather than
     `bg-white dark:bg-neutral-900` at every call site — which is how the two
@@ -651,3 +800,4 @@ def test_a_customised_setting_states_what_the_platform_ships():
         "reverting to the shipped value must go through the normal draft, so "
         "it is previewed and saved with a reason like any other change"
     )
+

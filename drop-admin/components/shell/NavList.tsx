@@ -12,6 +12,12 @@ import type { NavCounts } from "@/lib/nav-counts";
  *
  * Written once so the two cannot drift — a page that is reachable at a desk and
  * not on a phone is a page whose queue silently stops being worked.
+ *
+ * Both its hosts are the `--chrome` accent, so every colour here is an on-accent
+ * one and **nothing is dimmed**. Near-white on that ground measures 4.62:1 in
+ * light mode, which is the ceiling rather than a starting point — a muted
+ * variant of it fails AA outright. So an inactive row is the same colour as an
+ * active one, and the difference is carried by weight and by the solid plate.
  */
 export function NavList({
   sections,
@@ -29,7 +35,11 @@ export function NavList({
     <ul className="space-y-6">
       {sections.map((section) => (
         <li key={section.title}>
-          <p className="px-2 pb-1.5 text-xs font-medium uppercase tracking-wide text-muted">
+          {/* Full strength, like everything else here. A section label is
+              information, so it needs the same 4.5:1 a row does — and on this
+              ground there is no lighter shade that still clears it. It reads as
+              a label instead by being smaller and more widely tracked. */}
+          <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.09em]">
             {section.title}
           </p>
           <ul className="space-y-0.5">
@@ -47,8 +57,16 @@ export function NavList({
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors",
                       active
-                        ? "bg-[color-mix(in_oklch,var(--accent)_14%,transparent)] font-medium text-[var(--accent)]"
-                        : "text-muted hover:bg-surface-muted hover:text-[var(--foreground)]",
+                        ? // Inverts to the content area's own material: 4.74:1
+                          // light and 6.26:1 dark, for the plate against the
+                          // panel and for the label against the plate.
+                          "bg-[var(--chrome-active)] font-semibold text-[var(--chrome-active-foreground)] shadow-sm"
+                        : // Hover darkens under light mode's near-white text
+                          // and lightens under dark mode's near-black, so the
+                          // row gets *more* legible on hover, never less. The
+                          // translucent-white wash this replaces measured
+                          // 3.83:1 in light and failed.
+                          "font-medium hover:bg-[var(--chrome-hover)]",
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -63,9 +81,14 @@ export function NavList({
                       <span
                         className={cn(
                           "shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums",
+                          // Whichever ground the row is on, the chip takes the
+                          // other one — 4.62:1 light, 6.87:1 dark, both ways
+                          // round. The amber it replaces was a 1.87:1 patch
+                          // against this panel: legible text inside a boundary
+                          // nobody could see.
                           active
-                            ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                            : "bg-[color-mix(in_oklch,var(--warning)_20%,transparent)] text-[var(--warning)]",
+                            ? "bg-[var(--chrome)] text-[var(--chrome-foreground)]"
+                            : "bg-[var(--chrome-foreground)] text-[var(--chrome)]",
                         )}
                       >
                         {count > 99 ? "99+" : count}

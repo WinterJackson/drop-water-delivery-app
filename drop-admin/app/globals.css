@@ -64,6 +64,83 @@
     --chart-4: oklch(0.60 0.19 15);
     --chart-5: oklch(0.58 0.16 300);
     --chart-6: oklch(0.68 0.12 200);
+
+    /* Which of the two logo files is showing.
+     *
+     * The obvious way to swap them is `dark:hidden` / `dark:block`, and it
+     * would be wrong here: nothing wires Tailwind's `dark:` variant to
+     * `data-theme`, so those utilities follow the *operating system* and would
+     * ignore the toggle entirely — the console uses no `dark:` utility
+     * anywhere for exactly this reason. Driving `display` from a custom
+     * property instead means the swap follows the same three-state rule as
+     * every colour on the page, costs no JavaScript, and cannot flash on a
+     * theme change because nothing re-renders. */
+    --logo-on-light: block;
+    --logo-on-dark: none;
+
+    /* ── Brand chrome ───────────────────────────────────────────────────
+     *
+     * The sidebar, the header bar, the mobile drawer and the mobile tab bar
+     * are **one surface**, painted in the same `--accent` as the sign-in
+     * page's branding panel. One token set rather than four, because
+     * `NavList` renders into both the sidebar and the drawer — a second
+     * ground would mean a second variant of every rule in it, which is how
+     * the two stop agreeing.
+     *
+     * The whole set is derived from measurement, not taste. `--accent` is a
+     * saturated mid-blue, and text on it has almost no contrast budget:
+     *
+     *   light  #fcfcfc on #0079b8 → 4.62:1   (AA, and that is the ceiling)
+     *   dark   #0a0e11 on #16a4e2 → 6.87:1
+     *
+     * In light mode that 4.62 is the *maximum* available — `--accent-fg` is
+     * already near-white — so **nothing in the chrome may be dimmed**. A 12%
+     * white wash, the obvious hover treatment, drops body text to 3.83:1 and
+     * fails. Hierarchy here is carried by weight, size and the solid active
+     * pill; never by opacity. That is the one rule this file cannot express
+     * on its own, so it is written down here.
+     */
+    /* The one inset the whole shell is built from: the channel between the
+     * sidebar and the header bar, above the header, below the tab bar, and
+     * the drop below the header that the search panel hangs from. Written
+     * once so those five cannot drift apart, and so the search panel's offset
+     * is *derived* from the header's real height rather than guessed at and
+     * then quietly wrong the first time the bar changes size. */
+    --chrome-inset: 10px;
+    --header-height: 3.5rem;
+    --header-block: calc(var(--chrome-inset) + var(--header-height));
+
+    --chrome: var(--accent);
+    --chrome-foreground: var(--accent-foreground);
+
+    /* Hover moves the ground *away* from the text rather than toward it:
+     * darker under near-white (light), lighter under near-black (dark). Both
+     * directions therefore raise legibility on hover instead of lowering it —
+     * 4.62 → 6.13 here, 6.87 → 9.22 in dark. */
+    --chrome-hover: oklch(0.47 0.15 235);
+
+    /* The current page inverts to a solid plate, which is also what makes it
+     * legible: 4.74:1 light and 6.26:1 dark, for both the plate against the
+     * panel and the label against the plate. `--surface` rather than a fifth
+     * colour, so the active row is visibly the same material as the content
+     * area it opens. */
+    --chrome-active: var(--surface);
+    --chrome-active-foreground: var(--accent);
+
+    /* Opaque mixes *with the panel*, not alpha over it. `color-mix(… ,
+     * transparent)` composites in premultiplied sRGB and lands somewhere
+     * other than where an oklch mix does, so the shipped colour would not be
+     * the colour that was measured. */
+    --chrome-rule: color-mix(in oklch, var(--accent-foreground) 38%, var(--accent));
+    --chrome-thumb: color-mix(in oklch, var(--accent-foreground) 75%, var(--accent));
+    --chrome-thumb-hover: var(--accent-foreground);
+
+    /* A divider between regions and the outline of a control are not the same
+     * job, and one value cannot do both. `--chrome-rule` at 38% is a 1.9:1
+     * hairline: right for a separator, and so faint on a control that the
+     * button reads as having no edge at all. `--chrome-edge` is the 3:1 an
+     * interface component's boundary is held to. */
+    --chrome-edge: color-mix(in oklch, var(--accent-foreground) 75%, var(--accent));
   }
 
   /* Follows the OS by default, and the explicit toggle wins over it. */
@@ -90,6 +167,17 @@
       --chart-4: oklch(0.70 0.17 15);
       --chart-5: oklch(0.68 0.15 300);
       --chart-6: oklch(0.76 0.11 200);
+
+      --logo-on-light: none;
+      --logo-on-dark: block;
+
+      /* The only chrome token that flips. The rest are written in terms of
+         `--accent` / `--accent-foreground` / `--surface`, which are redefined
+         just above, so they re-resolve here for free — a custom property
+         substitutes at use time against whichever declaration won on this
+         element. Hover lightens in dark mode because the text is near-black:
+         same rule as light, opposite direction. */
+      --chrome-hover: oklch(0.76 0.12 235);
     }
   }
 
@@ -117,6 +205,11 @@
     --chart-4: oklch(0.70 0.17 15);
     --chart-5: oklch(0.68 0.15 300);
     --chart-6: oklch(0.76 0.11 200);
+
+    --logo-on-light: none;
+    --logo-on-dark: block;
+
+    --chrome-hover: oklch(0.76 0.12 235);
   }
 
   * {
@@ -171,24 +264,211 @@
   }
 }
 
+/* ── The semantic utilities ──────────────────────────────────────────────────
+ *
+ * `@utility`, not a hand-written class in `@layer utilities`, and the
+ * difference is not cosmetic: **Tailwind only generates variants for utilities
+ * it knows about.** A plain `.text-muted` rule works when written on its own
+ * and silently produces *nothing at all* the moment a variant is put in front
+ * of it. `hover:bg-surface-muted` compiled to no rule whatsoever, and there
+ * was nothing to see — the class is in the markup, the base class exists, the
+ * page looks fine.
+ *
+ * It was live in 35 places: `placeholder:text-muted` on the shared input
+ * primitive and on the search box, so every field in the console fell back to
+ * the browser's washed-out default placeholder; and `hover:bg-surface-muted`
+ * on the row of every list screen there is, so no table row in this console
+ * had ever highlighted under the pointer. On a console whose main activity is
+ * scanning a queue and clicking the right line.
+ *
+ * Declaring them as real utilities makes every variant work — `hover:`,
+ * `focus:`, `placeholder:`, `md:` — with no change at any call site.
+ */
+@utility bg-surface { background-color: var(--surface); }
+@utility bg-surface-muted { background-color: var(--surface-muted); }
+@utility text-muted { color: var(--foreground-muted); }
+@utility border-default { border-color: var(--border); }
+
+/* The brand panel on the sign-in screen. `--accent` is a semantic token, not a
+   `@theme` colour, so Tailwind generates no `bg-accent` for it — these are the
+   accent's half of the same pattern as `bg-surface` above, and they keep the
+   call site free of `bg-[var(--accent)]`. Both sides move together when the
+   theme changes, so the panel never ends up light-on-light. */
+@utility bg-accent { background-color: var(--accent); }
+@utility text-accent-foreground { color: var(--accent-foreground); }
+
+/* ── Brand chrome ────────────────────────────────────────────────────────── */
+@utility bg-chrome { background-color: var(--chrome); }
+@utility text-chrome-foreground { color: var(--chrome-foreground); }
+@utility border-chrome { border-color: var(--chrome-rule); }
+@utility border-chrome-edge { border-color: var(--chrome-edge); }
+
 @layer utilities {
-  .bg-surface { background-color: var(--surface); }
-  .bg-surface-muted { background-color: var(--surface-muted); }
-  .text-muted { color: var(--foreground-muted); }
-  .border-default { border-color: var(--border); }
+  /* Not a utility — a compound selector, and nothing ever puts a variant in
+     front of it.
 
-  /* Wide content — tables, the audit log's JSON diffs — scrolls inside its own
-     box. The page body must never scroll sideways on a phone. */
-  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+     The console's focus ring is `--ring`, which *is* the accent, so on an
+     accent-coloured panel it is invisible and every control in the sidebar
+     loses its keyboard indicator. Every action in this console must be
+     reachable without a mouse, payout approval included, so the ring inverts
+     along with everything else inside the chrome. */
+  .brand-chrome:focus-visible,
+  .brand-chrome :focus-visible {
+    outline-color: var(--chrome-foreground);
+  }
+}
 
-  /* The bottom tab bar sits over the home indicator on an iPhone and over the
-     gesture pill on Android. Both are handled by the same inset, which is 0 on
-     every device that does not have one. */
-  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* ── Clerk's account popover ─────────────────────────────────────────────────
+ *
+ * `ThemedUserButton` does the work; this closes the one hole it cannot.
+ *
+ * Clerk's *development-instance* badge takes its colour from Clerk's own
+ * warning yellow, and lands at 1.87:1 on the accent card — measured, and the
+ * only text in there that fails. It carries no stable hook: no `appearance`
+ * element key, and a hashed class (`cl-internal-10kzkpu`) that is a *different
+ * hash in each theme*, so there is nothing to name.
+ *
+ * So it is caught by where it sits rather than by what it is called, along
+ * with everything else in the card — which is the correct rule for this
+ * surface anyway. Nothing on the accent ground may be dimmed: near-white on
+ * light-mode accent is 4.62:1, the ceiling, and any quieter shade fails.
+ *
+ * `!important` because Clerk's stylesheet ships after this one and the badge
+ * loses no other way. Inputs are excluded: the popover has none today, and if
+ * one appears it sits on a light plate where this colour would be wrong. The
+ * manage-account modal is a different root and is untouched.
+ */
+.cl-userButtonPopoverCard,
+.cl-userButtonPopoverCard :not(input):not(textarea):not(select) {
+  color: var(--chrome-foreground) !important;
+}
 
-  /* Reserve the tab bar's height at the end of the scroll region, or the last
-     row of every list is permanently underneath it. */
-  .pb-tabbar { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
+/* Where the card hangs.
+ *
+ * Clerk measures the trigger and writes `position: absolute; top: 62px` as an
+ * **inline** style, so a stylesheet `top` cannot win without `!important` — and
+ * 62px is 4px *over* the header's 66px bottom edge, so out of the box the card
+ * overlaps the bar it belongs to.
+ *
+ * Its containing block is the document, not the viewport: every ancestor up to
+ * the root is `position: static`, so Clerk's 62px is measured from the top of
+ * the page. Overriding `top` alone would therefore be right at the top of a
+ * list and wrong everywhere else — pinned 76px down the *document* and off the
+ * screen entirely once somebody has scrolled.
+ *
+ * So it is re-anchored to the viewport. That is exact rather than approximate
+ * here, because the header is `sticky top-0`: its bottom edge is always at
+ * `--header-block`, at every scroll position and every width. `left` is left
+ * to Clerk, which is doing the horizontal collision handling — and horizontal
+ * position is unaffected by the switch, since the console never scrolls
+ * sideways.
+ */
+.cl-userButtonPopoverCard {
+  position: fixed !important;
+  top: calc(var(--header-block) + var(--chrome-inset)) !important;
+}
+
+/* ── The scrollbar, everywhere ───────────────────────────────────────────────
+ *
+ * 2px, in the platform's colours, on **every** scrollable region in the
+ * console — the page itself, a table, the nav, a Clerk popover. Unprefixed
+ * pseudo-elements rather than a `.scrollbar-thin` class, because a class only
+ * reaches the containers somebody remembered to put it on, and the ones that
+ * get missed are the ones inside a third party's markup.
+ *
+ * The thumb comes from a custom property rather than a fixed colour, which is
+ * what lets one rule serve two very different grounds: `::-webkit-scrollbar-*`
+ * resolves `var()` against the *scrollable element*, so a region inside
+ * `.brand-chrome` inherits the on-accent thumb and everything else gets the
+ * on-surface one. A single white thumb would be invisible on a white page; a
+ * single dark one would be invisible on the accent panel.
+ *
+ * Two engines, two mechanisms, and they are **mutually exclusive** — which is
+ * the whole difficulty. `::-webkit-scrollbar` takes an exact width;
+ * `scrollbar-width` is the standard property but accepts only
+ * `auto | thin | none`. Declaring both does not get the best of each: current
+ * Chrome implements the standard properties, and the moment `scrollbar-width`
+ * is present it stops honouring the `::-webkit-` rules altogether. The first
+ * attempt here set both and Chrome drew its full default scrollbar, arrow
+ * buttons and all.
+ *
+ * So the standard properties are fenced behind a query that is false in every
+ * engine that has the pseudo-element. Chrome takes the 2px branch; Firefox,
+ * which has no `::-webkit-scrollbar`, takes `thin` — about 8px, and the
+ * closest it can get.
+ *
+ * At 2px the thumb is not a pointer target — well under any usable hit area —
+ * so it is treated as an *indicator*, not a control. Every region it belongs
+ * to scrolls by wheel, trackpad, and by tabbing through what is inside it,
+ * none of which go through the thumb. */
+@layer base {
+  :root {
+    --scrollbar-thumb: color-mix(in oklch, var(--foreground) 42%, var(--background));
+    --scrollbar-thumb-hover: var(--foreground);
+  }
+
+  /* Scoped to the accent surfaces by re-declaring the same two names. Nothing
+     below has to know which ground it is on. */
+  .brand-chrome {
+    --scrollbar-thumb: var(--chrome-thumb);
+    --scrollbar-thumb-hover: var(--chrome-thumb-hover);
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+  }
+
+  ::-webkit-scrollbar { width: 2px; height: 2px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+}
+
+/* Wide content — tables, the audit log's JSON diffs — scrolls inside its own
+   box. The page body must never scroll sideways on a phone.
+ *
+ * `position: relative` is load-bearing, not tidiness. `overflow` only clips a
+ * descendant whose **containing block** is inside the scroller, and an
+ * absolutely-positioned element's containing block is its nearest *positioned*
+ * ancestor. A static scroller is therefore not one, so anything absolute inside
+ * it escapes the box entirely and is measured against the document.
+ *
+ * Tailwind's `sr-only` is `position: absolute`. The demand heatmap on
+ * `/analytics` puts one in each of its 168 cells, so on a 390px phone those
+ * screen-reader labels sat out at x=578 *outside* the scroller — 173 elements
+ * past the viewport, and a document `scrollWidth` of 582. The page scrolled
+ * sideways, which this console forbids, and it took the bottom tab bar with it:
+ * a `fixed` bar spans the layout viewport, so the bar stretched to 582px and
+ * only three of its five icons landed on screen. The visible symptom was two
+ * missing navigation buttons, three components away from the cause.
+ *
+ * With no offsets, `relative` moves nothing. */
+@utility scroll-x {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The bottom tab bar sits over the home indicator on an iPhone and over the
+   gesture pill on Android. Both are handled by the same inset, which is 0 on
+   every device that does not have one. */
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* Reserve the tab bar's height at the end of the scroll region, or the last row
+   of every list is permanently underneath it. Includes the bar's own 10px drop
+   from the bottom of the screen — the bar is that much taller than it looks,
+   and forgetting it hides the last row by exactly that much. */
+@utility pb-tabbar {
+  padding-bottom: calc(4.25rem + var(--chrome-inset) + env(safe-area-inset-bottom, 0px));
 }
 
 @media (prefers-reduced-motion: reduce) {

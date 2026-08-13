@@ -73,7 +73,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
     <div className="space-y-6">
       <Link
         href="/support"
-        className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-[var(--foreground)]"
+        className="-my-2 inline-flex min-h-11 items-center gap-1.5 py-2 text-sm text-muted hover:text-[var(--foreground)]"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         Back to the queue
