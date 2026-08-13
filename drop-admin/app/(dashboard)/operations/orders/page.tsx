@@ -1,8 +1,11 @@
 import { AlarmClock, ClipboardCheck, PauseCircle, Truck, Wallet } from "lucide-react";
 import Link from "next/link";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import { OrderCard, OrderRow, type BoardOrder } from "./OrderRow";
@@ -20,13 +23,17 @@ const VIEWS = [
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { view = "stuck", q = "" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const view = typeof params.view === "string" ? params.view : "stuck";
   const active = VIEWS.find((v) => v.key === view)?.key ?? "stuck";
+  const q = state.q;
 
-  const query = new URLSearchParams({ view: active });
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ view: active, limit: String(state.per) });
+  if (q) query.set("search", q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   type Board = { view: string; items: BoardOrder[]; next_cursor: string | null };
   type Counts = {
@@ -56,6 +63,14 @@ export default async function OrdersPage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the order board" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/operations/orders",
+    filters: { view: active, q },
+    state,
+    nextCursor: board.next_cursor,
+    count: board.items.length,
+  });
 
   // A cancellation rate is only meaningful against the day's throughput; with
   // nothing finished today it is not "0%", it is unanswerable.
@@ -146,21 +161,10 @@ export default async function OrdersPage({
 
       {blurb ? <p className="text-sm text-muted">{blurb}</p> : null}
 
-      <form method="GET" className="flex gap-2">
-        <input type="hidden" name="view" value={active} />
-        <label htmlFor="q" className="sr-only">Search by order id or phone</label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder="Order id or customer phone…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <button type="submit" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]">
-          Search
-        </button>
-      </form>
-
+      <TableToolbar
+        placeholder="Search by order id or customer phone"
+        keep={{ view: active }}
+      >
       {board.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -209,9 +213,29 @@ export default async function OrdersPage({
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              links={links}
+              noun="orders"
+              perPage={state.per}
+              sizeHref={sizeHrefFactory("/operations/orders", { view: active, q })}
+            />
+          </Card>
+
+          {/* Below `md` the table is not rendered, so the pager it contains is
+              not either. The card list needs its own. */}
+          <Card className="md:hidden">
+            <Pagination
+              links={links}
+              noun="orders"
+              perPage={state.per}
+              sizeHref={sizeHrefFactory("/operations/orders", { view: active, q })}
+              className="border-t-0"
+            />
           </Card>
         </>
       )}
+      </TableToolbar>
     </div>
   );
 }

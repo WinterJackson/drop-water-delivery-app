@@ -53,6 +53,8 @@ from typing import Any
 from sqlalchemy import String, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from utils import keyset
+
 from models.deliverer_model import Deliverer
 from models.order_model import Order
 from models.payout_model import Payout
@@ -85,7 +87,9 @@ def _hours_since(moment: datetime | None) -> float | None:
     return round((datetime.now(timezone.utc) - moment).total_seconds() / 3600, 1)
 
 
-async def refunds(db: AsyncSession, *, limit: int = 100) -> dict[str, Any]:
+async def refunds(
+    db: AsyncSession, *, limit: int = 100, cursor: str | None = None
+) -> dict[str, Any]:
     """Where every cancelled-and-paid order stands with its money."""
     rows = (
         await db.execute(
@@ -126,18 +130,29 @@ async def refunds(db: AsyncSession, *, limit: int = 100) -> dict[str, Any]:
 
     # Failed first, then the oldest in flight: a failed refund is a customer who
     # has already been let down, and it stays failed until somebody acts.
-    items = (
-        await db.execute(
-            select(Order, User.full_name, User.phone_number)
-            .outerjoin(User, User.id == Order.customer_id)
-            .where(Order.payment_status.in_(REFUND_OUTSTANDING))
-            .order_by(
-                (Order.payment_status == "refund_failed").desc(),
-                Order.updated_at.asc(),
-            )
-            .limit(limit)
-        )
-    ).all()
+    #
+    # The rank column is selected as well as ordered by, so the cursor can carry
+    # it — paging past the last failed refund must not land back among them.
+    failed_first = (Order.payment_status == "refund_failed").label("failed_first")
+    outstanding_query = (
+        select(Order, User.full_name, User.phone_number, failed_first)
+        .outerjoin(User, User.id == Order.customer_id)
+        .where(Order.payment_status.in_(REFUND_OUTSTANDING))
+    )
+    # Ascending on time — oldest first — but the rank must stay descending, so
+    # the two are expressed as one ordering with the rank inverted rather than
+    # as two `keyset.Order`s, which cannot be combined.
+    ranking = keyset.Order(
+        (Order.payment_status != "refund_failed").label("failed_first"),
+        Order.updated_at,
+        Order.id,
+        descending=False,
+    )
+    items, next_cursor = keyset.split(
+        (await db.execute(keyset.seek(outstanding_query, ranking, cursor).limit(limit + 1))).all(),
+        limit,
+        ranking,
+    )
 
     return {
         "summary": {
@@ -164,8 +179,16 @@ async def refunds(db: AsyncSession, *, limit: int = 100) -> dict[str, Any]:
                 and (_hours_since(order.updated_at) or 0) >= STUCK_AFTER_HOURS,
                 "created_at": order.created_at.isoformat() if order.created_at else None,
             }
-            for order, name, phone in items
+            for order, name, phone, _ in items
         ],
+        "next_cursor": next_cursor,
+        # Known without a second query: the summary above is a GROUP BY over
+        # every outstanding row, so the population is already counted.
+        "total": (
+            by_state["refund_pending"]["count"]
+            + by_state["refund_processing"]["count"]
+            + by_state["refund_failed"]["count"]
+        ),
     }
 
 

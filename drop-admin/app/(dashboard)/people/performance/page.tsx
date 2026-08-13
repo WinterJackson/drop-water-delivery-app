@@ -2,6 +2,9 @@ import { Gauge, PackageCheck, Store, TrendingUp, Users } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -48,18 +51,26 @@ type VendorRow = {
 
 type Riders = {
   items: RiderRow[];
+  next_cursor: string | null;
   min_orders_for_ranking: number;
   ranked_count: number;
+  /** The whole fleet: counted before the search and before the page. */
   total: number;
+  /** How many rows the current search matched. Equals `total` when not searching. */
+  matched: number;
   approved: number;
   with_any_order: number;
 };
 
 type Vendors = {
   items: VendorRow[];
+  next_cursor: string | null;
   min_orders_for_ranking: number;
   ranked_count: number;
+  /** Every store on the platform: counted before the search and before the page. */
   total: number;
+  /** How many rows the current search matched. Equals `total` when not searching. */
+  matched: number;
   selling: number;
   never_sold: number;
 };
@@ -67,9 +78,15 @@ type Vendors = {
 export default async function PerformancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { kind = "riders" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const kind = typeof params.kind === "string" ? params.kind : "riders";
+
+  const query = new URLSearchParams({ limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
   const active = kind === "vendors" ? "vendors" : "riders";
 
   let me: AdminMe;
@@ -99,9 +116,9 @@ export default async function PerformancePage({
   let vendors: Vendors | null = null;
   try {
     if (view === "riders") {
-      riders = await get<Riders>("/api/admin/performance/riders");
+      riders = await get<Riders>(`/api/admin/performance/riders?${query.toString()}`);
     } else {
-      vendors = await get<Vendors>("/api/admin/performance/vendors");
+      vendors = await get<Vendors>(`/api/admin/performance/vendors?${query.toString()}`);
     }
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
@@ -146,8 +163,35 @@ export default async function PerformancePage({
         </ul>
       </nav>
 
-      {riders ? <RiderView data={riders} /> : null}
-      {vendors ? <VendorView data={vendors} /> : null}
+      <TableToolbar
+        placeholder={view === "riders" ? "Search riders by name" : "Search stores by name"}
+        keep={{ kind: view }}
+      >
+        {riders ? <RiderView data={riders} /> : null}
+        {vendors ? <VendorView data={vendors} /> : null}
+
+        {/* `matched` in the pager, `total` beside the board. Both are real
+            counts taken over the whole population before it was paged — the
+            first narrows with the search, the second deliberately does not,
+            because "how big is the fleet" and "how many did I just find" are
+            different questions and only one of them belongs in a range. */}
+        <Card>
+          <Pagination
+            links={pageLinks({
+              pathname: "/people/performance",
+              filters: { kind: view, q: state.q },
+              state,
+              nextCursor: (riders ?? vendors)?.next_cursor,
+              count: (riders ?? vendors)?.items.length ?? 0,
+            })}
+            noun={view === "riders" ? "riders" : "stores"}
+            total={(riders ?? vendors)?.matched}
+            perPage={state.per}
+            sizeHref={sizeHrefFactory("/people/performance", { kind: view, q: state.q })}
+            className="border-t-0"
+          />
+        </Card>
+      </TableToolbar>
     </div>
   );
 }

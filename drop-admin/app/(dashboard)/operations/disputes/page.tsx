@@ -1,11 +1,14 @@
 import { AlarmClock, GaugeCircle, PackageCheck, Scale } from "lucide-react";
 import Link from "next/link";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import type { QueueStats } from "@/lib/queue-stats";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { DisputeCard, type Dispute } from "./DisputeCard";
 
 export const metadata = { title: "Disputes" };
@@ -19,18 +22,24 @@ const TABS = [
 export default async function DisputesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { status = "pending_review" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const status = typeof params.status === "string" ? params.status : "pending_review";
   const active = TABS.find((t) => t.key === status)?.key ?? "pending_review";
 
-  type DisputeList = { items: Dispute[] };
+  const query = new URLSearchParams({ status: active, limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
+
+  type DisputeList = { items: Dispute[]; next_cursor: string | null };
   let data: DisputeList;
   let me: AdminMe;
   let stats: QueueStats = {};
   try {
     [data, me, stats] = await Promise.all([
-      get<DisputeList>(`/api/admin/disputes?status=${active}`),
+      get<DisputeList>(`/api/admin/disputes?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
@@ -38,6 +47,14 @@ export default async function DisputesPage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load disputes" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/operations/disputes",
+    filters: { status: active, q: state.q },
+    state,
+    nextCursor: data.next_cursor,
+    count: data.items.length,
+  });
 
   const canResolve = can(me, PERMISSIONS.disputesResolve);
   const disputes = stats.disputes;
@@ -128,6 +145,10 @@ export default async function DisputesPage({
         </p>
       ) : null}
 
+      <TableToolbar
+        placeholder="Search by rider name, reason or ticket id"
+        keep={{ status: active }}
+      >
       {data.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -147,6 +168,17 @@ export default async function DisputesPage({
           ))}
         </div>
       )}
+
+      <Card>
+        <Pagination
+          links={links}
+          noun="disputes"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/operations/disputes", { status: active, q: state.q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

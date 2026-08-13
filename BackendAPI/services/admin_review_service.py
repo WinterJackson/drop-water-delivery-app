@@ -45,6 +45,8 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from utils import keyset
+
 from models.deliverer_model import Deliverer
 from models.review_model import Review
 from models.vendor_model import Vendor
@@ -169,8 +171,9 @@ async def listing(
     view: str = "all",
     search: str | None = None,
     limit: int = 100,
-) -> list[dict[str, Any]]:
-    query = select(Review).order_by(Review.created_at.desc())
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    query = select(Review)
 
     if view == "hidden":
         query = query.where(Review.hidden_at.isnot(None))
@@ -193,14 +196,37 @@ async def listing(
     if search and search.strip():
         query = query.where(Review.comment.ilike(f"%{search.strip()}%"))
 
-    # Over-fetch on `flagged` because the Python filter below removes rows.
-    reviews = list((await db.execute(query.limit(limit * 3 if view == "flagged" else limit))).scalars().all())
+    order = keyset.Order(Review.created_at, Review.id)
+    seeded = keyset.seek(query, order, cursor)
 
     if view == "flagged":
-        reviews = [review for review in reviews if _flags(review)][:limit]
+        # `flagged` is the union of "low with a comment" and "looks like contact
+        # details", and the second needs a regex the database cannot express —
+        # so the SQL narrows and Python decides. Over-fetch, filter, then take a
+        # page: the ordering survives the filter, so the last surviving row is
+        # still a valid boundary. Exhausting the over-fetch without filling a
+        # page is the only honest signal that there is nothing further, which is
+        # why `has_more` is derived from the raw count and not the kept one.
+        span = max(limit * 3, limit + 1)
+        raw = list((await db.execute(seeded.limit(span))).scalars().all())
+        kept = [review for review in raw if _flags(review)]
+        reviews = kept[:limit]
+        has_more = len(kept) > limit or len(raw) == span
+        next_cursor = (
+            keyset.encode(order.values(reviews[-1])) if has_more and reviews else None
+        )
+    else:
+        raw = list((await db.execute(seeded.limit(limit + 1))).scalars().all())
+        reviews, next_cursor = keyset.split(raw, limit, order)
 
     names = await _names(db, reviews)
-    return [_serialise(review, names.get((review.target_type, review.target_id))) for review in reviews]
+    return {
+        "items": [
+            _serialise(review, names.get((review.target_type, review.target_id)))
+            for review in reviews
+        ],
+        "next_cursor": next_cursor,
+    }
 
 
 async def worst_rated(db: AsyncSession, *, limit: int = 8) -> list[dict[str, Any]]:

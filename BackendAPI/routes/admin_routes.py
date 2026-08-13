@@ -59,6 +59,7 @@ from models.platform_setting_model import SupportTicket
 from models.user_model import User
 from models.vendor_model import Vendor
 from services import admin_queue_service, admin_service
+from utils import keyset
 from services.notification_service import create_notification
 from utils.s3_utils import generate_presigned_url
 
@@ -340,8 +341,9 @@ async def admin_overview(
 @router.get("/kyc/queue", summary="Riders awaiting KYC review")
 async def kyc_queue(
     status: Literal["pending", "approved", "rejected", "unsubmitted"] = "pending",
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
 ):
@@ -352,23 +354,23 @@ async def kyc_queue(
     every document in the list would create live links to identity documents on
     every page load, whether or not anyone opened one.
     """
-    query = (
-        select(Deliverer)
-        .where(Deliverer.kyc_status == KYCStatus(status))
-        .order_by(Deliverer.created_at.asc(), Deliverer.id.asc())
-    )
+    query = select(Deliverer).where(Deliverer.kyc_status == KYCStatus(status))
 
-    if cursor:
-        anchor = await db.get(Deliverer, cursor)
-        if anchor is not None:
-            query = query.where(
-                (Deliverer.created_at > anchor.created_at)
-                | ((Deliverer.created_at == anchor.created_at) & (Deliverer.id > anchor.id))
+    # A name or a plate. The queue is worked from a phone call more often than
+    # from the list, and the caller has neither a UUID nor a cursor.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Deliverer.name.ilike(like),
+                Deliverer.plate_number.ilike(like),
+                Deliverer.phone_number.ilike(like),
             )
+        )
 
-    rows = (await db.execute(query.limit(limit + 1))).scalars().all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    order = keyset.Order(Deliverer.created_at, Deliverer.id, descending=False)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
 
     now = datetime.now(timezone.utc)
     return {
@@ -394,7 +396,7 @@ async def kyc_queue(
             }
             for r in rows
         ],
-        "next_cursor": str(rows[-1].id) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 
@@ -519,8 +521,9 @@ async def review_rider_kyc(
 @router.get("/payouts", summary="Payouts, newest first")
 async def list_payouts(
     status: str = Query("pending"),
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
 ):
@@ -535,23 +538,24 @@ async def list_payouts(
     The destination is masked unless the caller holds `pii.view`, so finance
     staff can triage the queue without every M-Pesa number on screen.
     """
-    query = (
-        select(Payout)
-        .where(Payout.status == status)
-        .order_by(Payout.created_at.desc(), Payout.id.desc())
-    )
+    query = select(Payout).where(Payout.status == status)
 
-    if cursor:
-        anchor = await db.get(Payout, cursor)
-        if anchor is not None:
-            query = query.where(
-                (Payout.created_at < anchor.created_at)
-                | ((Payout.created_at == anchor.created_at) & (Payout.id < anchor.id))
-            )
+    # Deliberately **not** `account_details`: it is a `StringEncryptedType`, so
+    # the column holds ciphertext and an ILIKE against it matches nothing while
+    # looking like it works. The receipt and the failure reason are the two
+    # things finance actually pastes in from a Daraja statement.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        clauses = [Payout.mpesa_receipt.ilike(like), Payout.failure_reason.ilike(like)]
+        try:
+            clauses.append(Payout.provider_id == UUID(search.strip()))
+        except ValueError:
+            pass
+        query = query.where(or_(*clauses))
 
-    rows = (await db.execute(query.limit(limit + 1))).scalars().all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    order = keyset.Order(Payout.created_at, Payout.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
 
     may_see = access.may(PERM_PII_VIEW)
     return {
@@ -570,7 +574,7 @@ async def list_payouts(
             }
             for p in rows
         ],
-        "next_cursor": str(rows[-1].id) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 
@@ -651,11 +655,17 @@ async def reject_payout(
 
 @router.get("/admins", summary="The administrator roster")
 async def list_admins(
+    search: Optional[str] = Query(None, max_length=120),
+    role: Optional[str] = Query(None, max_length=40),
+    limit: int = Query(100, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_ADMINS_MANAGE)),
 ):
     return {
-        "items": await admin_service.list_admins(db),
+        **await admin_service.list_admins(
+            db, search=search, role=role, limit=limit, cursor=cursor
+        ),
         **admin_service.permission_catalogue(),
     }
 
@@ -743,25 +753,23 @@ async def revoke_admin(
 @router.get("/audit", summary="What administrators have done")
 async def audit_log(
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     admin_id: Optional[UUID] = None,
     action: Optional[str] = None,
     target_id: Optional[str] = None,
+    search: Optional[str] = Query(None, max_length=120),
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_ADMINS_MANAGE)),
 ):
-    items = await admin_service.list_audit(
+    return await admin_service.list_audit(
         db,
         limit=limit,
-        before_id=cursor,
+        cursor=cursor,
         admin_id=admin_id,
         action=action,
         target_id=target_id,
+        search=search,
     )
-    return {
-        "items": items,
-        "next_cursor": items[-1]["id"] if len(items) == limit else None,
-    }
 
 
 @router.get("/queues/stats", summary="Depth, age and outcome for every queue")

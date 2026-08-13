@@ -37,6 +37,7 @@ from models.order_model import Order
 from models.user_model import User
 from models.vendor_model import Vendor
 from services import admin_delivery_replay_service, admin_service
+from utils import keyset
 from services.notification_service import create_notification
 from utils.s3_utils import generate_presigned_url
 from services.order_service import apply_status_transition
@@ -95,7 +96,7 @@ async def list_orders(
     view: Literal["all", "stuck", "paused", "active", "cancelled"] = "stuck",
     search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_ORDERS_READ)),
 ):
@@ -114,7 +115,6 @@ async def list_orders(
         .outerjoin(Vendor, Order.vendor_id == Vendor.id)
         .outerjoin(Deliverer, Order.deliverer_id == Deliverer.id)
         .outerjoin(User, Order.customer_id == User.id)
-        .order_by(Order.created_at.desc(), Order.id.desc())
     )
 
     if view == "stuck":
@@ -146,32 +146,24 @@ async def list_orders(
             pass
         query = query.where(or_(*clauses))
 
-    if cursor:
-        anchor = await db.get(Order, cursor)
-        if anchor is not None:
-            query = query.where(
-                (Order.created_at < anchor.created_at)
-                | ((Order.created_at == anchor.created_at) & (Order.id < anchor.id))
-            )
-
-    rows = (await db.execute(query.limit(limit + 1))).all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    order = keyset.Order(Order.created_at, Order.id)
+    rows = (await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))).all()
+    page, next_cursor = keyset.split(rows, limit, order)
 
     return {
         "view": view,
         "items": [
             {
-                **_serialise(order, vendor_name=vendor, rider_name=rider, customer_name=customer),
+                **_serialise(row, vendor_name=vendor, rider_name=rider, customer_name=customer),
                 "waiting_minutes": (
-                    round((now - order.created_at).total_seconds() / 60)
-                    if order.created_at
+                    round((now - row.created_at).total_seconds() / 60)
+                    if row.created_at
                     else None
                 ),
             }
-            for order, vendor, rider, customer in rows
+            for row, vendor, rider, customer in page
         ],
-        "next_cursor": str(rows[-1][0].id) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 
@@ -249,11 +241,15 @@ async def order_counts(
 @limiter.limit("60/minute")
 async def replayable_orders(
     request: Request,
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_GEO_VIEW)),
 ):
-    return {"items": await admin_delivery_replay_service.tracked_orders(db, limit=limit)}
+    return await admin_delivery_replay_service.tracked_orders(
+        db, limit=limit, cursor=cursor, search=search
+    )
 
 
 @router.get("/orders/{order_id}", summary="One order, in full")
@@ -429,7 +425,9 @@ async def list_disputes(
     # which the enum does not define — `RejectionStatus("resolved")` raises
     # ValueError, so two of the three tabs on the disputes screen returned 500.
     status: Literal["pending_review", "approved", "denied", "all"] = "pending_review",
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_DISPUTES_READ)),
 ):
@@ -437,18 +435,38 @@ async def list_disputes(
 
     Photo URLs are **not** minted here — same reasoning as the KYC queue. The
     detail endpoint presigns them when somebody actually opens a ticket.
+
+    Oldest first, and paged ascending to match: this is a queue, and the ticket
+    that has been waiting longest is the one somebody has to deal with.
     """
     query = (
         select(BottleRejectionTicket, Deliverer.name, Order.id)
         .outerjoin(Deliverer, BottleRejectionTicket.rider_id == Deliverer.id)
         .outerjoin(Order, BottleRejectionTicket.order_id == Order.id)
-        .order_by(BottleRejectionTicket.created_at.asc())
-        .limit(limit)
     )
     if status != "all":
         query = query.where(BottleRejectionTicket.status == RejectionStatus(status))
 
-    rows = (await db.execute(query)).all()
+    # The rider's name, and the ticket's own id for somebody pasting one out of
+    # a support thread. `reason_text` is free text a rider typed, which is
+    # exactly where "the seal was broken" is findable and a status filter is not.
+    if search and search.strip():
+        term = search.strip()
+        clauses = [
+            Deliverer.name.ilike(f"%{term}%"),
+            BottleRejectionTicket.reason_text.ilike(f"%{term}%"),
+        ]
+        try:
+            clauses.append(BottleRejectionTicket.id == UUID(term))
+        except ValueError:
+            pass
+        query = query.where(or_(*clauses))
+
+    order = keyset.Order(
+        BottleRejectionTicket.created_at, BottleRejectionTicket.id, descending=False
+    )
+    rows = (await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))).all()
+    page, next_cursor = keyset.split(rows, limit, order)
 
     return {
         "items": [
@@ -461,8 +479,9 @@ async def list_disputes(
                 "photo_count": len(ticket.photo_urls or []),
                 "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
             }
-            for ticket, rider_name, _ in rows
-        ]
+            for ticket, rider_name, _ in page
+        ],
+        "next_cursor": next_cursor,
     }
 
 

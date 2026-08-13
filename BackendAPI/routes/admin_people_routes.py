@@ -34,6 +34,7 @@ from models.admin_model import (
 from models.user_model import User
 from services import admin_people_service as people, admin_performance_service
 from services import admin_service
+from utils import keyset
 from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ async def list_people(
     search: Optional[str] = Query(None, max_length=120),
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(current_admin),
 ):
@@ -319,22 +320,30 @@ async def review_vendor_verification(
 @limiter.limit("60/minute")
 async def rider_performance(
     request: Request,
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
 ):
-    return await admin_performance_service.riders(db, limit=limit)
+    return await admin_performance_service.riders(
+        db, limit=limit, cursor=cursor, search=search
+    )
 
 
 @router.get("/performance/vendors", summary="Store volume and fulfilment")
 @limiter.limit("60/minute")
 async def vendor_performance(
     request: Request,
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_VENDORS_READ)),
 ):
-    return await admin_performance_service.vendors(db, limit=limit)
+    return await admin_performance_service.vendors(
+        db, limit=limit, cursor=cursor, search=search
+    )
 
 
 # ── A customer's balances ─────────────────────────────────────────────────

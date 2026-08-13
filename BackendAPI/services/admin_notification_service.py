@@ -37,8 +37,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from utils import keyset
 
 from models.deliverer_model import Deliverer
 from models.notification_model import Notification
@@ -199,14 +201,35 @@ async def by_channel(db: AsyncSession, *, days: int = 30) -> list[dict[str, Any]
     return [{"channel": channel or "app", "sent": int(count or 0)} for channel, count in rows]
 
 
-async def recent(db: AsyncSession, *, limit: int = 100, audience: str | None = None) -> list[dict]:
-    query = select(Notification).order_by(Notification.created_at.desc())
+async def recent(
+    db: AsyncSession,
+    *,
+    limit: int = 100,
+    audience: str | None = None,
+    search: str | None = None,
+    message_type: str | None = None,
+    cursor: str | None = None,
+) -> dict:
+    query = select(Notification)
     if audience:
         query = query.where(Notification.user_type == audience)
+    if message_type:
+        query = query.where(Notification.message_type == message_type)
 
-    rows = (await db.execute(query.limit(limit))).scalars().all()
+    # Title and body. The body is only previewed on screen, but somebody
+    # checking whether a particular message went out is searching for a phrase
+    # that is usually past the 120th character.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(Notification.title.ilike(like), Notification.message.ilike(like))
+        )
 
-    return [
+    order = keyset.Order(Notification.created_at, Notification.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
+
+    items = [
         {
             "id": str(row.id),
             "title": row.title,
@@ -222,3 +245,4 @@ async def recent(db: AsyncSession, *, limit: int = 100, audience: str | None = N
         }
         for row in rows
     ]
+    return {"items": items, "next_cursor": next_cursor}

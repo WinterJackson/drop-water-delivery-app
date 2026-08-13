@@ -21,6 +21,7 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_FINANCE_ADJUST, PERM_FINANCE_READ, PERM_RIDERS_READ
 from services import admin_bottle_service, admin_service
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,9 @@ router = APIRouter()
 async def bottles(
     request: Request,
     view: str = Query("all", pattern="^(all|stale|drift|movements)$"),
+    search: str | None = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
 ):
@@ -43,15 +46,29 @@ async def bottles(
     suspect, and burying that behind a tab nobody clicks defeats the purpose of
     computing it.
     """
+    # Only the list the current view actually renders is paged; the other is
+    # not fetched at all. Both were fetched on every view, so opening the float
+    # ran the movement feed as well and vice versa.
+    holders = {"items": [], "next_cursor": None, "total": 0}
+    movements = {"items": [], "next_cursor": None}
+    if view == "movements":
+        movements = await admin_bottle_service.entries(
+            db, search=search, limit=limit, cursor=cursor
+        )
+    else:
+        holders = await admin_bottle_service.holders(
+            db, limit=limit, stale_only=view == "stale", search=search, cursor=cursor
+        )
+
     return {
         "summary": await admin_bottle_service.overview(db),
-        "holders": await admin_bottle_service.holders(
-            db, limit=limit, stale_only=view == "stale"
-        ),
+        "holders": holders["items"],
+        "holders_total": holders["total"],
+        "movements": movements["items"],
+        # One cursor for whichever list this view is showing — they are never
+        # both on screen, so a second would page the list nobody is looking at.
+        "next_cursor": (movements if view == "movements" else holders)["next_cursor"],
         "drift": await admin_bottle_service.drift(db),
-        "movements": await admin_bottle_service.entries(db, limit=limit)
-        if view == "movements"
-        else [],
     }
 
 
@@ -64,17 +81,21 @@ async def movements(
     entry_type: str | None = Query(
         None, pattern="^(delivery_accrual|vendor_receipt|adjustment)$"
     ),
+    search: str | None = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
 ):
     return {
-        "items": await admin_bottle_service.entries(
+        **await admin_bottle_service.entries(
             db,
             rider_id=rider_id,
             vendor_id=vendor_id,
             entry_type=entry_type,
+            search=search,
             limit=limit,
+            cursor=cursor,
         )
     }
 

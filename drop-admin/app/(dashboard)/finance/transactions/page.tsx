@@ -7,6 +7,9 @@ import { ApiError, get } from "@/lib/api/server";
 import { formatDateTime, formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
 import { NoAccess } from "@/components/shell/NoAccess";
 import { pageAccess } from "@/lib/page-access";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 
 export const metadata = { title: "Transactions" };
 
@@ -66,7 +69,7 @@ const STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger"> 
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; q?: string; type?: string; days?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   // Gated on the capability `nav-config` declares for `/finance/transactions` — the
   // same declaration that hides this entry in the sidebar, so the two can
@@ -76,29 +79,32 @@ export default async function TransactionsPage({
 
 
   const params = await searchParams;
+  const state = readPageState(params);
   const tab = TABS.find((t) => t.key === params.tab)?.key ?? "ledger";
-  const q = params.q ?? "";
-  const type = params.type ?? "";
+  const q = state.q;
+  const type = typeof params.type === "string" ? params.type : "";
   const days = Number(params.days) > 0 ? Number(params.days) : 30;
 
-  const query = new URLSearchParams({ days: String(days), limit: "100" });
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ days: String(days), limit: String(state.per) });
+  if (q) query.set("search", q);
   if (type) query.set("transaction_type", type);
+  if (state.cursor) query.set("cursor", state.cursor);
 
+  type Page<T> = { items: T[]; next_cursor: string | null };
   let summary: Summary;
-  let ledger: { items: Transaction[] } = { items: [] };
-  let payments: { items: Payment[] } = { items: [] };
+  let ledger: Page<Transaction> = { items: [], next_cursor: null };
+  let payments: Page<Payment> = { items: [], next_cursor: null };
 
   try {
     if (tab === "ledger") {
       [summary, ledger] = await Promise.all([
         get<Summary>(`/api/admin/finance/summary?days=${days}`),
-        get<{ items: Transaction[] }>(`/api/admin/finance/transactions?${query.toString()}`),
+        get<Page<Transaction>>(`/api/admin/finance/transactions?${query.toString()}`),
       ]);
     } else {
       [summary, payments] = await Promise.all([
         get<Summary>(`/api/admin/finance/summary?days=${days}`),
-        get<{ items: Payment[] }>(`/api/admin/finance/payments?${query.toString()}`),
+        get<Page<Payment>>(`/api/admin/finance/payments?${query.toString()}`),
       ]);
     }
   } catch (error) {
@@ -108,6 +114,15 @@ export default async function TransactionsPage({
 
   const unresolved = summary.collections.unresolved;
   const stuck = summary.payouts.stuck;
+
+  const shown = tab === "ledger" ? ledger : payments;
+  const links = pageLinks({
+    pathname: "/finance/transactions",
+    filters: { tab, q, days: String(days) },
+    state,
+    nextCursor: shown.next_cursor,
+    count: shown.items.length,
+  });
 
   return (
     <div className="space-y-6">
@@ -208,37 +223,30 @@ export default async function TransactionsPage({
         </ul>
       </nav>
 
-      <form method="GET" className="flex flex-wrap gap-2">
-        <input type="hidden" name="tab" value={tab} />
-        <label htmlFor="q" className="sr-only">
-          Search
-        </label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder={tab === "ledger" ? "Receipt, reference or description…" : "Receipt, checkout id or phone…"}
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <select
-          name="days"
-          defaultValue={String(days)}
-          aria-label="Period"
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          <option value="7">7 days</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="365">1 year</option>
-        </select>
-        <button
-          type="submit"
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
-        >
-          Search
-        </button>
-      </form>
-
+      {/* One pager, for whichever list is on screen. The two tabs are separate
+          result sets but only one renders at a time, so a second set of links
+          would be a Next button paging the list nobody is looking at. */}
+      <TableToolbar
+        placeholder={
+          tab === "ledger"
+            ? "Search receipt, reference or description"
+            : "Search receipt, checkout id or phone"
+        }
+        keep={{ tab }}
+        filters={[
+          {
+            name: "days",
+            label: "Period",
+            value: String(days),
+            options: [
+              { value: "7", label: "7 days" },
+              { value: "30", label: "30 days" },
+              { value: "90", label: "90 days" },
+              { value: "365", label: "1 year" },
+            ],
+          },
+        ]}
+      >
       {tab === "ledger" ? (
         ledger.items.length === 0 ? (
           <Card>
@@ -323,6 +331,17 @@ export default async function TransactionsPage({
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                links={links}
+                noun="movements"
+                perPage={state.per}
+                sizeHref={sizeHrefFactory("/finance/transactions", {
+                  tab,
+                  q,
+                  days: String(days),
+                })}
+              />
             </Card>
           </>
         )
@@ -398,9 +417,21 @@ export default async function TransactionsPage({
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              links={links}
+              noun="payments"
+              perPage={state.per}
+              sizeHref={sizeHrefFactory("/finance/transactions", {
+                tab,
+                q,
+                days: String(days),
+              })}
+            />
           </Card>
         </>
       )}
+      </TableToolbar>
     </div>
   );
 }

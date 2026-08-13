@@ -2,6 +2,9 @@ import { BellRing, BellOff, Eye, Send, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber, timeAgo } from "@/lib/utils/format";
 import { NoAccess } from "@/components/shell/NoAccess";
@@ -69,7 +72,7 @@ type Payload = {
   by_type: Breakdown[];
   by_audience: Breakdown[];
   by_channel: Channel[];
-  recent: Recent[];
+  recent: { items: Recent[]; next_cursor: string | null };
 };
 
 const AUDIENCE_LABEL: Record<string, string> = {
@@ -90,7 +93,7 @@ const AUDIENCE_TABS = [
 export default async function NotificationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ days?: string; audience?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   // Gated on the capability `nav-config` declares for `/platform/notifications` — the
   // same declaration that hides this entry in the sidebar, so the two can
@@ -99,7 +102,10 @@ export default async function NotificationsPage({
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
 
-  const { days: rawDays, audience: rawAudience } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const rawDays = typeof params.days === "string" ? params.days : undefined;
+  const rawAudience = typeof params.audience === "string" ? params.audience : undefined;
 
   // The endpoint has always taken both and the page has never sent either, so
   // the window was fixed at 30 days and the feed always mixed all three
@@ -111,8 +117,10 @@ export default async function NotificationsPage({
     ? (rawAudience ?? "")
     : "";
 
-  const query = new URLSearchParams({ days: String(days) });
+  const query = new URLSearchParams({ days: String(days), limit: String(state.per) });
   if (audience) query.set("audience", audience);
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let data: Payload;
   try {
@@ -123,6 +131,14 @@ export default async function NotificationsPage({
   }
 
   const { summary, reachability, by_type: byType, by_audience: byAudience, by_channel: byChannel, recent } = data;
+
+  const links = pageLinks({
+    pathname: "/platform/notifications",
+    filters: { days: String(days), audience, q: state.q },
+    state,
+    nextCursor: recent.next_cursor,
+    count: recent.items.length,
+  });
   const pushed = byChannel.find((row) => row.channel === "push")?.sent ?? 0;
 
   return (
@@ -304,6 +320,13 @@ export default async function NotificationsPage({
         </Card>
       </div>
 
+      {/* The toolbar sits on the feed alone. Everything above it is a fixed
+          set of aggregates, not a list, and a search box over a five-row
+          breakdown is a control with nothing to do. */}
+      <TableToolbar
+        placeholder="Search notification title or message"
+        keep={{ days: String(days), audience }}
+      >
       <Card className="overflow-hidden">
         <div className="border-b border-default px-4 py-3">
           <h2 className="text-sm font-semibold">
@@ -320,7 +343,7 @@ export default async function NotificationsPage({
               : ""}
           </p>
         </div>
-        {recent.length === 0 ? (
+        {recent.items.length === 0 ? (
           <EmptyState
             icon={<BellRing className="h-8 w-8" />}
             title="Nothing has been sent"
@@ -328,7 +351,7 @@ export default async function NotificationsPage({
           />
         ) : (
           <ul className="divide-y divide-[var(--border)]">
-            {recent.map((item) => (
+            {recent.items.map((item) => (
               <li key={item.id} className="px-4 py-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="min-w-0 text-sm font-medium">{item.title}</span>
@@ -355,7 +378,18 @@ export default async function NotificationsPage({
             ))}
           </ul>
         )}
+        <Pagination
+          links={links}
+          noun="notifications"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/platform/notifications", {
+            days: String(days),
+            audience,
+            q: state.q,
+          })}
+        />
       </Card>
+      </TableToolbar>
     </div>
   );
 }

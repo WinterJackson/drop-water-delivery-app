@@ -41,6 +41,7 @@ from services import (
     admin_settlement_service,
     wallet_service,
 )
+from utils import keyset
 from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ async def list_transactions(
     search: Optional[str] = Query(None, max_length=120),
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
-    cursor: Optional[UUID] = None,
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
 ):
@@ -94,11 +95,7 @@ async def list_transactions(
     when it starts to matter.
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    query = (
-        select(WalletTransaction)
-        .where(WalletTransaction.created_at >= since)
-        .order_by(WalletTransaction.created_at.desc(), WalletTransaction.id.desc())
-    )
+    query = select(WalletTransaction).where(WalletTransaction.created_at >= since)
 
     if user_type:
         query = query.where(WalletTransaction.user_type == user_type)
@@ -118,20 +115,9 @@ async def list_transactions(
             )
         )
 
-    if cursor:
-        anchor = await db.get(WalletTransaction, cursor)
-        if anchor is not None:
-            query = query.where(
-                (WalletTransaction.created_at < anchor.created_at)
-                | (
-                    (WalletTransaction.created_at == anchor.created_at)
-                    & (WalletTransaction.id < anchor.id)
-                )
-            )
-
-    rows = (await db.execute(query.limit(limit + 1))).scalars().all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    order = keyset.Order(WalletTransaction.created_at, WalletTransaction.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
 
     return {
         "items": [
@@ -156,7 +142,7 @@ async def list_transactions(
             }
             for row in rows
         ],
-        "next_cursor": str(rows[-1].id) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 
@@ -263,16 +249,12 @@ async def list_payments(
     search: Optional[str] = Query(None, max_length=120),
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
 ):
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    query = (
-        select(Payment)
-        .where(Payment.created_at >= since)
-        .order_by(Payment.created_at.desc())
-        .limit(limit)
-    )
+    query = select(Payment).where(Payment.created_at >= since)
     if status:
         query = query.where(Payment.status == status)
     if search and search.strip():
@@ -285,7 +267,9 @@ async def list_payments(
             )
         )
 
-    rows = (await db.execute(query)).scalars().all()
+    order = keyset.Order(Payment.created_at, Payment.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
     now = datetime.now(timezone.utc)
 
     return {
@@ -540,15 +524,17 @@ async def account_ledger(
 async def failed_webhooks(
     request: Request,
     resolved: bool = False,
+    search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
 ):
-    items = await admin_reconciliation_service.list_failures(
-        db, resolved=resolved, limit=limit
+    page = await admin_reconciliation_service.list_failures(
+        db, resolved=resolved, search=search, limit=limit, cursor=cursor
     )
     return {
-        "items": items,
+        **page,
         "summary": await admin_reconciliation_service.summary(db),
     }
 
@@ -605,11 +591,12 @@ async def resolve_failed_webhook(
 async def settlement(
     request: Request,
     limit: int = Query(100, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_FINANCE_READ)),
 ):
     return {
-        "refunds": await admin_settlement_service.refunds(db, limit=limit),
+        "refunds": await admin_settlement_service.refunds(db, limit=limit, cursor=cursor),
         "payouts": await admin_settlement_service.payouts(db, limit=limit),
         "cash": await admin_settlement_service.cash_exposure(db),
     }

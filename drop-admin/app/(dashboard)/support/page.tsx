@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils/cn";
 import { formatDuration, formatNumber, timeAgo } from "@/lib/utils/format";
 import { NoAccess } from "@/components/shell/NoAccess";
 import { pageAccess } from "@/lib/page-access";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 
 export const metadata = { title: "Support" };
 
@@ -50,13 +53,7 @@ const FIRST_REPLY_TARGET_HOURS = 4;
 export default async function SupportPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    view?: string;
-    q?: string;
-    priority?: string;
-    category?: string;
-    requester?: string;
-  }>;
+  searchParams: Promise<SearchParams>;
 }) {
   // Gated on the capability `nav-config` declares for `/support` — the
   // same declaration that hides this entry in the sidebar, so the two can
@@ -65,22 +62,25 @@ export default async function SupportPage({
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
 
-  const {
-    view = "open",
-    q = "",
-    priority = "",
-    category = "",
-    requester = "",
-  } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const text = (name: string) =>
+    typeof params[name] === "string" ? (params[name] as string) : "";
+  const view = text("view");
+  const q = state.q;
+  const priority = text("priority");
+  const category = text("category");
+  const requester = text("requester");
   const active = VIEWS.find((v) => v.key === view)?.key ?? "open";
 
-  const query = new URLSearchParams({ status: active, limit: "100" });
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ status: active, limit: String(state.per) });
+  if (q) query.set("search", q);
   if (priority) query.set("priority", priority);
   if (category) query.set("category", category);
   if (requester) query.set("requester_type", requester);
+  if (state.cursor) query.set("cursor", state.cursor);
 
-  let data: { items: Ticket[] };
+  let data: { items: Ticket[]; next_cursor: string | null };
   let counts: Record<string, number>;
   let stats: QueueStats = {};
   // Categories come from the backend rather than a copy here, so the filter
@@ -91,7 +91,9 @@ export default async function SupportPage({
   };
   try {
     [data, counts, stats, meta] = await Promise.all([
-      get<{ items: Ticket[] }>(`/api/admin/support/tickets?${query.toString()}`),
+      get<{ items: Ticket[]; next_cursor: string | null }>(
+        `/api/admin/support/tickets?${query.toString()}`,
+      ),
       get<Record<string, number>>("/api/admin/support/counts"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
       get<{ categories: string[]; priorities: string[] }>(
@@ -102,6 +104,14 @@ export default async function SupportPage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the support queue" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/support",
+    filters: { view: active, q, priority, category, requester },
+    state,
+    nextCursor: data.next_cursor,
+    count: data.items.length,
+  });
 
   const unanswered = data.items.filter(
     (ticket) => ticket.awaiting_first_reply && (ticket.age_hours ?? 0) > FIRST_REPLY_TARGET_HOURS,
@@ -194,62 +204,46 @@ export default async function SupportPage({
         </ul>
       </nav>
 
-      <form method="GET" className="flex flex-wrap gap-2">
-        <input type="hidden" name="view" value={active} />
-        <label htmlFor="q" className="sr-only">
-          Search subjects
-        </label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder="Search subjects…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <select
-          name="priority"
-          defaultValue={priority}
-          aria-label="Filter by priority"
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          <option value="">Any priority</option>
-          <option value="urgent">Urgent</option>
-          <option value="high">High</option>
-          <option value="normal">Normal</option>
-          <option value="low">Low</option>
-        </select>
-        <select
-          name="category"
-          defaultValue={category}
-          aria-label="Filter by category"
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          <option value="">Any subject</option>
-          {meta.categories.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <select
-          name="requester"
-          defaultValue={requester}
-          aria-label="Filter by who raised it"
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          <option value="">Anyone</option>
-          <option value="customer">Customers</option>
-          <option value="rider">Riders</option>
-          <option value="vendor">Stores</option>
-        </select>
-        <button
-          type="submit"
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
-        >
-          Search
-        </button>
-      </form>
-
+      <TableToolbar
+        placeholder="Search subject, assignee or ticket id"
+        keep={{ view: active }}
+        filters={[
+          {
+            name: "priority",
+            label: "Filter by priority",
+            value: priority,
+            options: [
+              { value: "", label: "Any priority" },
+              { value: "urgent", label: "Urgent" },
+              { value: "high", label: "High" },
+              { value: "normal", label: "Normal" },
+              { value: "low", label: "Low" },
+            ],
+          },
+          {
+            name: "category",
+            label: "Filter by category",
+            value: category,
+            // From the backend rather than a copy here, so the filter cannot
+            // offer one `create_ticket` would silently rewrite to "other".
+            options: [
+              { value: "", label: "Any subject" },
+              ...meta.categories.map((name) => ({ value: name, label: name })),
+            ],
+          },
+          {
+            name: "requester",
+            label: "Filter by who raised it",
+            value: requester,
+            options: [
+              { value: "", label: "Anyone" },
+              { value: "customer", label: "Customers" },
+              { value: "rider", label: "Riders" },
+              { value: "vendor", label: "Stores" },
+            ],
+          },
+        ]}
+      >
       {data.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -312,6 +306,23 @@ export default async function SupportPage({
           })}
         </ul>
       )}
+
+      <Card>
+        <Pagination
+          links={links}
+          noun="tickets"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/support", {
+            view: active,
+            q,
+            priority,
+            category,
+            requester,
+          })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

@@ -30,6 +30,8 @@ from typing import Any
 from sqlalchemy import Float, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from utils import keyset
+
 from models.product_model import Product
 from models.vendor_model import Vendor
 
@@ -166,11 +168,10 @@ async def list_products(
     search: str | None = None,
     view: str = "all",
     limit: int = 100,
-) -> list[dict[str, Any]]:
-    query = (
-        select(Product, Vendor.business_name)
-        .outerjoin(Vendor, Product.vendor_id == Vendor.id)
-        .order_by(Product.created_at.desc())
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    query = select(Product, Vendor.business_name).outerjoin(
+        Vendor, Product.vendor_id == Vendor.id
     )
 
     if view == "out_of_stock":
@@ -188,9 +189,11 @@ async def list_products(
         term = f"%{search.strip()}%"
         query = query.where(or_(Product.name.ilike(term), Vendor.business_name.ilike(term)))
 
-    rows = (await db.execute(query.limit(limit))).all()
+    order = keyset.Order(Product.created_at, Product.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.all(), limit, order)
 
-    return [
+    items = [
         {
             "id": str(product.id),
             "name": product.name,
@@ -209,6 +212,7 @@ async def list_products(
         }
         for product, vendor_name in rows
     ]
+    return {"items": items, "next_cursor": next_cursor}
 
 
 async def set_availability(db: AsyncSession, product_id, listed: bool) -> Product | None:

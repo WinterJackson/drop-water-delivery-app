@@ -17,6 +17,7 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_VENDORS_APPROVE, PERM_VENDORS_READ
 from services import admin_catalogue_service, admin_service
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +31,15 @@ async def catalogue(
     view: str = Query("all", pattern="^(all|out_of_stock|low_stock|hidden)$"),
     search: str | None = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_VENDORS_READ)),
 ):
+    page = await admin_catalogue_service.list_products(
+        db, search=search, view=view, limit=limit, cursor=cursor
+    )
     return {
-        "items": await admin_catalogue_service.list_products(
-            db, search=search, view=view, limit=limit
-        ),
+        **page,
         "summary": await admin_catalogue_service.summary(db),
         "outliers": await admin_catalogue_service.price_outliers(db),
     }

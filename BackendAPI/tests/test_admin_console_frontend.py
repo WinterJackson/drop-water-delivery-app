@@ -801,3 +801,135 @@ def test_a_customised_setting_states_what_the_platform_ships():
         "it is previewed and saved with a reason like any other change"
     )
 
+
+# ── Lists, and the three things every one of them must do ─────────────────
+#
+# Nineteen list screens were written independently and drifted into three
+# distinct defects: seventeen of them discarded the `next_cursor` the API was
+# already returning and silently showed the first page as if it were the whole
+# table; six had a search box, each one a full-page GET form with a submit
+# button; and the filters were tabs, selects or nothing depending on the screen.
+# These keep all three from coming back one page at a time.
+
+
+def _list_pages() -> list[pathlib.Path]:
+    """Dashboard pages that read paginated state.
+
+    Identified by their use of `readPageState` rather than by a hand-kept list —
+    a list of filenames in a test is a list that rots the first time somebody
+    adds a screen and does not think to update it.
+    """
+    return [
+        path
+        for path in _sources("app/(dashboard)/**/page.tsx")
+        if "readPageState" in path.read_text()
+    ]
+
+
+def test_every_list_page_actually_pages():
+    """A page that reads pagination state must render a pager.
+
+    Reading `readPageState` and then never rendering `<Pagination>` is the
+    original defect in a new costume: the cursor is parsed, the page size is
+    honoured, and the person still has no way to reach row 26.
+    """
+    missing = [
+        path.relative_to(ADMIN).as_posix()
+        for path in _list_pages()
+        if "<Pagination" not in path.read_text()
+    ]
+    assert not missing, (
+        "these list pages read pagination state but render no pager, so only "
+        f"the first page is reachable: {missing}"
+    )
+
+
+def test_a_paged_request_always_asks_for_the_page_it_is_showing():
+    """`limit` and `cursor` both have to reach the API.
+
+    Sending neither leaves the backend on its own default and pinned to page 1 —
+    which is exactly what every one of these screens did before. Sending `limit`
+    without `cursor` is worse than it looks: the page-size control appears to
+    work while Next silently re-serves the first rows.
+    """
+    incomplete = []
+    for path in _list_pages():
+        source = path.read_text()
+        if "limit" not in source or "cursor" not in source:
+            incomplete.append(path.relative_to(ADMIN).as_posix())
+    assert not incomplete, (
+        "these pages parse pagination state but never send `limit` and `cursor` "
+        f"to the API: {incomplete}"
+    )
+
+
+def test_no_list_page_hand_rolls_its_own_search_form():
+    """Search goes through `TableToolbar`, not a per-page GET form.
+
+    The hand-written forms are why searching meant type, click Search, wait for
+    a full document navigation. They also each spelled the reset differently, so
+    searching from page 3 kept the page-3 cursor and searched the wrong slice.
+    """
+    offenders = []
+    for path in _sources("app/(dashboard)/**/*.tsx"):
+        source = path.read_text()
+        if 'method="GET"' in source and "TableToolbar" not in source:
+            offenders.append(path.relative_to(ADMIN).as_posix())
+    assert not offenders, (
+        "these render their own GET search form instead of `TableToolbar`: "
+        f"{offenders}"
+    )
+
+
+def test_the_toolbar_resets_the_cursor_when_the_query_changes():
+    """A new search must start at page 1.
+
+    A keyset cursor is a value comparison, not an index, so carrying a stale one
+    into a different result set does not error — it lands somewhere plausible in
+    the middle of the new results, which is the worst of the three things it
+    could do. `TableToolbar.commit` therefore rebuilds the query string from
+    `keep` and the filters and never copies `cursor` or `back` across.
+    """
+    toolbar = (ADMIN / "components/table/TableToolbar.tsx").read_text()
+    commit = toolbar[toolbar.index("const commit ="):]
+    commit = commit[: commit.index("const timer")]
+    for carried in ("cursor", "back"):
+        assert carried not in commit, (
+            f"`TableToolbar.commit` carries `{carried}` into the new query; a "
+            "changed search or filter must return to the first page"
+        )
+
+
+def test_the_mobile_layout_can_page_too():
+    """A pager inside a `md:`-only table does not exist on a phone.
+
+    Several of these screens render a table above `md` and a stack of cards
+    below it. A pager placed inside the table's own card is invisible at exactly
+    the width where it matters most, because fewer rows fit on the screen.
+    """
+    offenders = []
+    for path in _list_pages():
+        source = path.read_text()
+        if "md:hidden" not in source:
+            continue  # no separate card layout, so nothing to miss
+        marker = 'className="hidden overflow-hidden md:block"'
+        if marker not in source:
+            continue  # the table is not desktop-only, so its pager is not either
+
+        # Where the pager is actually *rendered*, not where the component is
+        # named. Several pages build it once into a `pager` constant and render
+        # it twice; counting `<Pagination` alone reports those as having one.
+        sites = [i for i in range(len(source)) if source.startswith("<Pagination", i)]
+        if "const pager" in source:
+            sites += [i for i in range(len(source)) if source.startswith("{pager}", i)]
+
+        # Reachable below `md` if it is rendered more than once, or rendered
+        # before the desktop-only table begins — a pager above the table is
+        # still a pager on a phone.
+        desktop_starts = source.index(marker)
+        if len(sites) < 2 and not any(site < desktop_starts for site in sites):
+            offenders.append(path.relative_to(ADMIN).as_posix())
+    assert not offenders, (
+        "these render their only pager inside a desktop-only table, so the card "
+        f"layout below `md` cannot be paged: {offenders}"
+    )

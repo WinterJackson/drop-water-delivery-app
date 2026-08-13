@@ -57,6 +57,11 @@ from models.order_model import Order
 from models.order_tracking_log_model import OrderTrackingLog
 from models.user_model import User
 from models.vendor_model import Vendor
+from utils import keyset
+
+#: An order a human is arguing about. Named once — it was written out twice in
+#: `tracked_orders` alone, in the filter and again in the row it serialises.
+DISPUTED_STATUSES = ("pending_review", "mismatch_pending")
 
 #: Within this of the delivery coordinates counts as "at the door". Consumer GPS
 #: is good to 20–50 m in the open and considerably worse between buildings, so
@@ -221,7 +226,9 @@ async def replay(db: AsyncSession, order_id: UUID) -> dict[str, Any] | None:
     }
 
 
-async def tracked_orders(db: AsyncSession, *, limit: int = 50) -> list[dict[str, Any]]:
+async def tracked_orders(
+    db: AsyncSession, *, limit: int = 50, cursor: str | None = None, search: str | None = None
+) -> dict[str, Any]:
     """Orders worth replaying: the contested ones first, then anything tracked.
 
     A list of every order with a breadcrumb is not useful — the screen exists for
@@ -236,13 +243,19 @@ async def tracked_orders(db: AsyncSession, *, limit: int = 50) -> list[dict[str,
         .subquery()
     )
 
-    rows = (
-        await db.execute(
+    # The rank column is *selected*, not merely ordered by, so the cursor can
+    # carry it. A page boundary in a ranked list has to encode the rank as well
+    # as the timestamp, or paging past the last disputed order lands back in the
+    # middle of them.
+    disputed = Order.order_status.in_(DISPUTED_STATUSES).label("disputed")
+
+    query = (
             select(
                 Order,
                 Deliverer.name,
                 User.full_name,
                 func.coalesce(counts.c.points, 0).label("points"),
+                disputed,
             )
             .outerjoin(counts, counts.c.order_id == Order.id)
             .outerjoin(Deliverer, Deliverer.id == Order.deliverer_id)
@@ -250,19 +263,33 @@ async def tracked_orders(db: AsyncSession, *, limit: int = 50) -> list[dict[str,
             .where(
                 or_(
                     counts.c.points.isnot(None),
-                    Order.order_status.in_(("pending_review", "mismatch_pending")),
+                    Order.order_status.in_(DISPUTED_STATUSES),
                 )
             )
-            .order_by(
-                # Disputed first — that is what somebody came here to settle.
-                Order.order_status.in_(("pending_review", "mismatch_pending")).desc(),
-                Order.created_at.desc(),
-            )
-            .limit(limit)
-        )
-    ).all()
+    )
 
-    return [
+    if search and search.strip():
+        term = search.strip()
+        clauses = [
+            Order.delivery_address.ilike(f"%{term}%"),
+            Deliverer.name.ilike(f"%{term}%"),
+            User.full_name.ilike(f"%{term}%"),
+        ]
+        try:
+            clauses.append(Order.id == UUID(term))
+        except ValueError:
+            pass
+        query = query.where(or_(*clauses))
+
+    # Disputed first — that is what somebody came here to settle.
+    ranking = keyset.Order(disputed, Order.created_at, Order.id)
+    rows, next_cursor = keyset.split(
+        (await db.execute(keyset.seek(query, ranking, cursor).limit(limit + 1))).all(),
+        limit,
+        ranking,
+    )
+
+    items = [
         {
             "id": str(order.id),
             "status": order.order_status,
@@ -270,9 +297,10 @@ async def tracked_orders(db: AsyncSession, *, limit: int = 50) -> list[dict[str,
             "rider": rider_name,
             "customer": customer_name,
             "points": int(points or 0),
-            "disputed": order.order_status in ("pending_review", "mismatch_pending"),
+            "disputed": bool(is_disputed),
             "has_proof": bool(order.proof_url),
             "created_at": order.created_at.isoformat() if order.created_at else None,
         }
-        for order, rider_name, customer_name, points in rows
+        for order, rider_name, customer_name, points, is_disputed in rows
     ]
+    return {"items": items, "next_cursor": next_cursor}

@@ -2,6 +2,9 @@ import { AlarmClock, CheckCircle2, FileWarning, ShieldAlert, Wallet } from "luci
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -59,17 +62,26 @@ type Summary = {
 export default async function ReconciliationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { view = "open" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const view = typeof params.view === "string" ? params.view : "open";
   const resolved = view === "resolved";
 
-  let data: { items: Failure[]; summary: Summary };
+  const query = new URLSearchParams({
+    resolved: String(resolved),
+    limit: String(state.per),
+  });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
+
+  let data: { items: Failure[]; next_cursor: string | null; summary: Summary };
   let me: AdminMe;
   try {
     [data, me] = await Promise.all([
-      get<{ items: Failure[]; summary: Summary }>(
-        `/api/admin/reconciliation/webhooks?resolved=${resolved}`,
+      get<{ items: Failure[]; next_cursor: string | null; summary: Summary }>(
+        `/api/admin/reconciliation/webhooks?${query.toString()}`,
       ),
       get<AdminMe>("/api/admin/me"),
     ]);
@@ -180,6 +192,10 @@ export default async function ReconciliationPage({
         </ul>
       </nav>
 
+      <TableToolbar
+        placeholder="Search the error text or the callback payload"
+        keep={{ view }}
+      >
       {items.length === 0 ? (
         <Card>
           <EmptyState
@@ -201,6 +217,23 @@ export default async function ReconciliationPage({
           ))}
         </ul>
       )}
+
+      <Card>
+        <Pagination
+          links={pageLinks({
+            pathname: "/finance/reconciliation",
+            filters: { view, q: state.q },
+            state,
+            nextCursor: data.next_cursor,
+            count: items.length,
+          })}
+          noun="failed callbacks"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/finance/reconciliation", { view, q: state.q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

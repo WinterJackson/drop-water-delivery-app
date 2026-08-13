@@ -20,6 +20,7 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_ANALYTICS_READ, PERM_RIDERS_READ
 from services import admin_fleet_service, admin_notification_service
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,9 @@ router = APIRouter()
 async def fleet(
     request: Request,
     status: str | None = Query(None, pattern="^(pending|approved|rejected|suspended)$"),
+    search: str | None = Query(None, max_length=120),
     limit: int = Query(200, ge=1, le=400),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_RIDERS_READ)),
 ):
@@ -45,7 +48,9 @@ async def fleet(
         "summary": await admin_fleet_service.summary(db),
         "vendors_without_riders": await admin_fleet_service.vendors_without_riders(db),
         "pending": await admin_fleet_service.pending_requests(db),
-        "links": await admin_fleet_service.links(db, status=status, limit=limit),
+        "links": await admin_fleet_service.links(
+            db, status=status, search=search, limit=limit, cursor=cursor
+        ),
         "unattached": await admin_fleet_service.unattached_riders(db),
     }
 
@@ -56,7 +61,10 @@ async def notifications(
     request: Request,
     days: int = Query(30, ge=1, le=180),
     audience: str | None = Query(None, pattern="^(customer|rider|vendor)$"),
+    search: str | None = Query(None, max_length=120),
+    message_type: str | None = Query(None, max_length=60),
     limit: int = Query(100, ge=1, le=200),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_ANALYTICS_READ)),
 ):
@@ -73,5 +81,12 @@ async def notifications(
         "by_type": await admin_notification_service.by_type(db, days=days),
         "by_audience": await admin_notification_service.by_audience(db, days=days),
         "by_channel": await admin_notification_service.by_channel(db, days=days),
-        "recent": await admin_notification_service.recent(db, limit=limit, audience=audience),
+        "recent": await admin_notification_service.recent(
+            db,
+            limit=limit,
+            audience=audience,
+            search=search,
+            message_type=message_type,
+            cursor=cursor,
+        ),
     }

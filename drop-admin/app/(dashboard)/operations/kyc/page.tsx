@@ -1,11 +1,14 @@
 import { AlarmClock, BadgeCheck, GaugeCircle, UserRoundX, Users } from "lucide-react";
 import Link from "next/link";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import type { QueueStats } from "@/lib/queue-stats";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ReviewCard, type QueueRider } from "./ReviewCard";
 
 export const metadata = { title: "Rider verification" };
@@ -21,10 +24,16 @@ const TABS = [
 export default async function KycQueuePage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { status = "pending" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const status = typeof params.status === "string" ? params.status : "pending";
   const active = TABS.find((tab) => tab.key === status)?.key ?? "pending";
+
+  const query = new URLSearchParams({ status: active, limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let queue: Queue;
   let me: AdminMe;
@@ -34,7 +43,7 @@ export default async function KycQueuePage({
   try {
     // Three calls, one round trip each way — they do not depend on each other.
     [queue, me, stats] = await Promise.all([
-      get<Queue>(`/api/admin/kyc/queue?status=${active}`),
+      get<Queue>(`/api/admin/kyc/queue?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
@@ -42,6 +51,14 @@ export default async function KycQueuePage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the verification queue" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/operations/kyc",
+    filters: { status: active, q: state.q },
+    state,
+    nextCursor: queue.next_cursor,
+    count: queue.items.length,
+  });
 
   const canReview = can(me, PERMISSIONS.ridersKycReview);
   const canViewPii = can(me, PERMISSIONS.piiView);
@@ -140,6 +157,10 @@ export default async function KycQueuePage({
         </p>
       ) : null}
 
+      <TableToolbar
+        placeholder="Search by rider name, plate or phone"
+        keep={{ status: active }}
+      >
       {queue.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -169,16 +190,19 @@ export default async function KycQueuePage({
         </div>
       )}
 
-      {queue.next_cursor ? (
-        <div className="flex justify-center">
-          <Link
-            href={`/operations/kyc?status=${active}&cursor=${queue.next_cursor}`}
-            className="rounded-lg border border-default px-4 py-2 text-sm hover:bg-surface-muted"
-          >
-            Load more
-          </Link>
-        </div>
-      ) : null}
+      {/* "Load more" replaced by a real pager. Append-only paging cannot go
+          back, cannot be linked to, and grows the DOM without bound on a queue
+          somebody works through for an hour. */}
+      <Card>
+        <Pagination
+          links={links}
+          noun="riders"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/operations/kyc", { status: active, q: state.q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

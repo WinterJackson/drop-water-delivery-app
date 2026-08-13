@@ -1,5 +1,4 @@
 import { ScrollText } from "lucide-react";
-import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
@@ -7,6 +6,9 @@ import { formatDateTime, formatNumber } from "@/lib/utils/format";
 import type { QueueStats } from "@/lib/queue-stats";
 import { NoAccess } from "@/components/shell/NoAccess";
 import { pageAccess } from "@/lib/page-access";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 
 export const metadata = { title: "Audit log" };
 
@@ -49,12 +51,10 @@ const ACTION_FILTERS = [
   { value: "review", label: "Reviews" },
 ] as const;
 
-const PAGE_SIZE = 50;
-
 export default async function AuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ action?: string; target?: string; cursor?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   // Gated on the capability `nav-config` declares for `/platform/audit` — the
   // same declaration that hides this entry in the sidebar, so the two can
@@ -63,15 +63,19 @@ export default async function AuditPage({
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
 
-  const { action = "", target = "", cursor = "" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const action = typeof params.action === "string" ? params.action : "";
+  const target = typeof params.target === "string" ? params.target.trim() : "";
 
   // Every one of these was already supported by the endpoint and none of them
   // was ever sent. The screen that answers "who opened this person's national
   // ID" was capped at the newest fifty rows of everything, with no way to ask.
-  const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  const query = new URLSearchParams({ limit: String(state.per) });
   if (action) query.set("action", action);
-  if (target.trim()) query.set("target_id", target.trim());
-  if (cursor) query.set("cursor", cursor);
+  if (target) query.set("target_id", target);
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let log: { items: Entry[]; next_cursor: string | null };
   let stats: QueueStats = {};
@@ -87,11 +91,14 @@ export default async function AuditPage({
     return <ErrorState title="Couldn't load the audit log" detail={message} />;
   }
 
-  const filtered = Boolean(action || target.trim());
-  const nextQuery = new URLSearchParams();
-  if (action) nextQuery.set("action", action);
-  if (target.trim()) nextQuery.set("target", target.trim());
-  if (log.next_cursor) nextQuery.set("cursor", log.next_cursor);
+  const filtered = Boolean(action || target || state.q);
+  const links = pageLinks({
+    pathname: "/platform/audit",
+    filters: { action, target, q: state.q },
+    state,
+    nextCursor: log.next_cursor,
+    count: log.items.length,
+  });
 
   return (
     <div className="space-y-6">
@@ -151,48 +158,21 @@ export default async function AuditPage({
         </section>
       ) : null}
 
-      <form method="GET" className="flex flex-wrap gap-2">
-        <label htmlFor="audit-action" className="sr-only">
-          Filter by what was done
-        </label>
-        <select
-          id="audit-action"
-          name="action"
-          defaultValue={action}
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          {ACTION_FILTERS.map((option) => (
-            <option key={option.value || "all"} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <label htmlFor="audit-target" className="sr-only">
-          Filter by what it was done to
-        </label>
-        <input
-          id="audit-target"
-          name="target"
-          defaultValue={target}
-          placeholder="Target id — a rider, an order, a ticket…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 font-mono text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
-        >
-          Search
-        </button>
-        {filtered ? (
-          <Link
-            href="/platform/audit"
-            className="inline-flex items-center rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-muted"
-          >
-            Clear
-          </Link>
-        ) : null}
-      </form>
-
+      <TableToolbar
+        placeholder="Search by administrator, reason or target id"
+        keep={{ target }}
+        filters={[
+          {
+            name: "action",
+            label: "Filter by what was done",
+            value: action,
+            options: ACTION_FILTERS.map((option) => ({
+              value: option.value,
+              label: option.label,
+            })),
+          },
+        ]}
+      >
       {log.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -245,26 +225,16 @@ export default async function AuditPage({
         </Card>
       )}
 
-      {log.next_cursor ? (
-        <div className="flex justify-center">
-          {/* Keyset, not offset — this table only grows, and the cursor is the
-              id of the last row on the page. Without this the log stopped at
-              the newest fifty entries and older ones were simply unreachable. */}
-          <Link
-            href={`/platform/audit?${nextQuery.toString()}`}
-            className="rounded-lg border border-default px-4 py-2 text-sm hover:bg-surface-muted"
-          >
-            Older entries
-          </Link>
-        </div>
-      ) : cursor ? (
-        <p className="text-center text-sm text-muted">
-          That is the end of the log.{" "}
-          <Link href="/platform/audit" className="underline underline-offset-4">
-            Back to the newest
-          </Link>
-        </p>
-      ) : null}
+      <Card>
+        <Pagination
+          links={links}
+          noun="entries"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/platform/audit", { action, target, q: state.q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

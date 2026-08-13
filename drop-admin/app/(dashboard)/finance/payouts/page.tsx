@@ -1,11 +1,14 @@
 import { AlarmClock, Banknote, CircleAlert, TrendingUp, Wallet } from "lucide-react";
 import Link from "next/link";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import type { QueueStats } from "@/lib/queue-stats";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { PayoutCard, PayoutRow, type Payout } from "./PayoutRow";
 
 export const metadata = { title: "Payouts" };
@@ -22,10 +25,16 @@ const TABS = [
 export default async function PayoutsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { status = "pending" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const status = typeof params.status === "string" ? params.status : "pending";
   const active = TABS.find((tab) => tab.key === status)?.key ?? "pending";
+
+  const query = new URLSearchParams({ status: active, limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let list: PayoutList;
   let me: AdminMe;
@@ -34,7 +43,7 @@ export default async function PayoutsPage({
   let stats: QueueStats = {};
   try {
     [list, me, stats] = await Promise.all([
-      get<PayoutList>(`/api/admin/payouts?status=${active}`),
+      get<PayoutList>(`/api/admin/payouts?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
@@ -42,6 +51,22 @@ export default async function PayoutsPage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load payouts" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/finance/payouts",
+    filters: { status: active, q: state.q },
+    state,
+    nextCursor: list.next_cursor,
+    count: list.items.length,
+  });
+  const pager = (
+    <Pagination
+      links={links}
+      noun="payouts"
+      perPage={state.per}
+      sizeHref={sizeHrefFactory("/finance/payouts", { status: active, q: state.q })}
+    />
+  );
 
   const canDecide = can(me, PERMISSIONS.financePayoutApprove);
   const canSeeDestination = can(me, PERMISSIONS.piiView);
@@ -145,6 +170,10 @@ export default async function PayoutsPage({
         </p>
       ) : null}
 
+      <TableToolbar
+        placeholder="Search by M-Pesa receipt, failure reason or provider id"
+        keep={{ status: active }}
+      >
       {list.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -194,9 +223,14 @@ export default async function PayoutsPage({
                 </tbody>
               </table>
             </div>
+            {pager}
           </Card>
+
+          {/* The table is not rendered below `md`, so its pager is not either. */}
+          <Card className="md:hidden">{pager}</Card>
         </>
       )}
+      </TableToolbar>
     </div>
   );
 }

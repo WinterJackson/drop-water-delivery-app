@@ -2,6 +2,8 @@ import { AlertTriangle, Banknote, HandCoins, RotateCcw, Wallet } from "lucide-re
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -58,6 +60,9 @@ type Payload = {
       refunded_amount: string;
     };
     items: RefundItem[];
+    next_cursor: string | null;
+    /** Every outstanding refund — the summary above counts them all. */
+    total: number;
   };
   payouts: {
     summary: {
@@ -96,12 +101,20 @@ const REFUND_LABEL: Record<string, string> = {
   refund_failed: "Failed",
 };
 
-export default async function SettlementPage() {
+export default async function SettlementPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const state = readPageState(await searchParams);
+  const query = new URLSearchParams({ limit: String(state.per) });
+  if (state.cursor) query.set("cursor", state.cursor);
+
   let data: Payload;
   let me: AdminMe;
   try {
     [data, me] = await Promise.all([
-      get<Payload>("/api/admin/settlement"),
+      get<Payload>(`/api/admin/settlement?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
     ]);
   } catch (error) {
@@ -266,6 +279,23 @@ export default async function SettlementPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Only the outstanding-refund list is paged. The payout panels below
+              are exception lists whose counts are already stated in full beside
+              them, and a healthy platform reads zero on every one. */}
+          <Pagination
+            links={pageLinks({
+              pathname: "/finance/settlement",
+              filters: {},
+              state,
+              nextCursor: refunds.next_cursor,
+              count: refunds.items.length,
+            })}
+            noun="outstanding refunds"
+            total={refunds.total}
+            perPage={state.per}
+            sizeHref={sizeHrefFactory("/finance/settlement", {})}
+          />
         </Card>
       )}
 

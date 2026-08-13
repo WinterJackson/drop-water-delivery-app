@@ -25,6 +25,7 @@ from models.deliverer_model import Deliverer, KYCStatus
 from models.order_model import Order
 from models.user_model import User
 from models.vendor_model import Vendor
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -112,16 +113,11 @@ async def list_people(
     search: str | None = None,
     status: str | None = None,
     limit: int = 50,
-    cursor: UUID | None = None,
+    cursor: str | None = None,
 ) -> dict:
-    """Keyset pagination, newest first. Never OFFSET.
-
-    OFFSET degrades precisely when a table grows large enough for pagination to
-    matter, and it skips or repeats rows when the underlying set changes between
-    pages — which it does constantly on a live platform.
-    """
+    """Keyset pagination, newest first — see `utils/keyset.py` for why never OFFSET."""
     model = MODELS[kind]
-    query = select(model).order_by(model.created_at.desc(), model.id.desc())
+    query = select(model)
 
     if search and search.strip():
         query = query.where(_search_filter(model, search))
@@ -138,17 +134,9 @@ async def list_people(
         # verification queue filters on this to answer "who is still waiting".
         query = query.where(Vendor.verification_status == status)
 
-    if cursor:
-        anchor = await session.get(model, cursor)
-        if anchor is not None:
-            query = query.where(
-                (model.created_at < anchor.created_at)
-                | ((model.created_at == anchor.created_at) & (model.id < anchor.id))
-            )
-
-    rows = (await session.execute(query.limit(limit + 1))).scalars().all()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    order = keyset.Order(model.created_at, model.id)
+    result = await session.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
 
     if kind == "vendor":
         from services import vendor_availability
@@ -157,7 +145,7 @@ async def list_people(
 
     return {
         "items": [summarise(row, kind) for row in rows],
-        "next_cursor": str(rows[-1].id) if has_more and rows else None,
+        "next_cursor": next_cursor,
     }
 
 

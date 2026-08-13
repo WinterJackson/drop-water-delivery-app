@@ -1,11 +1,14 @@
 import { AlarmClock, BadgeCheck, Store, StoreIcon } from "lucide-react";
 import Link from "next/link";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
 import { formatDuration, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
 import type { QueueStats } from "@/lib/queue-stats";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { VerificationCard, type QueueVendor } from "./VerificationCard";
 
 export const metadata = { title: "Vendor verification" };
@@ -21,17 +24,25 @@ type View = keyof typeof VIEWS;
 export default async function VendorVerificationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const view: View = params.view && params.view in VIEWS ? (params.view as View) : "pending";
+  const state = readPageState(params);
+  const raw = typeof params.view === "string" ? params.view : "";
+  const view: View = raw && raw in VIEWS ? (raw as View) : "pending";
 
-  let data: { items: QueueVendor[] };
+  const query = new URLSearchParams({ status: view, limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
+
+  let data: { items: QueueVendor[]; next_cursor: string | null };
   let me: AdminMe;
   let stats: QueueStats = {};
   try {
     [data, me, stats] = await Promise.all([
-      get<{ items: QueueVendor[] }>(`/api/admin/people/vendors?status=${view}&limit=100`),
+      get<{ items: QueueVendor[]; next_cursor: string | null }>(
+        `/api/admin/people/vendors?${query.toString()}`,
+      ),
       get<AdminMe>("/api/admin/me"),
       get<QueueStats>("/api/admin/queues/stats").catch(() => ({})),
     ]);
@@ -39,6 +50,14 @@ export default async function VendorVerificationPage({
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the verification queue" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/operations/vendors",
+    filters: { view, q: state.q },
+    state,
+    nextCursor: data.next_cursor,
+    count: data.items.length,
+  });
 
   const canApprove = can(me, PERMISSIONS.vendorsApprove);
   const vendors = stats.vendor_verification;
@@ -134,6 +153,10 @@ export default async function VendorVerificationPage({
 
       <p className="text-sm text-muted">{VIEWS[view].blurb}</p>
 
+      <TableToolbar
+        placeholder="Search stores by name, owner, email or phone"
+        keep={{ view }}
+      >
       {data.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -157,6 +180,17 @@ export default async function VendorVerificationPage({
           ))}
         </div>
       )}
+
+      <Card>
+        <Pagination
+          links={links}
+          noun="stores"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/operations/vendors", { view, q: state.q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

@@ -27,8 +27,10 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from utils import keyset
 from sqlalchemy.orm.attributes import flag_modified
 
 from models.deliverer_model import Deliverer
@@ -141,13 +143,16 @@ async def list_tickets(
     requester_type: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = 50,
+    cursor: Optional[str] = None,
 ) -> dict:
     """The queue. Oldest first, because the point is that nothing rots.
 
     Newest-first is the wrong default for a work queue: it buries the ticket
-    that has been waiting three days under the one raised a minute ago.
+    that has been waiting three days under the one raised a minute ago. The
+    paging runs in the same direction, so "next" is older-still rather than a
+    jump back to the top of a list sorted the other way.
     """
-    query = select(SupportTicket).order_by(SupportTicket.created_at.asc()).limit(limit)
+    query = select(SupportTicket)
 
     if status == "open":
         query = query.where(SupportTicket.status.in_(OPEN_STATUSES))
@@ -162,9 +167,22 @@ async def list_tickets(
         query = query.where(SupportTicket.requester_type == requester_type)
     if search and search.strip():
         like = f"%{search.strip()}%"
-        query = query.where(SupportTicket.subject.ilike(like))
+        # The subject, plus whoever it was handed to — "everything assigned to
+        # me" is the query a support lead runs most and there was no filter for
+        # it. The ticket id matters because that is what a customer quotes back.
+        clauses = [
+            SupportTicket.subject.ilike(like),
+            SupportTicket.assigned_admin_email.ilike(like),
+        ]
+        try:
+            clauses.append(SupportTicket.id == UUID(search.strip()))
+        except ValueError:
+            pass
+        query = query.where(or_(*clauses))
 
-    rows = (await session.execute(query)).scalars().all()
+    order = keyset.Order(SupportTicket.created_at, SupportTicket.id, descending=False)
+    result = await session.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
     now = datetime.now(timezone.utc)
 
     return {
@@ -198,7 +216,8 @@ async def list_tickets(
                 "awaiting_us": _awaiting_us(ticket),
             }
             for ticket in rows
-        ]
+        ],
+        "next_cursor": next_cursor,
     }
 
 

@@ -14,16 +14,18 @@ Two rules hold this together:
 """
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.admin_model import (
     ALL_PERMISSIONS,
     PERM_ADMINS_MANAGE,
+    PERM_FINANCE_ADJUST,
+    PERM_PII_VIEW,
     PERMISSION_GROUPS,
     PERMISSION_LABELS,
     ROLE_DESCRIPTIONS,
@@ -35,6 +37,8 @@ from models.admin_model import (
     normalise_permissions,
     permissions_for_role,
 )
+
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -92,19 +96,24 @@ async def list_audit(
     session: AsyncSession,
     *,
     limit: int = 50,
-    before_id: UUID | None = None,
+    cursor: str | None = None,
     admin_id: UUID | None = None,
     action: str | None = None,
     target_id: str | None = None,
-) -> list[dict]:
+    search: str | None = None,
+) -> dict:
     """Newest first, keyset-paginated on `created_at`.
 
     Keyset rather than OFFSET: this table only grows, and OFFSET degrades
     exactly when the log becomes large enough to be worth reading.
+
+    Returns the same `items` / `next_cursor` envelope as every other admin
+    list, rather than a bare list the route then has to guess a cursor from.
+    It guessed with `len(items) == limit`, which offers a Next page whenever
+    the last page happens to be exactly full — and the log is read precisely
+    when somebody is trying to establish that they have seen everything.
     """
-    query = select(AdminAuditLog).order_by(
-        AdminAuditLog.created_at.desc(), AdminAuditLog.id.desc()
-    )
+    query = select(AdminAuditLog)
 
     if admin_id:
         query = query.where(AdminAuditLog.admin_id == admin_id)
@@ -112,19 +121,25 @@ async def list_audit(
         query = query.where(AdminAuditLog.action.startswith(action))
     if target_id:
         query = query.where(AdminAuditLog.target_id == str(target_id))
-    if before_id:
-        anchor = await session.get(AdminAuditLog, before_id)
-        if anchor is not None:
-            query = query.where(
-                (AdminAuditLog.created_at < anchor.created_at)
-                | (
-                    (AdminAuditLog.created_at == anchor.created_at)
-                    & (AdminAuditLog.id < anchor.id)
-                )
-            )
 
-    result = await session.execute(query.limit(min(limit, 200)))
-    return [serialize_audit(row) for row in result.scalars().all()]
+    # Who did it, and why they said they did. `reason` is mandatory on every
+    # audited action, so it is the one free-text field that is always there.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                AdminAuditLog.admin_email.ilike(like),
+                AdminAuditLog.reason.ilike(like),
+                AdminAuditLog.target_id.ilike(like),
+            )
+        )
+
+    order = keyset.Order(AdminAuditLog.created_at, AdminAuditLog.id)
+    result = await session.execute(
+        keyset.seek(query, order, cursor).limit(min(limit, 200) + 1)
+    )
+    rows, next_cursor = keyset.split(result.scalars().all(), min(limit, 200), order)
+    return {"items": [serialize_audit(row) for row in rows], "next_cursor": next_cursor}
 
 
 def serialize_audit(entry: AdminAuditLog) -> dict:
@@ -191,13 +206,82 @@ def _clean_email(email: str | None) -> str:
     return email
 
 
-async def list_admins(session: AsyncSession) -> list[dict]:
+async def list_admins(
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    role: str | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> dict:
+    """The roster, paged like every other list.
+
+    This one is genuinely small — administrators are invited, not signed up —
+    and it would work unpaged for a long time. It is paged anyway because "small
+    today" is how every unbounded list starts, and because a roster that behaves
+    differently from every other table is a roster somebody has to think about.
+    """
     result = await session.execute(
         select(AdminUser)
         .where(AdminUser.revoked_at.is_(None))
-        .order_by(AdminUser.created_at.asc())
+        .order_by(AdminUser.created_at.asc(), AdminUser.id.asc())
     )
-    return [serialize_admin(a) for a in result.scalars().all()]
+    everyone = [serialize_admin(a) for a in result.scalars().all()]
+
+    # The access summary is computed over the **whole** roster, before the
+    # filters and before the page. "How many people can reveal a national ID"
+    # is the question an access review asks, and answering it from the visible
+    # page would report a smaller, reassuring number that shrinks further the
+    # moment somebody types in the search box.
+    summary = _roster_summary(everyone)
+
+    rows = everyone
+    if search and search.strip():
+        needle = search.strip().casefold()
+        rows = [
+            row
+            for row in rows
+            if needle in (row["email"] or "").casefold()
+            or needle in (row["name"] or "").casefold()
+        ]
+    if role:
+        rows = [row for row in rows if row["role"] == role]
+
+    return {**keyset.page_list(rows, limit=limit, cursor=cursor), "summary": summary}
+
+
+#: Thirty days without a sign-in, on a console that can reveal a national ID.
+DORMANT_AFTER_DAYS = 30
+
+
+def _roster_summary(everyone: list[dict]) -> dict:
+    """Counts for the access review, over every administrator."""
+    active = [row for row in everyone if row["is_active"]]
+
+    def holding(permission: str) -> int:
+        return sum(1 for row in active if permission in row["permissions"])
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=DORMANT_AFTER_DAYS)
+    dormant = [
+        row
+        for row in active
+        if not row["is_pending"]
+        and row["last_seen_at"]
+        and datetime.fromisoformat(row["last_seen_at"]) < cutoff
+    ]
+
+    return {
+        "total": len(everyone),
+        "active": len(active),
+        "revoked": len(everyone) - len(active),
+        "pii_view": holding(PERM_PII_VIEW),
+        "finance_adjust": holding(PERM_FINANCE_ADJUST),
+        "dormant": len(dormant),
+        "dormant_after_days": DORMANT_AFTER_DAYS,
+        "oldest_dormant_seen_at": min(
+            (row["last_seen_at"] for row in dormant), default=None
+        ),
+    }
 
 
 async def invite_admin(

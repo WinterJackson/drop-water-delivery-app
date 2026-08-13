@@ -2,6 +2,9 @@ import { AlertTriangle, Clock, Package, Scale, Users } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -89,8 +92,12 @@ type Movement = {
 type Payload = {
   summary: Summary;
   holders: Holder[];
+  /** Holding pairs matching the current search — the whole set, not this page. */
+  holders_total: number;
   drift: Drift[];
   movements: Movement[];
+  /** For whichever of the two lists this view is showing. */
+  next_cursor: string | null;
 };
 
 const VIEWS = [
@@ -109,16 +116,22 @@ const MOVEMENT_LABEL: Record<string, string> = {
 export default async function BottlesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { view = "all" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const view = typeof params.view === "string" ? params.view : "all";
   const active = VIEWS.find((v) => v.key === view)?.key ?? "all";
+
+  const query = new URLSearchParams({ view: active, limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let data: Payload;
   let me: AdminMe;
   try {
     [data, me] = await Promise.all([
-      get<Payload>(`/api/admin/bottles?view=${active}`),
+      get<Payload>(`/api/admin/bottles?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
     ]);
   } catch (error) {
@@ -273,12 +286,55 @@ export default async function BottlesPage({
         </ul>
       </nav>
 
-      {active === "movements" ? (
-        <MovementsView movements={movements} />
-      ) : active === "drift" ? (
+      {/* `drift` is a bounded reconciliation report — only pairs that *have* a
+          registry row can drift, and any non-empty result is an incident rather
+          than a list to page through. It takes neither a toolbar nor a pager. */}
+      {active === "drift" ? (
         <DriftView drift={drift} />
       ) : (
-        <HoldersView holders={holders} summary={summary} mayAdjust={mayAdjust} stale={active === "stale"} />
+        <TableToolbar
+          placeholder={
+            active === "movements"
+              ? "Search by rider, store or note"
+              : "Search by rider or store"
+          }
+          keep={{ view: active }}
+        >
+          {active === "movements" ? (
+            <MovementsView movements={movements} />
+          ) : (
+            <HoldersView
+              holders={holders}
+              summary={summary}
+              mayAdjust={mayAdjust}
+              stale={active === "stale"}
+            />
+          )}
+
+          <Card>
+            <Pagination
+              links={pageLinks({
+                pathname: "/operations/bottles",
+                filters: { view: active, q: state.q },
+                state,
+                nextCursor: data.next_cursor,
+                count: active === "movements" ? movements.length : holders.length,
+              })}
+              noun={active === "movements" ? "movements" : "holdings"}
+              // The holder ranking is built whole before it is sliced, so its
+              // count is the size of the result set whether or not a search is
+              // narrowing it — safe to print beside the range either way. The
+              // movement feed is keyset-paged and has no count to offer.
+              total={active === "movements" ? null : data.holders_total}
+              perPage={state.per}
+              sizeHref={sizeHrefFactory("/operations/bottles", {
+                view: active,
+                q: state.q,
+              })}
+              className="border-t-0"
+            />
+          </Card>
+        </TableToolbar>
       )}
 
       {summary.entries_total === 0 ? (

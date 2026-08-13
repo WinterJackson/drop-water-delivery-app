@@ -2,6 +2,9 @@ import { CircleHelp, Footprints, MapPin, Route, TriangleAlert } from "lucide-rea
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber, timeAgo } from "@/lib/utils/format";
 import { ReplayMap, type PathPoint } from "./ReplayMap";
@@ -73,7 +76,7 @@ type Replay = {
 export default async function ReplayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   // Gated on the capability `nav-config` declares for `/operations/replay` — the
   // same declaration that hides this entry in the sidebar, so the two can
@@ -82,12 +85,20 @@ export default async function ReplayPage({
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
 
-  const { order: orderId } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const orderId = typeof params.order === "string" ? params.order : undefined;
 
-  let list: { items: ListItem[] };
+  const query = new URLSearchParams({ limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
+
+  let list: { items: ListItem[]; next_cursor: string | null };
   let replay: Replay | null = null;
   try {
-    list = await get<{ items: ListItem[] }>("/api/admin/orders/replayable");
+    list = await get<{ items: ListItem[]; next_cursor: string | null }>(
+      `/api/admin/orders/replayable?${query.toString()}`,
+    );
     if (orderId) {
       replay = await get<Replay>(`/api/admin/orders/${orderId}/replay`);
     }
@@ -109,6 +120,12 @@ export default async function ReplayPage({
 
       {replay ? <Findings replay={replay} /> : null}
 
+      {/* `order` is kept, so opening a replay and then searching the list does
+          not close the replay somebody is reading. */}
+      <TableToolbar
+        placeholder="Search by address, rider, customer or order id"
+        keep={{ order: orderId }}
+      >
       <Card className="overflow-hidden">
         <div className="border-b border-default px-4 py-3">
           <h2 className="text-sm font-semibold">Orders with a recorded path</h2>
@@ -182,7 +199,24 @@ export default async function ReplayPage({
             </table>
           </div>
         )}
+
+        <Pagination
+          links={pageLinks({
+            pathname: "/operations/replay",
+            filters: { order: orderId, q: state.q },
+            state,
+            nextCursor: list.next_cursor,
+            count: list.items.length,
+          })}
+          noun="tracked orders"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/operations/replay", {
+            order: orderId,
+            q: state.q,
+          })}
+        />
       </Card>
+      </TableToolbar>
     </div>
   );
 }

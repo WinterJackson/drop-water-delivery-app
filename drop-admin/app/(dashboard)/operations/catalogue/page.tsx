@@ -2,6 +2,9 @@ import { Boxes, PackageX, Store, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -63,27 +66,51 @@ const VIEWS = [
 export default async function CataloguePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { view = "all", q = "" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const view = typeof params.view === "string" ? params.view : "all";
+  const q = state.q;
   const active = VIEWS.find((v) => v.key === view)?.key ?? "all";
 
-  const query = new URLSearchParams({ view: active });
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ view: active, limit: String(state.per) });
+  if (q) query.set("search", q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
-  let data: { items: CatalogueItem[]; summary: Summary; outliers: Outlier[] };
+  type CataloguePage = {
+    items: CatalogueItem[];
+    next_cursor: string | null;
+    summary: Summary;
+    outliers: Outlier[];
+  };
+  let data: CataloguePage;
   let me: AdminMe;
   try {
     [data, me] = await Promise.all([
-      get<{ items: CatalogueItem[]; summary: Summary; outliers: Outlier[] }>(
-        `/api/admin/catalogue?${query.toString()}`,
-      ),
+      get<CataloguePage>(`/api/admin/catalogue?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
     ]);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the catalogue" detail={message} />;
   }
+
+  const links = pageLinks({
+    pathname: "/operations/catalogue",
+    filters: { view: active, q },
+    state,
+    nextCursor: data.next_cursor,
+    count: data.items.length,
+  });
+  const pager = (
+    <Pagination
+      links={links}
+      noun="products"
+      perPage={state.per}
+      sizeHref={sizeHrefFactory("/operations/catalogue", { view: active, q })}
+    />
+  );
 
   const { items, summary, outliers } = data;
   const canChange = can(me, PERMISSIONS.vendorsApprove);
@@ -185,23 +212,7 @@ export default async function CataloguePage({
         </ul>
       </nav>
 
-      <form method="GET" className="flex gap-2">
-        <input type="hidden" name="view" value={active} />
-        <label htmlFor="q" className="sr-only">Search by product or store</label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder="Product name or store…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
-        >
-          Search
-        </button>
-      </form>
+      <TableToolbar placeholder="Search by product name or store" keep={{ view: active }}>
 
       {items.length === 0 ? (
         <Card>
@@ -269,9 +280,13 @@ export default async function CataloguePage({
                 </tbody>
               </table>
             </div>
+            {pager}
           </Card>
+
+          <Card className="md:hidden">{pager}</Card>
         </>
       )}
+      </TableToolbar>
     </div>
   );
 }

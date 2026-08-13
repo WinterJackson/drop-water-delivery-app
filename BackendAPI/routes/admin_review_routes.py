@@ -17,6 +17,7 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_DISPUTES_READ, PERM_DISPUTES_RESOLVE
 from services import admin_review_service, admin_service
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ async def reviews(
     view: str = Query("flagged", pattern="^(all|flagged|low|hidden)$"),
     search: str | None = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=200),
+    cursor: str | None = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_DISPUTES_READ)),
 ):
@@ -39,8 +41,11 @@ async def reviews(
     a heuristic and the console labels it as one. See the module docstring on
     `admin_review_service` for what it matches and why.
     """
+    page = await admin_review_service.listing(
+        db, view=view, search=search, limit=limit, cursor=cursor
+    )
     return {
-        "items": await admin_review_service.listing(db, view=view, search=search, limit=limit),
+        **page,
         "summary": await admin_review_service.summary(db),
         "worst_rated": await admin_review_service.worst_rated(db),
     }

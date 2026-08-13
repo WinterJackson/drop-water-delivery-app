@@ -40,8 +40,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from utils import keyset
 
 from models.deliverer_model import Deliverer, KYCStatus, RiderEmploymentType
 from models.deliverer_vendor_model import DelivererVendor
@@ -200,8 +202,13 @@ async def pending_requests(db: AsyncSession, *, limit: int = 100) -> list[dict[s
 
 
 async def links(
-    db: AsyncSession, *, status: str | None = None, limit: int = 200
-) -> list[dict[str, Any]]:
+    db: AsyncSession,
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 200,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """Every rider/store registration, with what dispatch reads off it."""
     query = (
         select(
@@ -214,14 +221,24 @@ async def links(
         )
         .outerjoin(Deliverer, Deliverer.id == VendorRiderRegistry.rider_id)
         .outerjoin(Vendor, Vendor.id == VendorRiderRegistry.vendor_id)
-        .order_by(VendorRiderRegistry.requested_at.desc())
     )
     if status:
         query = query.where(VendorRiderRegistry.status == status)
 
-    rows = (await db.execute(query.limit(limit))).all()
+    # Either side of the pairing. This table is read to answer "who delivers for
+    # this store" and "which stores has this rider signed up with", and both are
+    # a name typed into a box.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(Deliverer.name.ilike(like), Vendor.business_name.ilike(like))
+        )
 
-    return [
+    order = keyset.Order(VendorRiderRegistry.requested_at, VendorRiderRegistry.rider_id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.all(), limit, order)
+
+    items = [
         {
             "rider_id": str(link.rider_id),
             "rider_name": rider_name,
@@ -242,6 +259,7 @@ async def links(
         }
         for link, rider_name, kyc, employment, suspended_at, vendor_name in rows
     ]
+    return {"items": items, "next_cursor": next_cursor}
 
 
 async def unattached_riders(db: AsyncSession, *, limit: int = 100) -> list[dict[str, Any]]:

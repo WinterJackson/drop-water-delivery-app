@@ -22,6 +22,7 @@ from models.admin_model import (
     PERM_SUPPORT_RESPOND,
 )
 from services import admin_service, broadcast_service, email_service, support_service
+from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ async def list_tickets(
     requester_type: Optional[str] = None,
     search: Optional[str] = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access: AdminAccess = Depends(require_admin(PERM_SUPPORT_READ)),
 ):
@@ -50,6 +52,7 @@ async def list_tickets(
         requester_type=requester_type,
         search=search,
         limit=limit,
+        cursor=cursor,
     )
 
 

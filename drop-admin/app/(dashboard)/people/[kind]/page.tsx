@@ -2,8 +2,11 @@ import { Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
 import { ApiError, get } from "@/lib/api/server";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { formatMoney, formatNumber, timeAgo } from "@/lib/utils/format";
 import type { PeopleStats, QueueStats } from "@/lib/queue-stats";
 import { NoAccess } from "@/components/shell/NoAccess";
@@ -76,7 +79,7 @@ export default async function PeopleListPage({
   searchParams,
 }: {
   params: Promise<{ kind: string }>;
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const { kind: slug } = await params;
   const config = KINDS[slug as Slug];
@@ -88,11 +91,15 @@ export default async function PeopleListPage({
   const access = await pageAccess(`/people/${slug}`);
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
-  const { q = "", status = "" } = await searchParams;
+  const query$ = await searchParams;
+  const state = readPageState(query$);
+  const status = typeof query$.status === "string" ? query$.status : "";
+  const q = state.q;
 
-  const query = new URLSearchParams();
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ limit: String(state.per) });
+  if (q) query.set("search", q);
   if (status) query.set("status", status);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let data: { items: Person[]; next_cursor: string | null };
   // Population context, in its own catch — a slow aggregate must not blank the
@@ -110,6 +117,22 @@ export default async function PeopleListPage({
     return <ErrorState title={`Couldn't load ${config.title.toLowerCase()}`} detail={message} />;
   }
 
+  const links = pageLinks({
+    pathname: `/people/${slug}`,
+    filters: { q, status },
+    state,
+    nextCursor: data.next_cursor,
+    count: data.items.length,
+  });
+
+  // The population figure is the size of the *roster*, not of this result set.
+  // Printing "1–25 of 1,240" under a search for "Achieng" would be a lie about
+  // the search, so it is shown only when nothing is filtering the list.
+  const peopleStats = (stats as Record<string, PeopleStats | undefined>)[
+    `people_${config.kind}`
+  ];
+  const populationTotal = q || status ? null : (peopleStats?.total ?? null);
+
   return (
     <div className="space-y-6">
       <div>
@@ -117,39 +140,23 @@ export default async function PeopleListPage({
         <p className="mt-1 text-sm text-muted">{config.blurb}</p>
       </div>
 
-      <PopulationHeader
-        stats={
-          (stats as Record<string, PeopleStats | undefined>)[`people_${config.kind}`]
-        }
-        noun={config.title.toLowerCase()}
-      />
+      <PopulationHeader stats={peopleStats} noun={config.title.toLowerCase()} />
 
-      {/* A plain GET form: search survives a reload, is linkable, and works
-          before any JavaScript has run. */}
-      <form method="GET" className="flex flex-wrap gap-2">
-        <label htmlFor="q" className="sr-only">Search {config.title.toLowerCase()}</label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder="Name, email, phone…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <select
-          name="status"
-          defaultValue={status}
-          aria-label="Filter by status"
-          className="rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        >
-          <option value="">All</option>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-        </select>
-        <button type="submit" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]">
-          Search
-        </button>
-      </form>
-
+      <TableToolbar
+        placeholder={`Search ${config.title.toLowerCase()} by name, email or phone`}
+        filters={[
+          {
+            name: "status",
+            label: "Filter by status",
+            value: status,
+            options: [
+              { value: "", label: "All" },
+              { value: "active", label: "Active" },
+              { value: "suspended", label: "Suspended" },
+            ],
+          },
+        ]}
+      >
       {data.items.length === 0 ? (
         <Card>
           <EmptyState
@@ -278,9 +285,33 @@ export default async function PeopleListPage({
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              links={links}
+              noun={config.title.toLowerCase()}
+              total={populationTotal}
+              perPage={state.per}
+              sizeHref={sizeHrefFactory(`/people/${slug}`, { q, status })}
+            />
+          </Card>
+
+          {/* The card list carries its own copy: below `md` the table is not
+              rendered at all, so a pager inside it is a pager that does not
+              exist on a phone — on the layout where paging matters most,
+              because fewer rows fit on the screen. */}
+          <Card className="md:hidden">
+            <Pagination
+              links={links}
+              noun={config.title.toLowerCase()}
+              total={populationTotal}
+              perPage={state.per}
+              sizeHref={sizeHrefFactory(`/people/${slug}`, { q, status })}
+              className="border-t-0"
+            />
           </Card>
         </>
       )}
+      </TableToolbar>
     </div>
   );
 }

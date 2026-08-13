@@ -2,6 +2,9 @@ import { Bike, Link2, Store, TriangleAlert, UserPlus } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber } from "@/lib/utils/format";
 import { NoAccess } from "@/components/shell/NoAccess";
@@ -75,27 +78,47 @@ type Payload = {
   summary: Summary;
   vendors_without_riders: VendorGap[];
   pending: Pending[];
-  links: LinkRow[];
+  links: { items: LinkRow[]; next_cursor: string | null };
   unattached: Unattached[];
 };
 
-export default async function FleetPage() {
+export default async function FleetPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   // Gated on the capability `nav-config` declares for `/people/fleet` — the
   // same declaration that hides this entry in the sidebar, so the two can
   // never disagree. The backend enforces it again regardless.
   const access = await pageAccess("/people/fleet");
   if (!access.allowed) return <NoAccess permission={access.permission} />;
 
+  const state = readPageState(await searchParams);
+  const query = new URLSearchParams({ limit: String(state.per) });
+  if (state.q) query.set("search", state.q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
   let data: Payload;
   try {
-    data = await get<Payload>("/api/admin/fleet");
+    data = await get<Payload>(`/api/admin/fleet?${query.toString()}`);
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "Something went wrong.";
     return <ErrorState title="Couldn't load the fleet" detail={message} />;
   }
 
   const { summary, vendors_without_riders: gaps, pending, links, unattached } = data;
+
+  // Only "Every registration" is a list that grows with the platform. The three
+  // panels above it are bounded attention lists — stores with no rider, pending
+  // requests, riders attached to nobody — and each is empty on a healthy
+  // platform. Paging them would be paging a queue that should read zero.
+  const registrations = pageLinks({
+    pathname: "/people/fleet",
+    filters: { q: state.q },
+    state,
+    nextCursor: links.next_cursor,
+    count: links.items.length,
+  });
   const misconfigured = unattached.filter((rider) => rider.misconfigured);
 
   return (
@@ -264,11 +287,12 @@ export default async function FleetPage() {
         </Card>
       ) : null}
 
+      <TableToolbar placeholder="Search by rider or store name">
       <Card className="overflow-hidden">
         <div className="border-b border-default px-4 py-3">
           <h2 className="text-sm font-semibold">Every registration</h2>
         </div>
-        {links.length === 0 ? (
+        {links.items.length === 0 ? (
           <EmptyState
             icon={<Link2 className="h-8 w-8" />}
             title="No rider is registered with any store"
@@ -288,7 +312,7 @@ export default async function FleetPage() {
                 </tr>
               </thead>
               <tbody>
-                {links.map((row) => (
+                {links.items.map((row) => (
                   <tr
                     key={`${row.rider_id}-${row.vendor_id}`}
                     className="border-b border-default last:border-0"
@@ -337,7 +361,15 @@ export default async function FleetPage() {
             </table>
           </div>
         )}
+
+        <Pagination
+          links={registrations}
+          noun="registrations"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/people/fleet", { q: state.q })}
+        />
       </Card>
+      </TableToolbar>
 
       {summary.legacy_table_rows > 0 ? (
         <p className="text-xs text-muted">

@@ -49,8 +49,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from utils import keyset
 
 from models.bottle_ledger_model import BottleLedgerEntry, BottleLedgerEntryType
 from models.deliverer_model import Deliverer
@@ -203,16 +205,28 @@ async def overview(db: AsyncSession) -> dict[str, Any]:
     }
 
 
-async def holders(db: AsyncSession, *, limit: int = 100, stale_only: bool = False) -> list[dict]:
+async def holders(
+    db: AsyncSession,
+    *,
+    limit: int = 100,
+    stale_only: bool = False,
+    search: str | None = None,
+    cursor: str | None = None,
+) -> dict:
     """Every rider/vendor pair with bottles outstanding, worst first.
 
     "Worst" is deposit value, not bottle count: twelve 10L bottles are a smaller
     problem than eight 20L ones, and the person deciding whether to chase this
     is deciding about money.
+
+    Ranked in Python, so it pages in Python — `keyset.page_list`, which also
+    makes `total` free and honest. The ordering depends on a per-capacity
+    deposit schedule joined to a netted ledger aggregate, which is not something
+    the database can order by, so a keyset cursor has nothing to seek on.
     """
     balances = await _pair_balances(db)
     if not balances:
-        return []
+        return {"items": [], "next_cursor": None, "total": 0}
 
     deposits = await _deposits(db)
 
@@ -271,8 +285,19 @@ async def holders(db: AsyncSession, *, limit: int = 100, stale_only: bool = Fals
     if stale_only:
         out = [pair for pair in out if pair["stale"]]
 
+    # Either party. This table is read to answer "who is holding our bottles",
+    # and the answer is always reached through somebody's name.
+    if search and search.strip():
+        needle = search.strip().casefold()
+        out = [
+            pair
+            for pair in out
+            if needle in (pair["rider_name"] or "").casefold()
+            or needle in (pair["vendor_name"] or "").casefold()
+        ]
+
     out.sort(key=lambda pair: pair.pop("_sort"), reverse=True)
-    return out[:limit]
+    return keyset.page_list(out, limit=limit, cursor=cursor)
 
 
 async def drift(db: AsyncSession) -> list[dict]:
@@ -373,8 +398,10 @@ async def entries(
     rider_id: UUID | None = None,
     vendor_id: UUID | None = None,
     entry_type: str | None = None,
+    search: str | None = None,
     limit: int = 100,
-) -> list[dict]:
+    cursor: str | None = None,
+) -> dict:
     """The movement feed — the evidence a counter could never provide."""
     query = (
         select(
@@ -384,7 +411,6 @@ async def entries(
         )
         .outerjoin(Deliverer, Deliverer.id == BottleLedgerEntry.rider_id)
         .outerjoin(Vendor, Vendor.id == BottleLedgerEntry.vendor_id)
-        .order_by(BottleLedgerEntry.created_at.desc())
     )
 
     if rider_id is not None:
@@ -395,11 +421,29 @@ async def entries(
         try:
             query = query.where(BottleLedgerEntry.entry_type == BottleLedgerEntryType(entry_type))
         except ValueError:
-            return []
+            # An entry type the enum does not define matches nothing. Returning
+            # the empty page rather than an unfiltered one: a filter the caller
+            # asked for and did not get is a list that looks like an answer.
+            return {"items": [], "next_cursor": None}
 
-    rows = (await db.execute(query.limit(limit))).all()
+    # Either party, or the note somebody typed when they made an adjustment —
+    # which is the only free text on a ledger row and the only way back to
+    # "why is this rider sixteen bottles down".
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Deliverer.name.ilike(like),
+                Vendor.business_name.ilike(like),
+                BottleLedgerEntry.note.ilike(like),
+            )
+        )
 
-    return [
+    order = keyset.Order(BottleLedgerEntry.created_at, BottleLedgerEntry.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.all(), limit, order)
+
+    items = [
         {
             "id": str(entry.id),
             "rider_id": str(entry.rider_id),
@@ -417,6 +461,7 @@ async def entries(
         }
         for entry, rider_name, vendor_name in rows
     ]
+    return {"items": items, "next_cursor": next_cursor}
 
 
 async def adjust(

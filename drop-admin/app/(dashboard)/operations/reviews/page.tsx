@@ -2,6 +2,9 @@ import { EyeOff, MessageSquare, Phone, Star, ThumbsDown } from "lucide-react";
 import Link from "next/link";
 
 import { Badge, Card, EmptyState, ErrorState, Stat } from "@/components/ui/primitives";
+import { Pagination, sizeHrefFactory } from "@/components/table/Pagination";
+import { TableToolbar } from "@/components/table/TableToolbar";
+import { pageLinks, readPageState, type SearchParams } from "@/lib/table/query";
 import { ApiError, get } from "@/lib/api/server";
 import { formatNumber, timeAgo } from "@/lib/utils/format";
 import { PERMISSIONS, can, type AdminMe } from "@/lib/permissions";
@@ -71,21 +74,29 @@ const FLAG_LABEL: Record<string, string> = {
 export default async function ReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const { view = "flagged", q = "" } = await searchParams;
+  const params = await searchParams;
+  const state = readPageState(params);
+  const view = typeof params.view === "string" ? params.view : "flagged";
+  const q = state.q;
   const active = VIEWS.find((v) => v.key === view)?.key ?? "flagged";
 
-  const query = new URLSearchParams({ view: active });
-  if (q.trim()) query.set("search", q.trim());
+  const query = new URLSearchParams({ view: active, limit: String(state.per) });
+  if (q) query.set("search", q);
+  if (state.cursor) query.set("cursor", state.cursor);
 
-  let data: { items: Review[]; summary: Summary; worst_rated: Worst[] };
+  type ReviewPage = {
+    items: Review[];
+    next_cursor: string | null;
+    summary: Summary;
+    worst_rated: Worst[];
+  };
+  let data: ReviewPage;
   let me: AdminMe;
   try {
     [data, me] = await Promise.all([
-      get<{ items: Review[]; summary: Summary; worst_rated: Worst[] }>(
-        `/api/admin/reviews?${query.toString()}`,
-      ),
+      get<ReviewPage>(`/api/admin/reviews?${query.toString()}`),
       get<AdminMe>("/api/admin/me"),
     ]);
   } catch (error) {
@@ -95,6 +106,14 @@ export default async function ReviewsPage({
 
   const { items, summary, worst_rated: worst } = data;
   const mayModerate = can(me, PERMISSIONS.disputesResolve);
+
+  const links = pageLinks({
+    pathname: "/operations/reviews",
+    filters: { view: active, q },
+    state,
+    nextCursor: data.next_cursor,
+    count: items.length,
+  });
 
   return (
     <div className="space-y-6">
@@ -210,23 +229,7 @@ export default async function ReviewsPage({
         </p>
       ) : null}
 
-      <form method="GET" className="flex gap-2">
-        <input type="hidden" name="view" value={active} />
-        <label htmlFor="q" className="sr-only">Search review comments</label>
-        <input
-          id="q"
-          name="q"
-          defaultValue={q}
-          placeholder="Search what people wrote…"
-          className="min-w-0 flex-1 rounded-lg border border-default bg-surface px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
-        >
-          Search
-        </button>
-      </form>
+      <TableToolbar placeholder="Search what people wrote" keep={{ view: active }}>
 
       {items.length === 0 ? (
         <Card>
@@ -253,6 +256,17 @@ export default async function ReviewsPage({
           ))}
         </ul>
       )}
+
+      <Card>
+        <Pagination
+          links={links}
+          noun="reviews"
+          perPage={state.per}
+          sizeHref={sizeHrefFactory("/operations/reviews", { view: active, q })}
+          className="border-t-0"
+        />
+      </Card>
+      </TableToolbar>
     </div>
   );
 }

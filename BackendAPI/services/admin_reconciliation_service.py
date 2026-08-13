@@ -31,8 +31,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from utils import keyset
 
 from models.failed_webhook_model import FailedWebhook
 from models.order_model import Order
@@ -144,16 +146,23 @@ async def list_failures(
     db: AsyncSession,
     *,
     resolved: bool = False,
+    search: str | None = None,
     limit: int = 50,
-) -> list[dict[str, Any]]:
-    rows = (
-        await db.execute(
-            select(FailedWebhook)
-            .where(FailedWebhook.resolved.is_(resolved))
-            .order_by(FailedWebhook.created_at.desc())
-            .limit(limit)
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    query = select(FailedWebhook).where(FailedWebhook.resolved.is_(resolved))
+
+    # The error text, and the raw payload — a checkout request id pasted out of
+    # a Daraja dashboard is inside the payload and nowhere else on the row.
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        query = query.where(
+            or_(FailedWebhook.error_message.ilike(like), FailedWebhook.payload.ilike(like))
         )
-    ).scalars().all()
+
+    order = keyset.Order(FailedWebhook.created_at, FailedWebhook.id)
+    result = await db.execute(keyset.seek(query, order, cursor).limit(limit + 1))
+    rows, next_cursor = keyset.split(result.scalars().all(), limit, order)
 
     now = datetime.now(timezone.utc)
     out: list[dict[str, Any]] = []
@@ -178,7 +187,7 @@ async def list_failures(
             }
         )
 
-    return out
+    return {"items": out, "next_cursor": next_cursor}
 
 
 async def summary(db: AsyncSession) -> dict[str, Any]:
