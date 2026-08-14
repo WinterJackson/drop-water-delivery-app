@@ -16,6 +16,49 @@ import { useRiderProfile } from "@/hooks/queries/useRiderData";
 import VehicleDropdown from "@/components/ui/VehicleDropdown";
 import { BRAND } from "@/constants/brandColors";
 
+/**
+ * A labelled text field.
+ *
+ * Module scope, not the render body. React reconciles by component *type*, and a
+ * function created during render is a new type every time — so the subtree is
+ * unmounted and remounted rather than updated, and the native `TextInput` inside
+ * it is destroyed and recreated on every keystroke. The field loses focus and the
+ * keyboard closes after each character.
+ *
+ * This screen is where a rider types their number plate. `autoCapitalize` is
+ * "characters", so the remount also re-applied capitalisation to a value the
+ * rider could only enter one character at a time.
+ */
+const InputField = ({
+    label,
+    value,
+    onChangeText,
+    placeholder,
+    darkTheme,
+}: {
+    label: string;
+    value: string;
+    onChangeText: (text: string) => void;
+    placeholder?: string;
+    darkTheme: boolean;
+}) => (
+    <View className="mb-6">
+        <Text className={`font-sans-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+            {label}
+        </Text>
+        <View className={`px-4 py-4 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
+            <TextInput
+                value={value}
+                onChangeText={onChangeText}
+                className={`text-lg ${darkTheme ? "text-white" : "text-black"}`}
+                placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
+                placeholder={placeholder}
+                autoCapitalize="characters"
+            />
+        </View>
+    </View>
+);
+
 export default function VehicleDetails() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -51,23 +94,6 @@ export default function VehicleDetails() {
         }
     };
 
-    const InputField = ({ label, value, onChangeText, placeholder }: any) => (
-        <View className="mb-6">
-            <Text className={`font-sans-semibold mb-2 text-base ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-                {label}
-            </Text>
-            <View className={`px-4 py-4 rounded-2xl border ${darkTheme ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>
-                <TextInput
-                    value={value}
-                    onChangeText={onChangeText}
-                    className={`text-lg ${darkTheme ? "text-white" : "text-black"}`}
-                    placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
-                    placeholder={placeholder}
-                    autoCapitalize="characters"
-                />
-            </View>
-        </View>
-    );
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -91,7 +117,7 @@ export default function VehicleDetails() {
                 </View>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-                <InputField 
+                <InputField darkTheme={darkTheme} 
                     label="Plate Number / Registration" 
                     value={plateNo} 
                     onChangeText={setPlateNo} 

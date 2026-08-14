@@ -146,6 +146,10 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 				<FlatList
 					horizontal
 					data={data}
+					// Products and vendors both carry an id. Keyed on position instead,
+					// a refresh that reorders the row — a store going offline, a product
+					// selling out — leaves the previous item's image in place.
+					keyExtractor={(item: any, index: number) => String(item?.id ?? index)}
 					showsHorizontalScrollIndicator={false}
 					contentContainerStyle={{ paddingHorizontal: 20 }}
 					ItemSeparatorComponent={() => <View style={{ width: 10 }} />}

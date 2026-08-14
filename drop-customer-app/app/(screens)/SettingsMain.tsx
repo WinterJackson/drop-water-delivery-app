@@ -26,11 +26,45 @@ import { Toast } from "@/lib/toast";
 import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import CloudinaryUpload from "@/Helpers/imageUpload";
+import SecureUpload from "@/Helpers/imageUpload";
 import { Popup } from "@/lib/popup";
 import { PressableScale } from "@/components/ui/PressableScale";
 
 const { width } = Dimensions.get("window");
+
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const SettingItem = ({ title, iconName, onPress, danger = false, darkTheme }: any) => (
+    <PressableScale 
+        activeOpacity={0.7} 
+        onPress={() => {
+            Haptics.selectionAsync();
+            onPress();
+        }}
+        className={`flex-row items-center justify-between p-4 mb-3 rounded-2xl border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200")}`}
+        style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+    >
+        <View className="flex-row items-center gap-4">
+            <View className={`w-10 h-10 items-center justify-center rounded-full ${danger ? "bg-red-500/10" : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
+                <Ionicons name={iconName} size={20} color={danger ? "#ef4444" : BRAND.primary} />
+            </View>
+            <Text className={`text-lg font-sans-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
+                {title}
+            </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
+    </PressableScale>
+);
 
 export default function SettingsMain() {
     const { currentTheme, setTheme } = useContext(UIThemeContext);
@@ -57,8 +91,9 @@ export default function SettingsMain() {
                 setIsUploadingPic(true);
                 const imageUri = result.assets[0].uri;
                 
-                // Upload to Cloudinary
-                const uploadedData = await CloudinaryUpload(imageUri, `avatar_${user?.id}`);
+                // Through our own backend, which stores it in S3 and returns the
+                // key. Never Cloudinary: the preset that path used was unsigned.
+                const uploadedData = await SecureUpload(imageUri, `avatar_${user?.id}`, getToken);
                 
                 if (uploadedData && uploadedData.secure_url) {
                     const secureUrl = uploadedData.secure_url;
@@ -150,27 +185,7 @@ export default function SettingsMain() {
         }
     };
 
-    const SettingItem = ({ title, iconName, onPress, danger = false }: any) => (
-        <PressableScale 
-            activeOpacity={0.7} 
-            onPress={() => {
-                Haptics.selectionAsync();
-                onPress();
-            }}
-            className={`flex-row items-center justify-between p-4 mb-3 rounded-2xl border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200")}`}
-            style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
-        >
-            <View className="flex-row items-center gap-4">
-                <View className={`w-10 h-10 items-center justify-center rounded-full ${danger ? "bg-red-500/10" : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
-                    <Ionicons name={iconName} size={20} color={danger ? "#ef4444" : BRAND.primary} />
-                </View>
-                <Text className={`text-lg font-sans-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
-                    {title}
-                </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
-        </PressableScale>
-    );
+    const settingItemProps = { darkTheme };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -253,17 +268,17 @@ export default function SettingsMain() {
                     Account Settings
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Personal Details" 
                         iconName="person-outline" 
                         onPress={() => router.push("/(screens)/settings/PersonalDetails")} 
                     />
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Saved Locations" 
                         iconName="location-outline" 
                         onPress={() => router.push("/(screens)/settings/SavedLocations")} 
                     />
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Payment Methods" 
                         iconName="card-outline" 
                         onPress={() => router.push("/(screens)/settings/PaymentMethods")} 
@@ -274,12 +289,12 @@ export default function SettingsMain() {
                     Preferences
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Notifications" 
                         iconName="notifications-outline" 
                         onPress={() => router.push("/(screens)/settings/NotificationPreferences")} 
                     />
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Privacy & Security" 
                         iconName="lock-closed-outline" 
                         onPress={() => router.push("/(screens)/settings/PrivacySecurity")} 
@@ -313,7 +328,7 @@ export default function SettingsMain() {
                     Help
                 </Text>
                 <View className="mb-8">
-                    <SettingItem
+                    <SettingItem {...settingItemProps}
                         title="Help & Support"
                         iconName="help-buoy-outline"
                         onPress={() => router.push("/(screens)/Support" as any)}
@@ -324,12 +339,12 @@ export default function SettingsMain() {
                     System
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Sign Out" 
                         iconName="log-out-outline" 
                         onPress={handleSignOut} 
                     />
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Delete Account" 
                         iconName="trash-outline" 
                         danger={true} 

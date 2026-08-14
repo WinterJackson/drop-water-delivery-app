@@ -12,6 +12,32 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { Toast } from "@/lib/toast";
 import { PressableScale } from "@/components/ui/PressableScale";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const RatingStars = ({ rating, setRating, darkTheme }: { rating: number, setRating: (r: number) => void } & { darkTheme: boolean }) => {
+    return (
+        <View className="flex-row gap-2 mt-3">
+            {[1, 2, 3, 4, 5].map((star) => (
+                <PressableScale key={star} onPress={() => setRating(star)}>
+                    <Text style={{ fontSize: 36, color: star <= rating ? "#FFD700" : (darkTheme ? "#4B5563" : "#D1D5DB") }}>
+                        ★
+                    </Text>
+                </PressableScale>
+            ))}
+        </View>
+    );
+};
+
 const RateOrder = () => {
     const { currentTheme } = useContext<any>(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -75,19 +101,7 @@ const RateOrder = () => {
         }
     };
 
-    const RatingStars = ({ rating, setRating }: { rating: number, setRating: (r: number) => void }) => {
-        return (
-            <View className="flex-row gap-2 mt-3">
-                {[1, 2, 3, 4, 5].map((star) => (
-                    <PressableScale key={star} onPress={() => setRating(star)}>
-                        <Text style={{ fontSize: 36, color: star <= rating ? "#FFD700" : (darkTheme ? "#4B5563" : "#D1D5DB") }}>
-                            ★
-                        </Text>
-                    </PressableScale>
-                ))}
-            </View>
-        );
-    };
+    const ratingStarsProps = { darkTheme };
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -118,7 +132,7 @@ const RateOrder = () => {
                     <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
                         <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Vendor Rating</Text>
                         <Text className={`mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>How was the product quality and packaging?</Text>
-                        <RatingStars rating={vendorRating} setRating={setVendorRating} />
+                        <RatingStars {...ratingStarsProps} rating={vendorRating} setRating={setVendorRating} />
                     </View>
                 )}
 
@@ -126,7 +140,7 @@ const RateOrder = () => {
                     <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
                         <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Rider Rating</Text>
                         <Text className={`mt-2 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>How was the delivery speed and service?</Text>
-                        <RatingStars rating={riderRating} setRating={setRiderRating} />
+                        <RatingStars {...ratingStarsProps} rating={riderRating} setRating={setRiderRating} />
                     </View>
                 )}
 

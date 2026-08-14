@@ -32,6 +32,40 @@ import { RiderSettingsSkeleton } from "@/components/skeletons/ContextualSkeleton
 
 const { width } = Dimensions.get("window");
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const SettingItem = ({ title, iconName, onPress, danger = false, darkTheme }: any) => (
+    <TouchableOpacity 
+        activeOpacity={0.7} 
+        onPress={() => {
+            Haptics.selectionAsync();
+            onPress();
+        }}
+        className={`flex-row items-center justify-between p-4 mb-3 rounded-2xl border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200")}`}
+        style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+    >
+        <View className="flex-row items-center gap-4">
+            <View className={`w-10 h-10 items-center justify-center rounded-full ${danger ? "bg-red-500/10" : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
+                <Ionicons name={iconName} size={20} color={danger ? "#ef4444" : BRAND.primary} />
+            </View>
+            <Text className={`text-lg font-sans-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
+                {title}
+            </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
+    </TouchableOpacity>
+);
+
 export default function SettingsMain() {
     const { currentTheme, setTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -143,27 +177,7 @@ export default function SettingsMain() {
         });
     };
 
-    const SettingItem = ({ title, iconName, onPress, danger = false }: any) => (
-        <TouchableOpacity 
-            activeOpacity={0.7} 
-            onPress={() => {
-                Haptics.selectionAsync();
-                onPress();
-            }}
-            className={`flex-row items-center justify-between p-4 mb-3 rounded-2xl border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200")}`}
-            style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
-        >
-            <View className="flex-row items-center gap-4">
-                <View className={`w-10 h-10 items-center justify-center rounded-full ${danger ? "bg-red-500/10" : (darkTheme ? "bg-blue-900/40" : "bg-blue-50")}`}>
-                    <Ionicons name={iconName} size={20} color={danger ? "#ef4444" : BRAND.primary} />
-                </View>
-                <Text className={`text-lg font-sans-semibold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-gray-900")}`}>
-                    {title}
-                </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={BRAND.primary} />
-        </TouchableOpacity>
-    );
+    const settingItemProps = { darkTheme };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -250,7 +264,7 @@ export default function SettingsMain() {
                     Vendors
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="My Vendors" 
                         iconName="briefcase-outline" 
                         onPress={() => router.push("/(screens)/MyVendors")} 
@@ -261,7 +275,7 @@ export default function SettingsMain() {
                     Verification & Vehicle
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Vehicle Details" 
                         iconName="bicycle-outline" 
                         onPress={() => router.push("/(screens)/rider/VehicleDetails")} 
@@ -272,7 +286,7 @@ export default function SettingsMain() {
                     Financials
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Bank & Earning Settings" 
                         iconName="business-outline" 
                         onPress={() => router.push("/(screens)/rider/BankDetails")} 
@@ -286,7 +300,7 @@ export default function SettingsMain() {
                     {/* Where a delivery that failed to reach the server ends up.
                         Before this screen existed the queue was invisible and the
                         replay silently deleted anything the server refused. */}
-                    <SettingItem
+                    <SettingItem {...settingItemProps}
                         title="Pending Sync"
                         iconName="cloud-upload-outline"
                         onPress={() => router.push("/(screens)/PendingSync" as any)}
@@ -297,7 +311,7 @@ export default function SettingsMain() {
                     Help
                 </Text>
                 <View className="mb-8">
-                    <SettingItem
+                    <SettingItem {...settingItemProps}
                         title="Help & Support"
                         iconName="help-buoy-outline"
                         onPress={() => router.push("/(screens)/Support" as any)}
@@ -308,7 +322,7 @@ export default function SettingsMain() {
                     Preferences
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="App Preferences" 
                         iconName="settings-outline" 
                         onPress={() => router.push("/(screens)/rider/Preferences")} 
@@ -343,12 +357,12 @@ export default function SettingsMain() {
                     System
                 </Text>
                 <View className="mb-8">
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Sign Out" 
                         iconName="log-out-outline" 
                         onPress={handleSignOut} 
                     />
-                    <SettingItem 
+                    <SettingItem {...settingItemProps} 
                         title="Delete Account" 
                         iconName="trash-outline" 
                         danger={true} 

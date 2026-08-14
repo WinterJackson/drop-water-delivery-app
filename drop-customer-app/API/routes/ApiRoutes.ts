@@ -33,6 +33,8 @@ export const ROUTES = {
     CREATE_USER: `${BASE_URL}/api/auth/create_user`,
     GET_USER_DETAILS: `${BASE_URL}/api/auth/get_user_details`,
     UPDATE_PROFILE_PIC: `${BASE_URL}/api/auth/update_profile_pic`,
+    /** Multipart avatar upload. Returns the S3 key, which is what gets stored. */
+    UPLOAD_PROFILE_PIC: `${BASE_URL}/api/auth/upload-profile-pic`,
     UPDATE_LOCATION: `${BASE_URL}/api/auth/update_user_location`,
     REVOKE_LOCATION: `${BASE_URL}/api/auth/revoke_user_location`,
     REGISTER_PUSH_TOKEN: `${BASE_URL}/api/auth/push-token`,
@@ -170,5 +172,5 @@ export const ROUTES = {
     SUPPORT_CATEGORIES: `${BASE_URL}/api/support/categories`,
 
     // Misc
-    APP_VERSION: `${BASE_URL}/api/app-version`,
+    APP_VERSION: `${BASE_URL}/api/app-version?app=customer`,
 } as const;

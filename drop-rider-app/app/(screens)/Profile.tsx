@@ -31,6 +31,64 @@ import { useKycStatus } from "@/hooks/queries/useKycStatus";
 import { errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
 
+/**
+ * One label/value row, editable in place.
+ *
+ * At module scope on purpose. Defined inside `Profile` — where it used to be — it
+ * is a new function object on every render, and React reconciles by component
+ * *type*: a new type means the old subtree is unmounted and a new one mounted
+ * rather than updated. The `TextInput` here is driven by `editForm`, so every
+ * keystroke re-rendered `Profile`, which destroyed and recreated the native input.
+ * The field lost focus and the keyboard closed after each character, which makes
+ * editing a plate number or a phone number effectively impossible on a handset.
+ *
+ * Everything it used to close over — the theme, the edit mode, the form and its
+ * setter — arrives as a prop instead.
+ */
+const InfoRow = ({
+  label,
+  value,
+  field,
+  placeholder,
+  darkTheme,
+  isEditing,
+  editForm,
+  setEditForm,
+}: {
+  label: string;
+  value: string;
+  field: string;
+  placeholder?: string;
+  darkTheme: boolean;
+  isEditing: boolean;
+  editForm: any;
+  setEditForm: (next: any) => void;
+}) => (
+  <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
+    <Text className={`w-1/3 mt-3 text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{label}</Text>
+    {isEditing ? (
+      field === "vehicle_type" ? (
+        <VehicleDropdown
+            value={editForm[field]}
+            onValueChange={(val) => setEditForm({ ...editForm, [field]: val })}
+            containerStyle={{ width: "60%" }}
+            buttonStyle={{ width: "100%", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, height: "auto" }}
+        />
+      ) : (
+        <TextInput
+          value={editForm[field]}
+          onChangeText={(text) => setEditForm({ ...editForm, [field]: text })}
+          placeholder={placeholder || `Enter ${label}`}
+          placeholderTextColor={darkTheme ? "#666" : "#999"}
+          className={`w-[60%] p-3 rounded-lg border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"}`}
+        />
+      )
+    ) : (
+      <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-white" : "text-gray-900"}`}>{value || "—"}</Text>
+    )}
+  </View>
+);
+
 export default function Profile() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -159,31 +217,7 @@ export default function Profile() {
     }
   };
 
-  const InfoRow = ({ label, value, field, placeholder }: { label: string; value: string; field: string; placeholder?: string }) => (
-    <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
-      <Text className={`w-1/3 mt-3 text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{label}</Text>
-      {isEditing ? (
-        field === "vehicle_type" ? (
-          <VehicleDropdown 
-              value={editForm[field]} 
-              onValueChange={(val) => setEditForm({ ...editForm, [field]: val })} 
-              containerStyle={{ width: "60%" }}
-              buttonStyle={{ width: "100%", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, height: "auto" }}
-          />
-        ) : (
-          <TextInput
-            value={editForm[field]}
-            onChangeText={(text) => setEditForm({ ...editForm, [field]: text })}
-            placeholder={placeholder || `Enter ${label}`}
-            placeholderTextColor={darkTheme ? "#666" : "#999"}
-            className={`w-[60%] p-3 rounded-lg border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"}`}
-          />
-        )
-      ) : (
-        <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-white" : "text-gray-900"}`}>{value || "—"}</Text>
-      )}
-    </View>
-  );
+  const infoRowProps = { darkTheme, isEditing, editForm, setEditForm };
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -267,11 +301,11 @@ export default function Profile() {
             </View>
 
             <View className={`rounded-2xl p-4 ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-              <InfoRow field="name" label="Name" value={profile?.name} />
-              <InfoRow field="phone_number" label="Phone" value={profile?.phone_number} placeholder="07XXXXXXXX" />
-              <InfoRow field="vehicle_type" label="Vehicle" value={profile?.vehicle_type} />
-              <InfoRow field="plate_number" label="Plate" value={profile?.plate_number} />
-              {!isEditing && <InfoRow field="is_available" label="Available" value={profile?.is_available ? "Yes" : "No"} />}
+              <InfoRow {...infoRowProps} field="name" label="Name" value={profile?.name} />
+              <InfoRow {...infoRowProps} field="phone_number" label="Phone" value={profile?.phone_number} placeholder="07XXXXXXXX" />
+              <InfoRow {...infoRowProps} field="vehicle_type" label="Vehicle" value={profile?.vehicle_type} />
+              <InfoRow {...infoRowProps} field="plate_number" label="Plate" value={profile?.plate_number} />
+              {!isEditing && <InfoRow {...infoRowProps} field="is_available" label="Available" value={profile?.is_available ? "Yes" : "No"} />}
             </View>
 
             {isEditing && (

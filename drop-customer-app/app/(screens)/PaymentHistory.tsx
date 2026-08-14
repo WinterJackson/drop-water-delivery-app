@@ -89,6 +89,13 @@ export default function PaymentHistory() {
             <View className="flex-1 px-4">
                 <FlashList
                     data={loading && payments.length === 0 ? [1, 2, 3] : payments}
+                    // The list carries two kinds of row: three placeholder numbers
+                    // while the first page loads, then real payments. A payment has
+                    // an id; a placeholder has only its position, which is all the
+                    // identity a placeholder needs.
+                    keyExtractor={(item: any, index: number) =>
+                        typeof item === "number" ? `placeholder-${index}` : String(item.id)
+                    }
 					// @ts-ignore
 					estimatedItemSize={100}
                     contentContainerStyle={{ paddingTop: 16, paddingBottom: 120}}

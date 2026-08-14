@@ -30,7 +30,14 @@ const ThemeContextProvider = ({ children }: Props) => {
           setCurrentTheme(value as ColorSchemeName);
           setManualOverride(true);
         }
-      } catch (error) {}
+      } catch (error) {
+        // Fail open to the system theme: a preference that cannot be read is a
+        // preference, not an outage, and throwing here would take the whole app
+        // down at mount. Logged rather than swallowed — silently ignoring a
+        // failing AsyncStorage read is how "my dark mode keeps resetting" turns
+        // into a bug report with nothing behind it.
+        if (__DEV__) console.warn("[ThemeContext] could not read the saved theme", error);
+      }
     };
     _retrieveTheme();
   }, []);

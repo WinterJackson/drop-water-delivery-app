@@ -1,34 +1,40 @@
 import Constants from "expo-constants";
-import { apiFetch } from "@/API/apiFetch";
-import { ROUTES } from "@/API/routes/ApiRoutes";
 import { Alert, Linking, Platform } from "react-native";
+
+import { apiFetch } from "@/API/apiFetch";
+import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 
 /** What `GET /api/app-version` returns, per app. */
 interface AppVersionResponse {
     min_version?: string;
     android_store_url?: string;
-    ios_store_url?: string;
+    ios_store_url?: string | null;
 }
 
 /**
- * Check if there is a mandatory app update available.
- * Compares current app version against a minimum version from the backend.
+ * Block the app when the build is too old to be trusted on this platform.
  *
- * Call this on app mount in root _layout.tsx.
+ * The customer app has had this since launch; the vendor app did not, which had it
+ * exactly backwards. A customer on a stale build sees wrong prices. A vendor on a
+ * stale build is mid-trading, accepting orders it may price or dispatch wrongly — and is the person least able to
+ * notice, because they are working rather than browsing an app store.
+ *
+ * `Alert`, not `Toast`, and `cancelable: false`: this is the one prompt in the
+ * app that must not be dismissible. Everything else uses the themed `Popup`.
+ *
+ * Failure is silent by design. A version check is advisory, and the platform must
+ * not become unusable because the check for whether it is usable did not answer.
+ *
+ * Called once from the root layout.
  */
 export async function checkForAppUpdate() {
     try {
         const currentVersion = Constants.expoConfig?.version || "1.0.0";
-        // Path comes from ROUTES, not an inline string — test_route_contract.py
-        // verifies every ROUTES entry resolves on the backend.
-        // Through `apiFetch`, and without a token: this runs before there is a
-        // session, and the endpoint is deliberately public — a customer whose app
-        // is too old to sign in still has to be told to update. What it gains
-        // over the bare `fetch` this used to be is the connection-aware timeout.
-        // A version check that never resolves is a version check that runs on
-        // every cold start and never once completes, on exactly the slow
-        // connections where it hangs longest.
-        const data = await apiFetch<AppVersionResponse>(ROUTES.APP_VERSION, {
+        // Unauthenticated: this runs before there is a session, and a build too
+        // old to sign in still has to be told. `apiFetch` is used anyway for the
+        // connection-aware timeout — a check that never resolves is one that
+        // runs on every cold start and never once completes.
+        const data = await apiFetch<AppVersionResponse>(VendorApiRoutes.AppVersion.path, {
             kind: "read",
         });
 
@@ -38,7 +44,7 @@ export async function checkForAppUpdate() {
         if (minVersion && isVersionLower(currentVersion, minVersion)) {
             Alert.alert(
                 "Update Required",
-                "A new version of Drop is available. Please update to continue using the app.",
+                "A new version of Drop Vendor is available. Please update to continue.",
                 [
                     {
                         text: "Update Now",
@@ -51,8 +57,7 @@ export async function checkForAppUpdate() {
             );
         }
     } catch (_) {
-        // Silently fail. A version check is advisory: the platform must not become
-        // unusable because the check for whether it is usable did not answer.
+        // Silently fail. See above.
     }
 }
 

@@ -258,6 +258,9 @@ export default function MyVendors() {
           <FlashList
             data={vendors}
             renderItem={renderVendor}
+            // A row here owns per-vendor state (`withdrawingId`), so recycling one
+            // against a different vendor shows the wrong store as withdrawing.
+            keyExtractor={(item: any) => String(item.vendor_id)}
             estimatedItemSize={150}
             refreshControl={
               <RefreshControl

@@ -13,6 +13,44 @@ import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 import { PressableScale } from "@/components/ui/PressableScale";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const PaymentCard = ({ item, index, darkTheme, handleRemove }: any) => (
+    <View className={`p-5 mb-4 rounded-2xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
+        <View className="flex-row items-center gap-4">
+            <View className={`w-12 h-12 rounded-full items-center justify-center ${item.type === "mpesa" ? "" : "bg-blue-500/10"}`} style={item.type === "mpesa" ? { backgroundColor: `${BRAND.primary}1A` } : {}}>
+                <Text style={{ fontSize: 24 }}>{item.type === "mpesa" ? "📱" : "💳"}</Text>
+            </View>
+            <View>
+                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                    {item.type === "mpesa" ? "M-Pesa" : "Card"}
+                </Text>
+                <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{item.phone}</Text>
+            </View>
+        </View>
+        <View className="flex-row items-center gap-2">
+            {item.isDefault && (
+                <View className="bg-blue-500/10 px-2 py-1 rounded-md">
+                    <Text className="text-blue-500 font-sans-bold text-xs">DEFAULT</Text>
+                </View>
+            )}
+            <PressableScale onPress={() => handleRemove(index)} className="ml-2">
+                <Text className="text-red-500 text-lg">🗑️</Text>
+            </PressableScale>
+        </View>
+    </View>
+);
+
 export default function PaymentMethods() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -85,31 +123,7 @@ export default function PaymentMethods() {
         });
     };
 
-    const PaymentCard = ({ item, index }: any) => (
-        <View className={`p-5 mb-4 rounded-2xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
-            <View className="flex-row items-center gap-4">
-                <View className={`w-12 h-12 rounded-full items-center justify-center ${item.type === "mpesa" ? "" : "bg-blue-500/10"}`} style={item.type === "mpesa" ? { backgroundColor: `${BRAND.primary}1A` } : {}}>
-                    <Text style={{ fontSize: 24 }}>{item.type === "mpesa" ? "📱" : "💳"}</Text>
-                </View>
-                <View>
-                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                        {item.type === "mpesa" ? "M-Pesa" : "Card"}
-                    </Text>
-                    <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{item.phone}</Text>
-                </View>
-            </View>
-            <View className="flex-row items-center gap-2">
-                {item.isDefault && (
-                    <View className="bg-blue-500/10 px-2 py-1 rounded-md">
-                        <Text className="text-blue-500 font-sans-bold text-xs">DEFAULT</Text>
-                    </View>
-                )}
-                <PressableScale onPress={() => handleRemove(index)} className="ml-2">
-                    <Text className="text-red-500 text-lg">🗑️</Text>
-                </PressableScale>
-            </View>
-        </View>
-    );
+    const paymentCardProps = { darkTheme, handleRemove };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -134,7 +148,7 @@ export default function PaymentMethods() {
             </View>
             <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120}}>
                 {paymentMethods.map((item: any, idx: number) => (
-                    <PaymentCard key={idx} item={item} index={idx} />
+                    <PaymentCard {...paymentCardProps} key={idx} item={item} index={idx} />
                 ))}
 
                 {isAdding ? (

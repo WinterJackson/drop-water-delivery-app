@@ -65,8 +65,21 @@ fails the build on all of the above.
 - Those hooks must go through `useApiRequest()` (from `API/useApiClient.ts`), never
   raw `fetch`. It injects the Clerk JWT, signs the user out on a 401, and converts
   every failure into an `ApiError` whose `message` is the backend's own `detail`.
-  The only legitimate raw `fetch` calls are to third-party APIs (Google Places,
-  Cloudinary).
+- Code **outside** React — the upload helper, the forced-update check — uses
+  `apiFetch` from `API/apiFetch.ts`, which is handed a token. It gives the same
+  timeout, HTTPS check and `ApiError` without the 401 sign-out, which belongs to
+  the on-screen client.
+- **There are no exemptions.** This guide used to grant one "to third-party APIs
+  (Google Places, Cloudinary)", and both halves were wrong. Places has gone
+  through our own backend since the Maps rework — the embedded keys are
+  SDK-restricted and cannot call a web service — and the Cloudinary upload used
+  an *unsigned* preset, which is a public write endpoint for anyone who unzips
+  the APK. Avatars now go to `POST /api/auth/upload-profile-pic`, exactly as the
+  rider and vendor apps do.
+- `BackendAPI/tests/test_customer_api_client.py` fails the build on a raw
+  `fetch` or a third-party upload host. It did not exist while the other two apps
+  had one each, which is the whole reason the two patterns above survived here
+  after being removed everywhere else.
 - Every backend path lives in `API/routes/ApiRoutes.ts`, in the **one** exported
   table, `ROUTES`. Never build one inline:
   `BackendAPI/tests/test_route_contract.py` parses that file and fails CI if a path
@@ -184,6 +197,27 @@ it again.
   `Alert` is reserved for the blocking forced-update prompt in `utils/appUpdate.ts`.
 - Surface the backend's message: `Toast.error("…", errorMessage(err))` using
   `errorMessage` from `API/errors.ts`. Never show a bare status code.
+
+### 4c. Components are declared at module scope
+
+A component defined inside another component's render body is a new function
+object — and therefore a new *type* — on every render, so React unmounts its
+subtree and mounts a fresh one instead of updating it. A `TextInput` inside one
+is destroyed and rebuilt on every keystroke: focus lost, keyboard dismissed, one
+character per tap. `settings/PersonalDetails.tsx` shipped that way, as did five
+screens across the other two apps.
+
+Pass what it closed over — the theme, the form, the setter — as props.
+`BackendAPI/tests/test_component_identity.py` fails the build on a nested
+component containing a `TextInput` or a hook.
+
+### 4d. A form seeded from a query needs an effect to reseed it
+
+`useState(User?.phone_number || "")` reads the query on the first render and
+never again. On a warm cache that looks right; on a cold one the fields seed
+empty and stay empty, and saving writes the blanks back over the customer's real
+details. Every edit screen resyncs in a `useEffect` keyed on the query data,
+guarded so a reply landing mid-save cannot overwrite what is being typed.
 
 ### 4a. Errors thrown by the API client
 `useApiRequest` normalises **every** failure into an `ApiError` — a plain `Error`

@@ -19,7 +19,59 @@ import { errorMessage } from "@/API/errors";
 import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 
+/**
+ * One label/value row on the owner record, editable in place.
+ *
+ * Module scope, not the render body of `OwnerProfile`. React reconciles by
+ * component *type*, and a function defined during render is a new type on every
+ * render — so React unmounts the old subtree and mounts a new one rather than
+ * updating it. The `TextInput` here is driven by `editForm`, which lives in
+ * `OwnerProfile`, so every keystroke destroyed and recreated the native input:
+ * focus lost, keyboard closed, one character per tap.
+ *
+ * `focusedField` made it worse rather than better — the focus ring it drives was
+ * being torn down by the same remount that dismissed the keyboard, so the field
+ * never looked focused either.
+ */
+const InfoRow = ({
+    label,
+    value,
+    field,
+    placeholder,
+    keyboardType = "default",
+    darkTheme,
+    isEditing,
+    editForm,
+    setEditForm,
+    focusedField,
+    setFocusedField,
+}: any) => {
+    const isFocused = focusedField === field;
+    return (
+        <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-slate-100"}`}>
+            <Text className={`w-1/3 mt-3 text-sm ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{label}</Text>
+            {isEditing ? (
+                <View className={`w-[60%] px-3 h-[45px] rounded-xl border-2 flex-row items-center ${isFocused ? "border-green-500 bg-green-500/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
+                    <TextInput
+                        value={editForm[field as keyof typeof editForm]}
+                        onChangeText={(text) => setEditForm({ ...editForm, [field]: text })}
+                        onFocus={() => { setFocusedField(field); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                        onBlur={() => setFocusedField(null)}
+                        placeholder={placeholder || `Enter ${label}`}
+                        placeholderTextColor={darkTheme ? "#666" : "#999"}
+                        keyboardType={keyboardType as KeyboardTypeOptions}
+                        className={`flex-1 text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}
+                    />
+                </View>
+            ) : (
+                <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>{value || "—"}</Text>
+            )}
+        </View>
+    );
+};
+
 export default function OwnerProfile() {
+
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { signOut, getToken } = useAuth();
@@ -156,30 +208,7 @@ export default function OwnerProfile() {
     }
   };
 
-  const InfoRow = ({ label, value, field, placeholder, keyboardType = "default" }: any) => {
-    const isFocused = focusedField === field;
-    return (
-        <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-slate-100"}`}>
-            <Text className={`w-1/3 mt-3 text-sm ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{label}</Text>
-            {isEditing ? (
-                <View className={`w-[60%] px-3 h-[45px] rounded-xl border-2 flex-row items-center ${isFocused ? "border-green-500 bg-green-500/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
-                    <TextInput
-                        value={editForm[field as keyof typeof editForm]}
-                        onChangeText={(text) => setEditForm({ ...editForm, [field]: text })}
-                        onFocus={() => { setFocusedField(field); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                        onBlur={() => setFocusedField(null)}
-                        placeholder={placeholder || `Enter ${label}`}
-                        placeholderTextColor={darkTheme ? "#666" : "#999"}
-                        keyboardType={keyboardType as KeyboardTypeOptions}
-                        className={`flex-1 text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-900"}`}
-                    />
-                </View>
-            ) : (
-                <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-slate-900"}`}>{value || "—"}</Text>
-            )}
-        </View>
-    );
-  };
+  const infoRowProps = { darkTheme, isEditing, editForm, setEditForm, focusedField, setFocusedField };
 
   const renderKYCBadge = () => {
       const status = vendorProfile?.verification_status?.toLowerCase() || "pending";
@@ -289,14 +318,14 @@ export default function OwnerProfile() {
           <View className={`rounded-[24px] p-6 mb-8 border shadow-sm ${darkTheme ? "bg-surface-container" : "bg-white border-gray-100"}`}>
             {isEditing ? (
               <>
-                <InfoRow label="First Name" field="firstName" value={editForm.firstName} />
-                <InfoRow label="Last Name" field="lastName" value={editForm.lastName} />
+                <InfoRow {...infoRowProps} label="First Name" field="firstName" value={editForm.firstName} />
+                <InfoRow {...infoRowProps} label="Last Name" field="lastName" value={editForm.lastName} />
               </>
             ) : (
-              <InfoRow label="Full Name" value={user?.fullName || vendorProfile?.owners_name || ""} />
+              <InfoRow {...infoRowProps} label="Full Name" value={user?.fullName || vendorProfile?.owners_name || ""} />
             )}
             
-            <InfoRow label="Phone Number" field="phone_number" value={vendorProfile?.phone_number || ""} placeholder="07XXXXXXXX" keyboardType="phone-pad" />
+            <InfoRow {...infoRowProps} label="Phone Number" field="phone_number" value={vendorProfile?.phone_number || ""} placeholder="07XXXXXXXX" keyboardType="phone-pad" />
             
             {!isEditing && (
               <>

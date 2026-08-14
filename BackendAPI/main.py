@@ -279,12 +279,63 @@ async def readiness_check():
         content={"status": "ready" if ready else "not ready", "checks": checks},
     )
 
+#: The three apps, by the Android package each one actually ships as.
+#:
+#: This used to be one answer for all three, naming `com.drop.app` — a package
+#: that does not exist on this platform and never has. The apps are
+#: `com.drop.customer`, `com.drop.rider` and `com.drop.vendor`, so the "Update
+#: Now" button on the only screen a blocked user can reach opened a Play Store
+#: page for nothing. A forced update that cannot be completed is worse than no
+#: forced update: it is an uninstall.
+#:
+#: One floor for three apps was wrong for a second reason. They are built and
+#: released separately and their versions move independently, so requiring 1.4.0
+#: because the customer app changed its checkout would have locked every rider
+#: out of a build that was current.
+_APP_PACKAGES = {
+    "customer": "com.drop.customer",
+    "rider": "com.drop.rider",
+    "vendor": "com.drop.vendor",
+}
+
+
 @app.get("/api/app-version", tags=["App Version"])
-async def get_app_version():
+async def get_app_version(app: str = "customer"):
+    """The lowest version of `app` that may still be used, and where to update.
+
+    Public and unauthenticated on purpose: a build too old to sign in still has
+    to be told to update, and this is the one call it can make.
+
+    The floor is an environment variable rather than a `Platform_Settings` row,
+    which is the opposite of what a business figure would be. Two reasons, both
+    deliberate. It is a release decision, not a trading one — it changes when a
+    build ships, alongside the deploy that made the old one unusable. And it has
+    to be answerable when the settings cache is degraded, because the situation
+    in which you most need to force an upgrade is the one where something is
+    already wrong. `CRON_SECRET`, `METRICS_TOKEN` and `PUBLIC_ASSET_BASE_URL`
+    sit here for the same reason.
+
+    An unknown `app` falls back to the customer's answer rather than erroring:
+    this endpoint's job is to avoid blocking a client, so an unrecognised
+    parameter must not be the thing that blocks one.
+    """
+    key = app if app in _APP_PACKAGES else "customer"
+    package = _APP_PACKAGES[key]
+
+    # Per app, so one can be forced forward without touching the other two.
+    # Unset means "no floor" — 0.0.0 is below every real build, so an
+    # unconfigured platform never locks anybody out by accident.
+    min_version = os.getenv(f"MIN_APP_VERSION_{key.upper()}", "0.0.0")
+
+    ios_id = os.getenv(f"IOS_APP_ID_{key.upper()}")
+
     return {
-        "min_version": "1.0.0",
-        "ios_store_url": "https://apps.apple.com/app/drop/id123456789",
-        "android_store_url": "https://play.google.com/store/apps/details?id=com.drop.app"
+        "app": key,
+        "min_version": min_version,
+        # Only offered once there is a real App Store listing. A placeholder id
+        # is a link to somebody else's app.
+        "ios_store_url": f"https://apps.apple.com/app/id{ios_id}" if ios_id else None,
+        "android_store_url": f"https://play.google.com/store/apps/details?id={package}",
     }
 
 # --- F-012 FIX: Global Exception Handler (prevents stack trace leaks) ---

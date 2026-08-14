@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from services.auth_service import  createUser
@@ -177,6 +177,59 @@ async def get_user_details(db: AsyncSession = Depends(get_db), user = Depends(ge
   clerk_id = user["sub"]
   user = await get_user(clerk_id= clerk_id , db=db)
   return user
+
+#: What a browser will render inline. Anything else — SVG in particular, which
+#: can carry script — must not be served back from our own origin.
+_ALLOWED_IMAGE_KINDS = {"jpeg", "png", "webp", "gif"}
+
+
+@router.post("/upload-profile-pic")
+@limiter.limit("10/minute")
+async def upload_customer_profile_pic(
+    request: Request,
+    file: UploadFile = File(...),
+    user = Depends(get_current_user),
+):
+    """Store a customer's avatar and return its S3 key.
+
+    The counterpart of `POST /api/vendor/upload-image`, and it exists for the
+    same reason that one does. This app was still posting straight to Cloudinary
+    with `upload_preset: "drop_uploads"` and no signature — an unsigned preset in
+    a shipped bundle is a public write endpoint: anyone who unzips the APK can
+    upload arbitrary files to the account, from any machine, at the account
+    owner's expense, and nothing in the request says who did it. Revoking it
+    means deleting the preset for every user at once.
+
+    The rider and vendor apps were moved off that path; this one was not, and
+    nothing failed the build over it because the raw-`fetch` guard covering the
+    other two apps was never written for this one.
+
+    Returns the S3 **key**, not a URL. `BaseUser.profile_pic` and
+    `BasicUser.profile_pic` run it through `public_asset_url` on the way out, so
+    the avatar gets a stable, cacheable address instead of a presigned one that
+    changes in every response and defeats every image cache in the stack.
+    `secure_url` is in the body because that is the field name the app already
+    reads.
+    """
+    import imghdr
+
+    header = await file.read(512)
+    await file.seek(0)
+    kind = imghdr.what(None, h=header)
+    # imghdr predates WebP; expo-image-manipulator emits it, so accept the RIFF
+    # container explicitly rather than rejecting the app's own output.
+    is_webp = header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if not (kind in _ALLOWED_IMAGE_KINDS or is_webp):
+        raise HTTPException(status_code=400, detail="Upload a JPG, PNG or WebP image.")
+
+    from utils.s3_utils import upload_file_to_s3
+
+    key = await upload_file_to_s3(file, prefix=f"customers/{user['sub']}")
+    if not key:
+        raise HTTPException(status_code=500, detail="Could not save that image. Please try again.")
+
+    return {"url": key, "secure_url": key}
+
 
 @router.post("/update_profile_pic")
 async def change_user_profile_pic( response_body: RequestBodyProfilePic, db: AsyncSession = Depends(get_db), user = Depends(get_current_user)):

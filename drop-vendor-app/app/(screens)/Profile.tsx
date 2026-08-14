@@ -29,6 +29,42 @@ import { useUpdateVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const NavItem = ({ icon, label, description, path, onPress, danger, darkTheme, router }: { icon: any, label: string, description: string, path?: string, onPress?: () => void, danger?: boolean } & { darkTheme: boolean; router: ReturnType<typeof useRouter> }) => (
+  <TouchableOpacity
+    activeOpacity={0.7}
+    onPress={() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (onPress) onPress();
+      else if (path) router.push(path as any);
+    }}
+    className={`rounded-3xl p-5 mb-3 flex-row items-center border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container" : "bg-white border-gray-100")}`}
+    style={darkTheme ? {} : { 
+      ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) 
+    }}
+  >
+    <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${danger ? "bg-red-500/20" : (darkTheme ? "bg-slate-800" : "bg-white")}`}>
+      <Ionicons name={icon} size={24} color={danger ? "#ef4444" : BRAND.primary} />
+    </View>
+    <View className="flex-1">
+      <Text className={`text-lg font-sans-bold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>{label}</Text>
+      <Text className={`text-sm mt-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{description}</Text>
+    </View>
+    <Ionicons name={path ? "chevron-forward" : "chevron-forward"} size={24} color={danger ? "#ef4444" : BRAND.primary} />
+  </TouchableOpacity>
+);
+
 export default function Profile() {
   const { currentTheme, setTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -170,29 +206,7 @@ export default function Profile() {
       });
   };
 
-  const NavItem = ({ icon, label, description, path, onPress, danger }: { icon: any, label: string, description: string, path?: string, onPress?: () => void, danger?: boolean }) => (
-    <TouchableOpacity
-      activeOpacity={0.7}
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (onPress) onPress();
-        else if (path) router.push(path as any);
-      }}
-      className={`rounded-3xl p-5 mb-3 flex-row items-center border ${danger ? (darkTheme ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-100") : (darkTheme ? "bg-surface-container" : "bg-white border-gray-100")}`}
-      style={darkTheme ? {} : { 
-        ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) 
-      }}
-    >
-      <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${danger ? "bg-red-500/20" : (darkTheme ? "bg-slate-800" : "bg-white")}`}>
-        <Ionicons name={icon} size={24} color={danger ? "#ef4444" : BRAND.primary} />
-      </View>
-      <View className="flex-1">
-        <Text className={`text-lg font-sans-bold ${danger ? "text-red-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>{label}</Text>
-        <Text className={`text-sm mt-1 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>{description}</Text>
-      </View>
-      <Ionicons name={path ? "chevron-forward" : "chevron-forward"} size={24} color={danger ? "#ef4444" : BRAND.primary} />
-    </TouchableOpacity>
-  );
+  const navItemProps = { darkTheme, router };
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -276,7 +290,7 @@ export default function Profile() {
 
         <Text className={`mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Account & Identity</Text>
         
-        <NavItem 
+        <NavItem {...navItemProps} 
           icon="storefront-outline" 
           label="Store Profile" 
           description="View public store details and operations" 
@@ -284,7 +298,7 @@ export default function Profile() {
         />
         
         {!isStaff && (
-          <NavItem
+          <NavItem {...navItemProps}
             icon="person-circle-outline"
             label="Owner Profile"
             description="Manage personal KYC and sign-in details"
@@ -297,7 +311,7 @@ export default function Profile() {
             open is the same decision as not offering it. Pausing the shop is
             *not* here — it is on the dashboard and open to staff. */}
         {!isStaff && (
-          <NavItem
+          <NavItem {...navItemProps}
             icon="pricetag-outline"
             label="Store Terms"
             description="Cash orders and your minimum order value"
@@ -307,21 +321,21 @@ export default function Profile() {
 
         <Text className={`mt-6 mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>Business Tools</Text>
         
-        <NavItem 
+        <NavItem {...navItemProps} 
           icon="map-outline" 
           label="Live Map" 
           description="Track active orders and riders" 
           path="/(screens)/MyMap" 
         />
 
-        <NavItem 
+        <NavItem {...navItemProps} 
           icon="wallet-outline" 
           label="Digital Wallet" 
           description="Manage funds and float balance" 
           path="/(screens)/WalletScreen" 
         />
 
-        <NavItem 
+        <NavItem {...navItemProps} 
           icon="water-outline" 
           label="Bottle Reconciliation" 
           description="Clear empty bottle debt with riders" 
@@ -329,7 +343,7 @@ export default function Profile() {
         />
         
         {!isStaff && (
-          <NavItem 
+          <NavItem {...navItemProps} 
             icon="people-outline" 
             label={vendor?.vendor_type === "wholesale_b2b" ? "Link TukTuk Drivers" : "Manage Riders"}
             description={vendor?.vendor_type === "wholesale_b2b" ? "Link drivers to your Vendor ID" : "View and approve gig rider applications"}
@@ -341,7 +355,7 @@ export default function Profile() {
 
         {/* Not owner-only. Staff are the ones on the floor when a rider turns up
             with the wrong bottle count, and they have no other way to reach us. */}
-        <NavItem
+        <NavItem {...navItemProps}
           icon="help-buoy-outline"
           label="Help & Support"
           description="Message the Drop team about this store"
@@ -350,7 +364,7 @@ export default function Profile() {
 
         <Text className={`mt-6 mb-4 ml-2 font-sans-bold text-xl tracking-tight ${darkTheme ? "text-white" : "text-slate-900"}`}>System & Security</Text>
         
-        <NavItem 
+        <NavItem {...navItemProps} 
           icon="log-out-outline" 
           label="Sign Out" 
           description="Securely log out of your account" 
@@ -358,7 +372,7 @@ export default function Profile() {
         />
         
         {!isStaff && (
-          <NavItem 
+          <NavItem {...navItemProps} 
             icon="trash-outline" 
             label="Delete Store" 
             description="Permanently erase your account and data" 

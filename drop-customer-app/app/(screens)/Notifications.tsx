@@ -150,6 +150,12 @@ const Notifications = () => {
             <View style={{ flex: 1, marginHorizontal: 0 }}>
                 <FlashList
                     data={groupedNotifications}
+                    // Both kinds of row carry an `id`: a notification its own, a
+                    // date header the synthetic `header-<date>`. Without this the
+                    // list keys on position, and position is exactly what a paged
+                    // feed changes — appending a page or marking one read reuses a
+                    // recycled row against different data.
+                    keyExtractor={(item: any) => String(item.id)}
                     contentContainerStyle={{ padding: 15, paddingBottom: 120}}
                     ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                     refreshControl={

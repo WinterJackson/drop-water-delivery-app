@@ -10,6 +10,38 @@ import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { Toast } from "@/lib/toast";
 import { PressableScale } from "@/components/ui/PressableScale";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const ToggleItem = ({ title, description, prefKey, darkTheme, preferences, handleToggle }: { title: string, description: string, prefKey: string } & { darkTheme: boolean; preferences: Record<string, boolean>; handleToggle: (key: string, value: boolean) => void }) => (
+    <View 
+        className={`flex-row justify-between items-center p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`}
+        style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+    >
+        <View className="flex-1 pr-6">
+            <Text className={`text-lg font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+            <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
+        </View>
+        <View>
+            <Switch 
+                value={preferences[prefKey]} 
+                onValueChange={(val) => handleToggle(prefKey, val)} 
+                trackColor={{ false: darkTheme ? "#333" : "#ddd", true: BRAND.blue }}
+                thumbColor={BRAND.white}
+            />
+        </View>
+    </View>
+);
+
 export default function NotificationPreferences() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -47,25 +79,7 @@ export default function NotificationPreferences() {
         }
     };
 
-    const ToggleItem = ({ title, description, prefKey }: { title: string, description: string, prefKey: string }) => (
-        <View 
-            className={`flex-row justify-between items-center p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`}
-            style={darkTheme ? {} : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
-        >
-            <View className="flex-1 pr-6">
-                <Text className={`text-lg font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
-                <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
-            </View>
-            <View>
-                <Switch 
-                    value={preferences[prefKey]} 
-                    onValueChange={(val) => handleToggle(prefKey, val)} 
-                    trackColor={{ false: darkTheme ? "#333" : "#ddd", true: BRAND.blue }}
-                    thumbColor={BRAND.white}
-                />
-            </View>
-        </View>
-    );
+    const toggleItemProps = { darkTheme, preferences, handleToggle };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -89,17 +103,17 @@ export default function NotificationPreferences() {
             </View>
             </View>
             <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120}}>
-                <ToggleItem 
+                <ToggleItem {...toggleItemProps} 
                     title="Order Updates" 
                     description="Get push notifications about your order status, out for delivery, and arrival." 
                     prefKey="order_updates" 
                 />
-                <ToggleItem 
+                <ToggleItem {...toggleItemProps} 
                     title="Promotions & Offers" 
                     description="Receive special offers, discounts, and news from your favorite vendors." 
                     prefKey="promotions" 
                 />
-                <ToggleItem 
+                <ToggleItem {...toggleItemProps} 
                     title="Delivery Reminders" 
                     description="Reminders to order water when you might be running low." 
                     prefKey="delivery_reminders" 

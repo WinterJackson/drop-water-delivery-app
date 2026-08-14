@@ -108,20 +108,26 @@ export default function VendorOnboarding() {
             try {
                 const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
                 coords = current.coords;
-            } catch (_e1) {}
+            } catch (_e1) {
+                if (__DEV__) console.warn("Tier 1 (High) GPS failed, trying Low...");
+            }
 
             if (!coords) {
                 try {
                     const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
                     coords = current.coords;
-                } catch (_e2) {}
+                } catch (_e2) {
+                    if (__DEV__) console.warn("Tier 2 (Low) GPS failed, trying last known...");
+                }
             }
 
             if (!coords) {
                 try {
                     const lastKnown = await Location.getLastKnownPositionAsync();
                     if (lastKnown) coords = lastKnown.coords;
-                } catch (_e3) {}
+                } catch (_e3) {
+                    if (__DEV__) console.warn("Tier 3 (LastKnown) also failed.");
+                }
             }
 
             if (!coords) {

@@ -21,6 +21,25 @@ import { useRiderEarnings, useRiderProfile } from "@/hooks/queries/useRiderData"
 import { useRouter } from "expo-router";
 import { formatMoneyShort } from "@/utils/money";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const StatRow = ({ label, value, darkTheme }: { label: string; value: string | number } & { darkTheme: boolean }) => (
+  <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
+    <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{label}</Text>
+    <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>{value}</Text>
+  </View>
+);
+
 export default function Earnings() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -33,12 +52,7 @@ export default function Earnings() {
 
   const onRefresh = useCallback(async () => { await refetch(); }, [refetch]);
 
-  const StatRow = ({ label, value }: { label: string; value: string | number }) => (
-    <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
-      <Text className={`text-base ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{label}</Text>
-      <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>{value}</Text>
-    </View>
-  );
+  const statRowProps = { darkTheme };
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -113,8 +127,8 @@ export default function Earnings() {
             </PressableScale>
 
             <View className={`rounded-3xl p-4 shadow-sm ${darkTheme ? "bg-white/5" : "bg-white"}`}>
-              <StatRow label="Rider Name" value={profile?.name || "Rider"} />
-              <StatRow label="Total Deliveries" value={earnings?.total_deliveries || 0} />
+              <StatRow {...statRowProps} label="Rider Name" value={profile?.name || "Rider"} />
+              <StatRow {...statRowProps} label="Total Deliveries" value={earnings?.total_deliveries || 0} />
               
               {/* Highlighted Bonuses */}
               <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-white/5" : "border-gray-100"}`}>
@@ -127,7 +141,7 @@ export default function Earnings() {
                 <Text style={{ color: TOAST.success }} className={`text-base font-sans-bold`}>+ {formatMoneyShort(earnings?.total_payload_bonus)}</Text>
               </View>
 
-              <StatRow label="Availability" value={profile?.is_available ? "Receiving Deliveries" : "Offline"} />
+              <StatRow {...statRowProps} label="Availability" value={profile?.is_available ? "Receiving Deliveries" : "Offline"} />
             </View>
           </>
         )}

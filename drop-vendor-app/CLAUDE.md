@@ -289,6 +289,33 @@ maps in two screens is how both states came to be missing from both.
 - The thread is rendered as the server gives it; internal notes are stripped
   server-side.
 
+### Components are declared at module scope
+
+A component defined inside another component's render body is a new function
+object — and therefore a new *type* — on every render, so React unmounts its
+subtree and mounts a fresh one instead of updating it. A `TextInput` inside one
+is destroyed and rebuilt on every keystroke: focus lost, keyboard dismissed, one
+character per tap. `OwnerProfile.tsx`, `StoreProfile.tsx` and
+`business/PayoutSettings.tsx` all shipped that way — the last being where a
+vendor types the bank account their money is paid into, up to twelve digits, one
+tap per digit.
+
+Pass what it closed over — the theme, the edit mode, the form and its setter —
+as props. `BackendAPI/tests/test_component_identity.py` fails the build on a
+nested component containing a `TextInput` or a hook.
+
+### A forced update reaches this app too
+
+`utils/appUpdate.ts` is called once from the root layout. It used to exist only
+in the customer app, which had it backwards: a customer on a stale build sees
+wrong prices, whereas a vendor on one is open for business, accepting orders the
+build may price or dispatch wrongly.
+
+`GET /api/app-version?app=vendor` answers per app — the three ship separately and
+their versions move independently, so one floor for all three would lock out a
+build that is current. The floor is `MIN_APP_VERSION_VENDOR` in the API's
+environment; unset means no floor.
+
 ### Session teardown
 `hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
 state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:

@@ -141,6 +141,10 @@ const Notifications = () => {
             <View style={{ flex: 1, marginHorizontal: 0 }}>
                 <FlashList
                     data={groupedNotifications}
+                    // Notifications carry their own id; the date headers carry a
+                    // synthetic `header-<date>`. Keying on position instead breaks
+                    // as soon as a page is appended underneath.
+                    keyExtractor={(item: any) => String(item.id)}
                     contentContainerStyle={{ padding: 15, paddingBottom: 120 }}
                     ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                     refreshControl={

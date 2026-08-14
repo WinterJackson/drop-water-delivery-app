@@ -205,6 +205,33 @@ an administrator cannot move — and here moving it would have left a rider
 looking at a map, and reading a promise, that were both a kilometre short of
 what the platform was doing. Same rule, same reason, as the withdrawal fee.
 
+### Components are declared at module scope
+
+A component defined inside another component's render body is a new function
+object — and therefore a new *type* — on every render, so React unmounts its
+subtree and mounts a fresh one instead of updating it. A `TextInput` inside one
+is destroyed and rebuilt on every keystroke: focus lost, keyboard dismissed, one
+character per tap. `Profile.tsx` and `rider/VehicleDetails.tsx` both shipped
+that way — the two screens where a rider types their phone number and their
+number plate.
+
+Pass what it closed over — the theme, the edit mode, the form and its setter —
+as props. `BackendAPI/tests/test_component_identity.py` fails the build on a
+nested component containing a `TextInput` or a hook.
+
+### A forced update reaches this app too
+
+`utils/appUpdate.ts` is called once from the root layout. It used to exist only
+in the customer app, which had it backwards: a customer on a stale build sees
+wrong prices, whereas a rider on one is mid-delivery, holding somebody's water
+and somebody's cash — and is the person least likely to go looking for an app
+store.
+
+`GET /api/app-version?app=rider` answers per app — the three ship separately and
+their versions move independently, so one floor for all three would lock out a
+build that is current. The floor is `MIN_APP_VERSION_RIDER` in the API's
+environment; unset means no floor.
+
 ### Session teardown
 `hooks/useSessionCleanup.ts` is mounted once in the root layout and wipes local
 state whenever Clerk's session ends. Do not rely on the sign-out handlers alone:

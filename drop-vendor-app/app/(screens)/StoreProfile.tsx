@@ -14,6 +14,73 @@ import * as Location from "expo-location";
 import { BRAND } from "@/constants/brandColors";
 import { useUpdateVendorProfile, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 
+/**
+ * One label/value row on the store record, editable in place.
+ *
+ * Module scope, not the render body of `StoreProfile`. React reconciles by
+ * component *type*; a function defined during render is a new type on every
+ * render, so React unmounts the previous subtree and mounts a new one instead of
+ * updating it. The `TextInput` here is controlled by state that lives in
+ * `StoreProfile`, so each keystroke re-rendered the screen, which destroyed and
+ * recreated the native input: focus lost, keyboard closed, one character per tap.
+ *
+ * The theme and the edit mode arrive as props rather than being closed over.
+ */
+const InfoRow = ({
+    label,
+    value,
+    stateVal,
+    setStateVal,
+    placeholder,
+    editable = true,
+    keyboardType = "default",
+    darkTheme,
+    isEditing,
+}: any) => (
+    <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
+        <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>{label}</Text>
+        {isEditing && editable ? (
+            <TextInput
+                value={stateVal}
+                onChangeText={setStateVal}
+                placeholder={placeholder || `Enter ${label}`}
+                placeholderTextColor={darkTheme ? "#666" : "#999"}
+                keyboardType={keyboardType}
+                className={`w-[60%] p-3 rounded-xl border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"}`}
+            />
+        ) : (
+            <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"} ${!editable && isEditing ? "opacity-50" : ""}`}>{value || "—"}</Text>
+        )}
+    </View>
+);
+
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const OperationsCard = ({ title, desc, icon, href, color, darkTheme, router, shadowStyle }: any) => (
+    <PressableScale onPress={() => router.push(href)} activeOpacity={0.7} className="mb-3">
+        <View className={`rounded-2xl p-4 flex-row items-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`} style={shadowStyle}>
+            <View className={`p-3 rounded-full mr-4 ${darkTheme ? "bg-blue-900/40" : "bg-blue-50"}`}>
+                <Ionicons name={icon} size={26} color={color || BRAND.primary} />
+            </View>
+            <View className="flex-1">
+                <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
+                <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{desc}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
+        </View>
+    </PressableScale>
+);
+
 export default function StoreProfile() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -217,38 +284,9 @@ export default function StoreProfile() {
         ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } 
         : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 };
 
-    const InfoRow = ({ label, value, stateVal, setStateVal, placeholder, editable = true, keyboardType = "default" }: any) => (
-        <View className={`flex-row justify-between py-3 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
-            <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>{label}</Text>
-            {isEditing && editable ? (
-                <TextInput
-                    value={stateVal}
-                    onChangeText={setStateVal}
-                    placeholder={placeholder || `Enter ${label}`}
-                    placeholderTextColor={darkTheme ? "#666" : "#999"}
-                    keyboardType={keyboardType}
-                    className={`w-[60%] p-3 rounded-xl border ${darkTheme ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"}`}
-                />
-            ) : (
-                <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"} ${!editable && isEditing ? "opacity-50" : ""}`}>{value || "—"}</Text>
-            )}
-        </View>
-    );
+    const infoRowProps = { darkTheme, isEditing };
 
-    const OperationsCard = ({ title, desc, icon, href, color }: any) => (
-        <PressableScale onPress={() => router.push(href)} activeOpacity={0.7} className="mb-3">
-            <View className={`rounded-2xl p-4 flex-row items-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`} style={shadowStyle}>
-                <View className={`p-3 rounded-full mr-4 ${darkTheme ? "bg-blue-900/40" : "bg-blue-50"}`}>
-                    <Ionicons name={icon} size={26} color={color || BRAND.primary} />
-                </View>
-                <View className="flex-1">
-                    <Text className={`text-base font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
-                    <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{desc}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
-            </View>
-        </PressableScale>
-    );
+    const operationsCardProps = { darkTheme, router, shadowStyle };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -310,15 +348,15 @@ export default function StoreProfile() {
                             </View>
 
                             <View className={`rounded-2xl p-4 mb-8 ${darkTheme ? "bg-white/5 border border-white/5" : "bg-white border border-gray-100"} shadow-sm`}>
-                                <InfoRow label="Store Name" value={vendorProfile?.business_name} stateVal={businessName} setStateVal={setBusinessName} />
-                                <InfoRow label="Owner Name" value={vendorProfile?.owners_name} stateVal={ownersName} setStateVal={setOwnersName} />
-                                <InfoRow label="Email Address" value={vendorProfile?.email} editable={false} />
-                                <InfoRow label="Phone Number" value={vendorProfile?.phone_number} stateVal={phone} setStateVal={setPhone} keyboardType="phone-pad" placeholder="07XXXXXXXX" />
+                                <InfoRow {...infoRowProps} label="Store Name" value={vendorProfile?.business_name} stateVal={businessName} setStateVal={setBusinessName} />
+                                <InfoRow {...infoRowProps} label="Owner Name" value={vendorProfile?.owners_name} stateVal={ownersName} setStateVal={setOwnersName} />
+                                <InfoRow {...infoRowProps} label="Email Address" value={vendorProfile?.email} editable={false} />
+                                <InfoRow {...infoRowProps} label="Phone Number" value={vendorProfile?.phone_number} stateVal={phone} setStateVal={setPhone} keyboardType="phone-pad" placeholder="07XXXXXXXX" />
                                 
                                 {isEditing ? (
                                     <>
-                                        <InfoRow label="Business License" value={vendorProfile?.business_license} stateVal={businessLicense} setStateVal={setBusinessLicense} placeholder="License No" />
-                                        <InfoRow label="Deposit Fee" value={vendorProfile?.deposit_fee?.toString()} stateVal={depositFee} setStateVal={setDepositFee} keyboardType="numeric" placeholder="e.g. 500" />
+                                        <InfoRow {...infoRowProps} label="Business License" value={vendorProfile?.business_license} stateVal={businessLicense} setStateVal={setBusinessLicense} placeholder="License No" />
+                                        <InfoRow {...infoRowProps} label="Deposit Fee" value={vendorProfile?.deposit_fee?.toString()} stateVal={depositFee} setStateVal={setDepositFee} keyboardType="numeric" placeholder="e.g. 500" />
                                         
                                         {/* Vendor Type Selection */}
                                         <View className={`flex-row justify-between py-4 border-b ${darkTheme ? "border-slate-800/80" : "border-gray-100"}`}>
@@ -335,10 +373,10 @@ export default function StoreProfile() {
                                     </>
                                 ) : (
                                     <>
-                                        <InfoRow label="Business License" value={vendorProfile?.business_license || "Not Provided"} editable={false} />
-                                        <InfoRow label="Vendor Type" value={vendorProfile?.vendor_type === "wholesale_b2b" ? "Wholesale (B2B)" : (vendorProfile?.vendor_type === "retail_refill" ? "Retail Refill" : "N/A")} editable={false} />
-                                        <InfoRow label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? `Ksh ${vendorProfile?.deposit_fee}` : "N/A"} editable={false} />
-                                        <InfoRow label="Operating Hours" value={vendorProfile?.shift_start && vendorProfile?.shift_end ? `${vendorProfile.shift_start.slice(0, 5)} - ${vendorProfile.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
+                                        <InfoRow {...infoRowProps} label="Business License" value={vendorProfile?.business_license || "Not Provided"} editable={false} />
+                                        <InfoRow {...infoRowProps} label="Vendor Type" value={vendorProfile?.vendor_type === "wholesale_b2b" ? "Wholesale (B2B)" : (vendorProfile?.vendor_type === "retail_refill" ? "Retail Refill" : "N/A")} editable={false} />
+                                        <InfoRow {...infoRowProps} label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? `Ksh ${vendorProfile?.deposit_fee}` : "N/A"} editable={false} />
+                                        <InfoRow {...infoRowProps} label="Operating Hours" value={vendorProfile?.shift_start && vendorProfile?.shift_end ? `${vendorProfile.shift_start.slice(0, 5)} - ${vendorProfile.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
                                         <View className="flex-row justify-between pt-3">
                                             <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Location</Text>
                                             <Text className={`flex-1 mt-3 font-sans-semibold text-right ${darkTheme ? "text-slate-200" : "text-gray-900"}`}>{vendorProfile?.location_address || "Not Set"}</Text>
@@ -433,21 +471,21 @@ export default function StoreProfile() {
                                     
                                     {!isStaff && (
                                         <>
-                                            <OperationsCard 
+                                            <OperationsCard {...operationsCardProps} 
                                                 title="Operating Hours" 
                                                 desc="Set store open and close times" 
                                                 icon="time-outline" 
                                                 href="/(screens)/business/OperatingHours" 
                                             />
                                             
-                                            <OperationsCard 
+                                            <OperationsCard {...operationsCardProps} 
                                                 title="Staff Management" 
                                                 desc="Delegate operations to a team member" 
                                                 icon="people-outline" 
                                                 href="/(screens)/business/ManageStaff" 
                                             />
                                             
-                                            <OperationsCard 
+                                            <OperationsCard {...operationsCardProps} 
                                                 title="Payout Settings" 
                                                 desc="Configure bank or M-Pesa details" 
                                                 icon="card-outline" 

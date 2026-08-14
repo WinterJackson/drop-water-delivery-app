@@ -67,6 +67,14 @@ const VendorApiRoutes = {
     path: `${BASE_URL}/api/auth/push-token?app_type=vendor`,
     method: "DELETE",
   } as const satisfies ApiRoute,
+  /**
+   * The lowest build of this app the platform still accepts, and where to get a
+   * newer one. Public — a build too old to sign in must still be tellable.
+   */
+  AppVersion: {
+    path: `${BASE_URL}/api/app-version?app=vendor`,
+    method: "GET",
+  } as const satisfies ApiRoute,
   GetStorefront: {
     path: `${BASE_URL}/api/vendor/storefront`,
     method: "GET",

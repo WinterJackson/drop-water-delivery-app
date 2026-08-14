@@ -116,7 +116,12 @@ function EditProductForm() {
     setLoading(true);
     const payload: Record<string, unknown> = {
       name, description,
-      price: parseFloat(price), discount: parseFloat(discount || "0"),
+      // Money goes up as a decimal string, exactly as it comes down as one.
+      // `parseFloat` here put the vendor's price through a double on its way to
+      // a NUMERIC column — the one number every order total on the platform is
+      // built from. The trim matters: the backend takes `Decimal`, and
+      // `Decimal(" 1500.55 ")` is not a number.
+      price: price.trim(), discount: (discount || "0").trim(),
       capacity: parseFloat(capacity),
       weight_kg: parseFloat(weightKg),
       minimum_order_qty: parseInt(minQty || "1"),

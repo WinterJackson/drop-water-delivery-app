@@ -11,6 +11,73 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { PressableScale } from "@/components/ui/PressableScale";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const ActionItem = ({ title, icon, description, onPress, darkTheme }: import("@/types/components").ActionItemProps & { darkTheme: boolean }) => (
+    <PressableScale 
+        activeOpacity={0.7} 
+        onPress={onPress}
+        className={`p-4 mb-4 rounded-xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}
+    >
+        <View className="flex-row items-center gap-4 flex-1">
+            <View className={`w-10 h-10 items-center justify-center rounded-full ${darkTheme ? "bg-black" : "bg-white"}`}>
+                <Text style={{ fontSize: 18 }}>{icon}</Text>
+            </View>
+            <View className="flex-1 pr-4">
+                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+                {description && (
+                    <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
+                )}
+            </View>
+        </View>
+        <Text className={`text-xl ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>›</Text>
+    </PressableScale>
+);
+
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const ToggleItem = ({ title, icon, description, value, onToggle, darkTheme }: import("@/types/components").ToggleItemProps & { darkTheme: boolean }) => (
+    <View className={`p-4 mb-4 rounded-xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
+        <View className="flex-row items-center gap-4 flex-1 border-r border-transparent">
+            <View className={`w-10 h-10 items-center justify-center rounded-full ${darkTheme ? "bg-black" : "bg-white"}`}>
+                <Text style={{ fontSize: 18 }}>{icon}</Text>
+            </View>
+            <View className="flex-1 pr-4">
+                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
+                {description && (
+                    <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
+                )}
+            </View>
+        </View>
+        <Switch
+            value={value}
+            onValueChange={onToggle}
+            trackColor={{ false: darkTheme ? "#333" : "#e5e7eb", true: "#3b82f6" }}
+            thumbColor={BRAND.white}
+        />
+    </View>
+);
+
 export default function PrivacySecurity() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -64,48 +131,9 @@ export default function PrivacySecurity() {
         }
     };
 
-    const ActionItem = ({ title, icon, description, onPress }: import("@/types/components").ActionItemProps) => (
-        <PressableScale 
-            activeOpacity={0.7} 
-            onPress={onPress}
-            className={`p-4 mb-4 rounded-xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}
-        >
-            <View className="flex-row items-center gap-4 flex-1">
-                <View className={`w-10 h-10 items-center justify-center rounded-full ${darkTheme ? "bg-black" : "bg-white"}`}>
-                    <Text style={{ fontSize: 18 }}>{icon}</Text>
-                </View>
-                <View className="flex-1 pr-4">
-                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
-                    {description && (
-                        <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
-                    )}
-                </View>
-            </View>
-            <Text className={`text-xl ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>›</Text>
-        </PressableScale>
-    );
+    const actionItemProps = { darkTheme };
 
-    const ToggleItem = ({ title, icon, description, value, onToggle }: import("@/types/components").ToggleItemProps) => (
-        <View className={`p-4 mb-4 rounded-xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
-            <View className="flex-row items-center gap-4 flex-1 border-r border-transparent">
-                <View className={`w-10 h-10 items-center justify-center rounded-full ${darkTheme ? "bg-black" : "bg-white"}`}>
-                    <Text style={{ fontSize: 18 }}>{icon}</Text>
-                </View>
-                <View className="flex-1 pr-4">
-                    <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{title}</Text>
-                    {description && (
-                        <Text className={`text-xs mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{description}</Text>
-                    )}
-                </View>
-            </View>
-            <Switch
-                value={value}
-                onValueChange={onToggle}
-                trackColor={{ false: darkTheme ? "#333" : "#e5e7eb", true: "#3b82f6" }}
-                thumbColor={BRAND.white}
-            />
-        </View>
-    );
+    const toggleItemProps = { darkTheme };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -134,7 +162,7 @@ export default function PrivacySecurity() {
                 <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-2 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Security
                 </Text>
-                <ActionItem 
+                <ActionItem {...actionItemProps} 
                     title="Change Password" 
                     icon="🔐"
                     description="Request a secure password modification link to your registered email."
@@ -144,13 +172,13 @@ export default function PrivacySecurity() {
                 <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Legal & Compliance
                 </Text>
-                <ActionItem 
+                <ActionItem {...actionItemProps} 
                     title="Privacy Policy" 
                     icon="📄"
                     description="Read our comprehensive privacy policy securely online."
                     onPress={() => handleOpenLink("https://drop.space/privacy")}
                 />
-                <ActionItem 
+                <ActionItem {...actionItemProps} 
                     title="Terms of Service" 
                     icon="⚖️"
                     description="Review the terms and conditions binding your usage."
@@ -160,7 +188,7 @@ export default function PrivacySecurity() {
                 <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-6 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Data Preferences
                 </Text>
-                <ToggleItem 
+                <ToggleItem {...toggleItemProps} 
                     title="Analytics & Telemetry" 
                     icon="📊"
                     description="Allow anonymous usage data to be collected to improve the Drop platform ecosystem."

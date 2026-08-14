@@ -34,6 +34,36 @@ import TripRadarList from "@/components/dashboard/TripRadarList";
 import { Popup } from "@/lib/popup";
 import { Skeleton } from "@/components/ui/Skeleton";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const QuickActionCard = ({ title, subtitle, icon, route, darkTheme, router }: { title: string, subtitle: string, icon: keyof typeof Ionicons.glyphMap, route: string } & { darkTheme: boolean; router: ReturnType<typeof useRouter> }) => (
+  <PressableScale
+    activeOpacity={0.8}
+    onPress={() => router.push(route as any)}
+  >
+    <View className={`p-4 rounded-2xl flex-row items-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
+      <View className={`p-3 rounded-full mr-3 ${darkTheme ? "bg-blue-900/40" : "bg-blue-50"}`}>
+        <Ionicons name={icon} size={24} color={BRAND.primary} />
+      </View>
+      <View className="flex-1">
+        <Text className={`font-sans-bold text-base ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
+        <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
+    </View>
+  </PressableScale>
+);
+
 export default function Dashboard() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -225,23 +255,7 @@ export default function Dashboard() {
     !['delivered', 'cancelled', 'rejected'].includes(o.order_status)
   );
 
-  const QuickActionCard = ({ title, subtitle, icon, route }: { title: string, subtitle: string, icon: keyof typeof Ionicons.glyphMap, route: string }) => (
-    <PressableScale
-      activeOpacity={0.8}
-      onPress={() => router.push(route as any)}
-    >
-      <View className={`p-4 rounded-2xl flex-row items-center border ${darkTheme ? "bg-surface-container border-gray-800" : "bg-white border-gray-200"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
-        <View className={`p-3 rounded-full mr-3 ${darkTheme ? "bg-blue-900/40" : "bg-blue-50"}`}>
-          <Ionicons name={icon} size={24} color={BRAND.primary} />
-        </View>
-        <View className="flex-1">
-          <Text className={`font-sans-bold text-base ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>{title}</Text>
-          <Text className={`text-xs mt-0.5 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{subtitle}</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={24} color={BRAND.primary} />
-      </View>
-    </PressableScale>
-  );
+  const quickActionCardProps = { darkTheme, router };
 
   return (
     <>
@@ -365,11 +379,11 @@ export default function Dashboard() {
             <View className="px-5 mt-4">
               <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Quick Actions</Text>
               <View className="gap-3">
-                <QuickActionCard title="Discover Vendors" subtitle="Find water distribution points" icon="business-outline" route="/(screens)/DiscoverVendors" />
-                <QuickActionCard title="Withdraw Earnings" subtitle="Transfer funds directly to M-Pesa" icon="cash-outline" route="/(screens)/Cashout" />
+                <QuickActionCard {...quickActionCardProps} title="Discover Vendors" subtitle="Find water distribution points" icon="business-outline" route="/(screens)/DiscoverVendors" />
+                <QuickActionCard {...quickActionCardProps} title="Withdraw Earnings" subtitle="Transfer funds directly to M-Pesa" icon="cash-outline" route="/(screens)/Cashout" />
 
-                <QuickActionCard title="My Deliveries" subtitle="View your past delivery history" icon="bicycle-outline" route="/(screens)/EarningsHistory" />
-                <QuickActionCard title="My Performance" subtitle="View stats and gamification progress" icon="stats-chart-outline" route="/(screens)/Performance" />
+                <QuickActionCard {...quickActionCardProps} title="My Deliveries" subtitle="View your past delivery history" icon="bicycle-outline" route="/(screens)/EarningsHistory" />
+                <QuickActionCard {...quickActionCardProps} title="My Performance" subtitle="View stats and gamification progress" icon="stats-chart-outline" route="/(screens)/Performance" />
               </View>
             </View>
 

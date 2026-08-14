@@ -6,7 +6,7 @@ import { ROUTES } from "@/API/routes/ApiRoutes";
 import { errorMessage } from "@/API/errors";
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import CloudinaryUpload from "@/Helpers/imageUpload";
+import SecureUpload from "@/Helpers/imageUpload";
 import { useFavorites } from "@/hooks/queries/useFavorites";
 import { useUpdateProfilePic, useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
 import { useAuth, useClerk, useUser } from "@clerk/clerk-expo";
@@ -111,20 +111,29 @@ const Profile = () => {
 	// picking file from device storage
 	const pickFile = async () => {
 		let result = await ImagePicker.launchImageLibraryAsync({
-			mediaTypes: ["images", "videos"],
+			// Images only. This is an avatar, and the endpoint content-sniffs and
+			// refuses anything that is not one — offering the customer their video
+			// library is offering them a choice that ends in an error.
+			mediaTypes: ["images"],
 			allowsEditing: true,
 			quality: 1,
 		});
 		if (result.canceled) {
 			return;
 		}
-		const uploadedImageData = await CloudinaryUpload(
-			result?.assets[0].uri,
-			result?.assets[0].fileName
-		);
-		ChangeProfileImage(uploadedImageData.secure_url)
-		setImage(uploadedImageData.secure_url);
-		if (__DEV__) console.log(uploadedImageData.secure_url)
+		try {
+			const uploadedImageData = await SecureUpload(
+				result?.assets[0].uri,
+				result?.assets[0].fileName,
+				getToken
+			);
+			ChangeProfileImage(uploadedImageData.secure_url);
+			setImage(uploadedImageData.secure_url);
+		} catch {
+			// `SecureUpload` has already shown the backend's own reason. Swallowing
+			// it here only stops the unhandled rejection — it must not fall through
+			// and set the avatar to an upload that did not happen.
+		}
 	};
 
 	if (!User && !isUserLoading) {

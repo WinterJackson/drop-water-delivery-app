@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 16.1.0",
+    "version": ">= 18.11.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -15,25 +15,6 @@
         "buildType": "apk",
         "distribution": "internal"
       }
-    },
-    "preview2": {
-      "android": {
-        "gradleCommand": ":app:assembleRelease",
-        "distribution": "internal"
-      }
-    },
-    "preview3": {
-      "android": {
-        "buildType": "apk",
-        "distribution": "internal"
-      },
-      "env": {
-        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com",
-        "EXPO_PUBLIC_AUTHORIZED_REDIRECT_URI": "https://clerk.drop.com/v1/oauth_callback"
-      }
-    },
-    "preview4": {
-      "distribution": "internal"
     },
     "production": {
       "environment": "production",

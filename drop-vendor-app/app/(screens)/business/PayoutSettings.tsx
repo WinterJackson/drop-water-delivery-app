@@ -15,6 +15,76 @@ import { BRAND } from "@/constants/brandColors";
 
 type PayoutMethod = "MPESA_PHONE" | "MPESA_TILL" | "MPESA_PAYBILL" | "BANK_TRANSFER";
 
+/**
+ * A labelled text field on the payout form.
+ *
+ * Module scope, not the render body of `PayoutSettings`. React reconciles by
+ * component *type*, and a function created during render is a new type every
+ * render, so the subtree is unmounted and remounted instead of updated — the
+ * native `TextInput` is destroyed and rebuilt on every keystroke, losing focus
+ * and dismissing the keyboard.
+ *
+ * This is the screen where a vendor types the account their money is paid into:
+ * a till number, a paybill and account, an M-Pesa number, or a bank account
+ * number up to twelve digits. Entering twelve digits meant twelve taps back into
+ * the field, which is exactly the condition under which somebody gets a digit
+ * wrong and does not notice.
+ */
+const InputBlock = ({
+    label,
+    value,
+    onChange,
+    placeholder,
+    keyboardType = "default",
+    id,
+    maxLength,
+    darkTheme,
+    isFocused,
+    handleFocus,
+    setIsFocused,
+}: any) => (
+    <View className="mb-4">
+        <Text className={`font-sans-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{label}</Text>
+        <View className={`flex-row items-center px-4 h-[55px] rounded-2xl border-2 ${isFocused === id ? "border-green-500 bg-green-500/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
+            <TextInput
+                value={value}
+                onChangeText={onChange}
+                onFocus={() => handleFocus(id)}
+                onBlur={() => setIsFocused(null)}
+                keyboardType={keyboardType as KeyboardTypeOptions}
+                className={`flex-1 text-base font-sans-semibold tracking-wide ${darkTheme ? "text-white" : "text-black"}`}
+                placeholder={placeholder}
+                placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
+                maxLength={maxLength}
+            />
+        </View>
+    </View>
+);
+
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const MethodTab = ({ method, title, icon, darkTheme, activeMethod, setActiveMethod }: { method: PayoutMethod, title: string, icon: keyof typeof Ionicons.glyphMap } & { darkTheme: boolean; activeMethod: PayoutMethod; setActiveMethod: (m: PayoutMethod) => void }) => {
+    const isActive = activeMethod === method;
+    return (
+        <PressableScale onPress={() => { Haptics.selectionAsync(); setActiveMethod(method); }} className="mr-3">
+            <View className={`px-4 py-3 rounded-2xl flex-row items-center border ${isActive ? (darkTheme ? "bg-accentbg/20 border-accentbg" : "bg-accentbg border-accentbg") : (darkTheme ? "bg-slate-800 border-gray-700" : "bg-white border-gray-200")}`}>
+                <Ionicons name={icon} size={18} color={isActive ? (darkTheme ? BRAND.primary : "#fff") : (darkTheme ? "#9ca3af" : "#6b7280")} style={{ marginRight: 6 }} />
+                <Text className={`font-sans-bold text-sm ${isActive ? (darkTheme ? "text-accenttxt" : "text-white") : (darkTheme ? "text-gray-300" : "text-gray-600")}`}>{title}</Text>
+            </View>
+        </PressableScale>
+    );
+};
+
 export default function PayoutSettings() {
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
@@ -120,36 +190,9 @@ export default function PayoutSettings() {
         }
     };
 
-    const InputBlock = ({ label, value, onChange, placeholder, keyboardType = "default", id, maxLength }: any) => (
-        <View className="mb-4">
-            <Text className={`font-sans-semibold mb-2 text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>{label}</Text>
-            <View className={`flex-row items-center px-4 h-[55px] rounded-2xl border-2 ${isFocused === id ? "border-green-500 bg-green-500/5" : (darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-200")}`}>
-                <TextInput
-                    value={value}
-                    onChangeText={onChange}
-                    onFocus={() => handleFocus(id)}
-                    onBlur={() => setIsFocused(null)}
-                    keyboardType={keyboardType as KeyboardTypeOptions}
-                    className={`flex-1 text-base font-sans-semibold tracking-wide ${darkTheme ? "text-white" : "text-black"}`}
-                    placeholder={placeholder}
-                    placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
-                    maxLength={maxLength}
-                />
-            </View>
-        </View>
-    );
+    const inputBlockProps = { darkTheme, isFocused, handleFocus, setIsFocused };
 
-    const MethodTab = ({ method, title, icon }: { method: PayoutMethod, title: string, icon: keyof typeof Ionicons.glyphMap }) => {
-        const isActive = activeMethod === method;
-        return (
-            <PressableScale onPress={() => { Haptics.selectionAsync(); setActiveMethod(method); }} className="mr-3">
-                <View className={`px-4 py-3 rounded-2xl flex-row items-center border ${isActive ? (darkTheme ? "bg-accentbg/20 border-accentbg" : "bg-accentbg border-accentbg") : (darkTheme ? "bg-slate-800 border-gray-700" : "bg-white border-gray-200")}`}>
-                    <Ionicons name={icon} size={18} color={isActive ? (darkTheme ? BRAND.primary : "#fff") : (darkTheme ? "#9ca3af" : "#6b7280")} style={{ marginRight: 6 }} />
-                    <Text className={`font-sans-bold text-sm ${isActive ? (darkTheme ? "text-accenttxt" : "text-white") : (darkTheme ? "text-gray-300" : "text-gray-600")}`}>{title}</Text>
-                </View>
-            </PressableScale>
-        );
-    };
+    const methodTabProps = { darkTheme, activeMethod, setActiveMethod };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -186,40 +229,40 @@ export default function PayoutSettings() {
                     </View>
 
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-8" contentContainerStyle={{ paddingRight: 20 }}>
-                        <MethodTab method="MPESA_TILL" title="Buy Goods (Till)" icon="storefront-outline" />
-                        <MethodTab method="MPESA_PAYBILL" title="Paybill" icon="business-outline" />
-                        <MethodTab method="MPESA_PHONE" title="Phone Number" icon="phone-portrait-outline" />
-                        <MethodTab method="BANK_TRANSFER" title="Bank Account" icon="card-outline" />
+                        <MethodTab {...methodTabProps} method="MPESA_TILL" title="Buy Goods (Till)" icon="storefront-outline" />
+                        <MethodTab {...methodTabProps} method="MPESA_PAYBILL" title="Paybill" icon="business-outline" />
+                        <MethodTab {...methodTabProps} method="MPESA_PHONE" title="Phone Number" icon="phone-portrait-outline" />
+                        <MethodTab {...methodTabProps} method="BANK_TRANSFER" title="Bank Account" icon="card-outline" />
                     </ScrollView>
 
                     <View className="mb-4">
                         {activeMethod === "MPESA_TILL" && (
                             <>
-                                <InputBlock label="M-Pesa Till Number" value={tillNo} onChange={setTillNo} placeholder="e.g. 123456" keyboardType="number-pad" id="till" maxLength={8} />
+                                <InputBlock {...inputBlockProps} label="M-Pesa Till Number" value={tillNo} onChange={setTillNo} placeholder="e.g. 123456" keyboardType="number-pad" id="till" maxLength={8} />
                                 <Text className={`text-xs mt-1 px-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Funds are sent directly to your Safaricom Buy Goods Till.</Text>
                             </>
                         )}
 
                         {activeMethod === "MPESA_PAYBILL" && (
                             <>
-                                <InputBlock label="Business Number (Paybill)" value={paybillBusinessNo} onChange={setPaybillBusinessNo} placeholder="e.g. 247247" keyboardType="number-pad" id="paybillBusiness" maxLength={8} />
-                                <InputBlock label="Account Number" value={paybillAccountNo} onChange={setPaybillAccountNo} placeholder="e.g. DropApp" keyboardType="default" id="paybillAccount" />
+                                <InputBlock {...inputBlockProps} label="Business Number (Paybill)" value={paybillBusinessNo} onChange={setPaybillBusinessNo} placeholder="e.g. 247247" keyboardType="number-pad" id="paybillBusiness" maxLength={8} />
+                                <InputBlock {...inputBlockProps} label="Account Number" value={paybillAccountNo} onChange={setPaybillAccountNo} placeholder="e.g. DropApp" keyboardType="default" id="paybillAccount" />
                                 <Text className={`text-xs mt-1 px-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Funds are deposited to this specific Paybill Account.</Text>
                             </>
                         )}
 
                         {activeMethod === "MPESA_PHONE" && (
                             <>
-                                <InputBlock label="M-Pesa Phone Number" value={phoneNo} onChange={handlePhoneChange} placeholder="e.g. 254712345678" keyboardType="number-pad" id="phone" maxLength={12} />
+                                <InputBlock {...inputBlockProps} label="M-Pesa Phone Number" value={phoneNo} onChange={handlePhoneChange} placeholder="e.g. 254712345678" keyboardType="number-pad" id="phone" maxLength={12} />
                                 <Text className={`text-xs mt-1 px-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Funds are sent via M-Pesa B2C to this mobile number.</Text>
                             </>
                         )}
 
                         {activeMethod === "BANK_TRANSFER" && (
                             <>
-                                <InputBlock label="Bank Name" value={bankName} onChange={setBankName} placeholder="e.g. Equity Bank" keyboardType="default" id="bankName" />
-                                <InputBlock label="Account Name" value={bankAccountName} onChange={setBankAccountName} placeholder="e.g. Aqua Drop Ltd" keyboardType="default" id="bankAcctName" />
-                                <InputBlock label="Account Number" value={bankAccountNo} onChange={setBankAccountNo} placeholder="e.g. 123456789012" keyboardType="number-pad" id="bankAcctNo" />
+                                <InputBlock {...inputBlockProps} label="Bank Name" value={bankName} onChange={setBankName} placeholder="e.g. Equity Bank" keyboardType="default" id="bankName" />
+                                <InputBlock {...inputBlockProps} label="Account Name" value={bankAccountName} onChange={setBankAccountName} placeholder="e.g. Aqua Drop Ltd" keyboardType="default" id="bankAcctName" />
+                                <InputBlock {...inputBlockProps} label="Account Number" value={bankAccountNo} onChange={setBankAccountNo} placeholder="e.g. 123456789012" keyboardType="number-pad" id="bankAcctNo" />
                                 <Text className={`text-xs mt-1 px-1 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>Bank transfers may take 1-2 business days to clear via EFT/RTGS.</Text>
                             </>
                         )}

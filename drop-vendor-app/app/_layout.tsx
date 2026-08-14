@@ -15,6 +15,7 @@ import { useFonts } from 'expo-font';
 import { retryTransientOnly } from '@/API/errors';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { useSessionCleanup } from '@/hooks/useSessionCleanup';
+import { checkForAppUpdate } from '@/utils/appUpdate';
 import ThemeContextProvider, { UIThemeContext } from "../context/ThemeContext";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import "../global.css";
@@ -147,6 +148,14 @@ export default function Layout() {
     'JetBrainsMono_700Bold': require('../assets/fonts/JetBrainsMono_700Bold.ttf'),
     'JetBrainsMono_800ExtraBold': require('../assets/fonts/JetBrainsMono_800ExtraBold.ttf'),
   });
+
+  // Forced-update check, exactly once per launch. Empty deps rather than
+  // `[fontsLoaded]`: keyed on a value that flips false→true it fires again on
+  // the flip, which is how the customer app came to run two update checks and
+  // initialise Sentry twice on every cold start.
+  useEffect(() => {
+    checkForAppUpdate();
+  }, []);
 
   // ── AppState Focus Manager for React Query ──
   useEffect(() => {

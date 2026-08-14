@@ -88,14 +88,29 @@ class VendorProfileUpdateRequest(BaseModel):
     deposit_fee: Optional[float] = None
 
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 class ProductCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     image_url: str
-    price: float = Field(gt=0)
-    discount: Optional[float] = 0
+    # `Decimal`, never `float` — the annotation the platform's money rule names
+    # explicitly, because it is the version of the defect with no cast to grep
+    # for: Pydantic does the coercion silently. This is the figure every order
+    # total on the platform is ultimately built from.
+    #
+    # To be exact about what this does and does not fix: Pydantic v2 converts a
+    # float to `Decimal` via `str()`, so a price typed into the app was not
+    # arriving wrong. What was wrong is that the correctness of the money path
+    # rested on that conversion detail rather than on the declared type, and the
+    # value spent part of its life as a double for no reason. `Decimal` plus a
+    # decimal string on the wire is the platform's convention in the other
+    # direction already; this makes the inbound half match.
+    price: Decimal = Field(gt=0)
+    discount: Optional[Decimal] = Decimal("0")
+    # Not money — a physical quantity, and float is the right type for it.
     capacity: float = Field(gt=0)
     weight_kg: float = Field(gt=0, le=1000, default=20.0)
     minimum_order_qty: int = Field(ge=1, default=1)
@@ -111,8 +126,8 @@ class ProductUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     image_url: Optional[str] = None
-    price: Optional[float] = Field(default=None, gt=0)
-    discount: Optional[float] = None
+    price: Optional[Decimal] = Field(default=None, gt=0)
+    discount: Optional[Decimal] = None
     capacity: Optional[float] = Field(default=None, gt=0)
     weight_kg: Optional[float] = Field(default=None, gt=0, le=1000)
     minimum_order_qty: Optional[int] = Field(default=None, ge=1)

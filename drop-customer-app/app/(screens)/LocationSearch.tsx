@@ -17,6 +17,72 @@ import { Toast } from "@/lib/toast";
 import { SavedLocationSkeleton } from '@/components/skeletons/ContextualSkeletons';
 import { Ionicons } from "@expo/vector-icons";
 
+/**
+ * At module scope, not inside the screen.
+ *
+ * A component declared in a render body is a new function object — and so a new
+ * component *type* — on every render, which makes React unmount its subtree and
+ * mount a fresh one instead of updating it. Even with no input and no state of
+ * its own that is not free: every child is torn down and rebuilt, `PressableScale`
+ * restarts its animation, and the reconciler does the most expensive kind of work
+ * on the most ordinary re-render.
+ *
+ * What it closed over is passed in instead.
+ */
+const SavedLocationCard = ({ loc, single = false, darkTheme, isLocationActive, loadingLocationId, handleUseSavedLocation, handleRevokeLocation, handleDeleteLocation, selectSavedLocation }: { loc: import("@/types/models").SavedLocation, single?: boolean } & { darkTheme: boolean; isLocationActive: (loc: any) => boolean; loadingLocationId: string | null; handleUseSavedLocation: (loc: any) => void; handleRevokeLocation: (loc: any) => void; handleDeleteLocation: (loc: any) => void; selectSavedLocation: { isPending: boolean } }) => {
+	const isActive = isLocationActive(loc);
+	const isLoading = loadingLocationId === loc.id;
+	
+	return (
+		<PressableScale
+			onPress={() => handleUseSavedLocation(loc)}
+			disabled={isLoading || selectSavedLocation.isPending}
+		>
+			<View className={`flex-row items-center p-4 rounded-2xl border ${darkTheme ? "bg-surface-container" + (single ? " border-accentbg/20" : " border-transparent") : "bg-white" + (single ? " border-accentbg/15 bg-accentbg/5" : " border-gray-200")}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
+				<View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${darkTheme ? "bg-surface-variant" : "bg-white"}`}>
+					<Text className="text-lg">
+						{loc.label === "Home" ? "🏠" : loc.label === "Work" ? "💼" : "📍"}
+					</Text>
+				</View>
+				<View className="flex-1">
+					{loc.label && (
+						<Text className={`text-sm font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+							{loc.label}
+						</Text>
+					)}
+					<Text numberOfLines={1} className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+						{loc.address}
+					</Text>
+				</View>
+				
+				{isLoading ? (
+					<ActivityIndicator size="small" color={BRAND.primary} />
+				) : (
+					<View className="flex-row items-center gap-2">
+						{isActive ? (
+							<PressableScale onPress={(e) => { e.stopPropagation?.(); handleRevokeLocation(loc); }}>
+								<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-red-500/20" : "bg-red-100"}`}>
+									<Text className={`text-xs font-sans-bold ${darkTheme ? "text-red-400" : "text-red-600"}`}>Revoke</Text>
+								</View>
+							</PressableScale>
+						) : (
+							<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-accentbg/10" : "bg-accentbg/10"}`}>
+								<Text className={`text-xs font-sans-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>Use</Text>
+							</View>
+						)}
+
+						<PressableScale onPress={(e) => { e.stopPropagation?.(); handleDeleteLocation(loc); }}>
+							<View className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-red-500/10" : "bg-red-50"}`}>
+								<Text className="text-red-500 text-lg">×</Text>
+							</View>
+						</PressableScale>
+					</View>
+				)}
+			</View>
+		</PressableScale>
+	);
+};
+
 export default function LocationSearch() {
 	const router = useRouter();
 	const { currentTheme } = useContext(UIThemeContext);
@@ -114,59 +180,7 @@ export default function LocationSearch() {
 		}
 	};
 
-	const SavedLocationCard = ({ loc, single = false }: { loc: import("@/types/models").SavedLocation, single?: boolean }) => {
-		const isActive = isLocationActive(loc);
-		const isLoading = loadingLocationId === loc.id;
-		
-		return (
-			<PressableScale
-				onPress={() => handleUseSavedLocation(loc)}
-				disabled={isLoading || selectSavedLocation.isPending}
-			>
-				<View className={`flex-row items-center p-4 rounded-2xl border ${darkTheme ? "bg-surface-container" + (single ? " border-accentbg/20" : " border-transparent") : "bg-white" + (single ? " border-accentbg/15 bg-accentbg/5" : " border-gray-200")}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
-					<View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${darkTheme ? "bg-surface-variant" : "bg-white"}`}>
-						<Text className="text-lg">
-							{loc.label === "Home" ? "🏠" : loc.label === "Work" ? "💼" : "📍"}
-						</Text>
-					</View>
-					<View className="flex-1">
-						{loc.label && (
-							<Text className={`text-sm font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
-								{loc.label}
-							</Text>
-						)}
-						<Text numberOfLines={1} className={`text-xs ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
-							{loc.address}
-						</Text>
-					</View>
-					
-					{isLoading ? (
-						<ActivityIndicator size="small" color={BRAND.primary} />
-					) : (
-						<View className="flex-row items-center gap-2">
-							{isActive ? (
-								<PressableScale onPress={(e) => { e.stopPropagation?.(); handleRevokeLocation(loc); }}>
-									<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-red-500/20" : "bg-red-100"}`}>
-										<Text className={`text-xs font-sans-bold ${darkTheme ? "text-red-400" : "text-red-600"}`}>Revoke</Text>
-									</View>
-								</PressableScale>
-							) : (
-								<View className={`px-3 py-1.5 rounded-full ${darkTheme ? "bg-accentbg/10" : "bg-accentbg/10"}`}>
-									<Text className={`text-xs font-sans-bold ${darkTheme ? "text-accentbg" : "text-accentbg"}`}>Use</Text>
-								</View>
-							)}
-
-							<PressableScale onPress={(e) => { e.stopPropagation?.(); handleDeleteLocation(loc); }}>
-								<View className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-red-500/10" : "bg-red-50"}`}>
-									<Text className="text-red-500 text-lg">×</Text>
-								</View>
-							</PressableScale>
-						</View>
-					)}
-				</View>
-			</PressableScale>
-		);
-	};
+	const savedLocationCardProps = { darkTheme, isLocationActive, loadingLocationId, handleUseSavedLocation, handleRevokeLocation, handleDeleteLocation, selectSavedLocation };
 
 	return (
 		<SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`} edges={["top"]}>
@@ -273,7 +287,7 @@ export default function LocationSearch() {
 						<Text className={`text-xs font-sans-bold tracking-wider uppercase mb-2 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
 							Quick Select
 						</Text>
-						<SavedLocationCard loc={savedLocations[0]} single />
+						<SavedLocationCard {...savedLocationCardProps} loc={savedLocations[0]} single />
 					</View>
 				) : savedLocations.length > 1 ? (
 					<View className="mt-8 px-4">
@@ -282,7 +296,7 @@ export default function LocationSearch() {
 						</Text>
 						<View className="gap-2">
 							{savedLocations.map((loc: import("@/types/models").SavedLocation) => (
-								<SavedLocationCard key={loc.id} loc={loc} />
+								<SavedLocationCard {...savedLocationCardProps} key={loc.id} loc={loc} />
 							))}
 						</View>
 					</View>

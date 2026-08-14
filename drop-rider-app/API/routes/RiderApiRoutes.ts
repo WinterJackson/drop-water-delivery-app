@@ -308,6 +308,14 @@ const RiderApiRoutes = {
     path: `${BASE_URL}/api/auth/push-token?app_type=rider`,
     method: "DELETE",
   } as const satisfies ApiRoute,
+  /**
+   * The lowest build of this app the platform still accepts, and where to get a
+   * newer one. Public — a build too old to sign in must still be tellable.
+   */
+  AppVersion: {
+    path: `${BASE_URL}/api/app-version?app=rider`,
+    method: "GET",
+  } as const satisfies ApiRoute,
   /** Whether this Clerk account already has a rider profile. */
   ProfileStatus: {
     path: `${BASE_URL}/api/auth/profile-status?app_type=rider`,

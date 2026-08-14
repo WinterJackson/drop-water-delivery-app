@@ -20,6 +20,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { retryTransientOnly } from "@/API/errors";
 import { useSessionCleanup } from "@/hooks/useSessionCleanup";
+import { checkForAppUpdate } from "@/utils/appUpdate";
 import { initDB } from "../config/database";
 // Imported for its side effect: `TaskManager.defineTask` must run before the OS
 // delivers a location update, including when Android relaunches the app
@@ -122,6 +123,14 @@ export default function Layout() {
       JetBrainsMono_700Bold: require('../assets/fonts/JetBrainsMono_700Bold.ttf'),
       JetBrainsMono_800ExtraBold: require('../assets/fonts/JetBrainsMono_800ExtraBold.ttf'),
     });
+
+    // Forced-update check, exactly once per launch. Empty deps rather than
+    // `[fontsLoaded]`: keyed on a value that flips false→true it fires again on
+    // the flip, which is how the customer app came to run two update checks and
+    // initialise Sentry twice on every cold start.
+    useEffect(() => {
+        checkForAppUpdate();
+    }, []);
 
     // ── AppState Focus Manager for React Query ──
     useEffect(() => {
