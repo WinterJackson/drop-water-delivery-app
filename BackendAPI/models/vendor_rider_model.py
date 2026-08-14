@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Float, TIMESTAMP, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 
 from db.session import Base
 
@@ -31,6 +31,20 @@ class VendorRiderRegistry(Base):
     requested_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
     
-    rider = relationship("Deliverer", backref="vendor_registrations")
-    vendor = relationship("Vendor", backref="rider_registrations")
+    # `lazy=` on the declaration governs only the *forward* direction. A bare
+    # `backref="…"` string builds the reverse relationship with the library
+    # default, so `Deliverer.vendor_registrations` and `Vendor.rider_registrations`
+    # were the only two of the platform's 38 relationships still lazy-loading —
+    # and they are collections on the two rows most likely to be held across a
+    # long-running request. `backref()` states the reverse side explicitly.
+    rider = relationship(
+        "Deliverer",
+        backref=backref("vendor_registrations", lazy="raise_on_sql"),
+        lazy="raise_on_sql",
+    )
+    vendor = relationship(
+        "Vendor",
+        backref=backref("rider_registrations", lazy="raise_on_sql"),
+        lazy="raise_on_sql",
+    )
 

@@ -37,11 +37,63 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 
 sentry_dsn = os.getenv("SENTRY_DSN")
+
+#: Paths whose traces are worth keeping whatever the sample rate says. Money and
+#: order state: the transactions where "it was slow that one time" is a question
+#: somebody will actually need answered, months later, about one order.
+_ALWAYS_TRACE = (
+    "/api/cart/mpesa_payment",
+    "/api/wallet/withdraw",
+    "/api/payouts",
+    "/api/payments",
+    "/api/refunds",
+    "/api/rider/complete",
+    "/api/sms",
+)
+
+#: Paths that are pure noise in a trace view and are hit constantly.
+_NEVER_TRACE = ("/health", "/ready", "/metrics")
+
+
+def _traces_sampler(context: dict) -> float:
+    """Sample by what the request *is*, not uniformly.
+
+    `traces_sample_rate=1.0` with `profiles_sample_rate=1.0` was correct for a
+    platform with no traffic and ruinous with any: a sampling profiler attached to
+    every request, a span tree sent for every one, latency on the request path and
+    a bill that scales linearly with success. Uniform sampling at a low rate is
+    the usual fix and it throws away the traces that matter — the checkout that
+    took nine seconds is rare *because* it is the interesting one.
+    """
+    path = (context.get("asgi_scope") or {}).get("path") or ""
+    if any(path.startswith(p) for p in _NEVER_TRACE):
+        return 0.0
+    if any(path.startswith(p) for p in _ALWAYS_TRACE):
+        return 1.0
+    return _DEFAULT_TRACES_RATE
+
+
+def _rate_from_env(name: str, production_default: float) -> float:
+    """Full sampling in development, a configured fraction anywhere else."""
+    raw = os.getenv(name)
+    if raw is not None:
+        try:
+            return min(max(float(raw), 0.0), 1.0)
+        except ValueError:
+            logging.warning("%s is not a number; using the default", name)
+    return 1.0 if os.getenv("ENV", "development") == "development" else production_default
+
+
+_DEFAULT_TRACES_RATE = _rate_from_env("SENTRY_TRACES_SAMPLE_RATE", 0.05)
+
 if sentry_dsn:
     sentry_sdk.init(
         dsn=sentry_dsn,
-        traces_sample_rate=1.0,
-        profiles_sample_rate=1.0,
+        traces_sampler=_traces_sampler,
+        # Profiling is the expensive half — it attaches a sampling profiler to the
+        # running request — and it is a fraction *of traced* transactions, so the
+        # two rates multiply.
+        profiles_sample_rate=_rate_from_env("SENTRY_PROFILES_SAMPLE_RATE", 0.1),
     )
 
 # --- Logging Configuration ---
@@ -169,10 +221,63 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Drop Water Delivery API", version="1.0.0", lifespan=lifespan)
 
-# --- F-011 FIX: Health Check Endpoint ---
+# --- Health: liveness and readiness are different questions ---
 @app.get("/health", tags=["Health"])
 async def health_check():
+    """Liveness. Is this process running at all?
+
+    Deliberately touches nothing. A liveness probe that consults the database
+    restarts a healthy replica every time the database hiccups, which converts a
+    brief dependency blip into a rolling outage of the whole fleet.
+    """
     return {"status": "ok"}
+
+
+@app.get("/ready", tags=["Health"])
+async def readiness_check():
+    """Readiness. Can this replica actually serve a request?
+
+    This is the one a load balancer should poll. `/health` answered `ok` from a
+    replica whose connection pool was exhausted or whose Redis had gone, so it
+    stayed in rotation serving 500s — the failure mode a health check exists to
+    prevent.
+
+    Redis being down is reported but is **not** disqualifying: it costs caching,
+    rate limiting precision and cross-replica WebSocket fan-out, all of which
+    degrade rather than break. A database that cannot answer `SELECT 1` is
+    disqualifying, because nothing on this platform works without it.
+    """
+    from sqlalchemy import text as _text
+
+    from db.session import AsyncSessionLocal
+
+    checks: dict[str, str] = {}
+    ready = True
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(_text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"unavailable: {type(exc).__name__}"
+        ready = False
+
+    try:
+        from core.redis_client import get_redis
+
+        r = get_redis()
+        if r is None:
+            checks["redis"] = "not configured"
+        else:
+            await r.ping()
+            checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"unavailable: {type(exc).__name__}"
+
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"status": "ready" if ready else "not ready", "checks": checks},
+    )
 
 @app.get("/api/app-version", tags=["App Version"])
 async def get_app_version():
@@ -212,6 +317,16 @@ app.state.limiter = redis_limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# Resolves *who* the limit counts against, and must run before the check above
+# consults it. Starlette runs middleware outermost-first in reverse registration
+# order, so being added after `SlowAPIMiddleware` is what puts it earlier in the
+# request. Swapping these two lines silently reverts every limit to the carrier
+# NAT address it used to key on — `tests/test_rate_limiting.py` fails the build
+# if the order changes.
+from core.rate_limit import RateLimitKeyMiddleware
+
+app.add_middleware(RateLimitKeyMiddleware)
+
 # --- CORS Configuration ---
 _env_mode = os.getenv("ENV", "development")
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
@@ -239,6 +354,13 @@ app.add_middleware(
 
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+# Conditional requests. Registered *before* GZip so it runs inside it and hashes
+# the uncompressed body — a validator that depended on whether the client sent
+# `Accept-Encoding` would give the same data two different tags.
+from core.conditional import ETagMiddleware
+
+app.add_middleware(ETagMiddleware)
+
 # Apply global payload compression (down to 500 bytes minimum to save processing overhead)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
@@ -251,7 +373,37 @@ app.add_middleware(CorrelationIdMiddleware)
 # Apply Security Headers Middleware
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Expose Prometheus Metrics
+# Expose Prometheus Metrics.
+#
+# Behind a bearer token unless one is deliberately not configured. `/metrics`
+# published route names, per-route latencies and request volumes on the public
+# origin to anybody who asked — which is a map of the platform, a live read on how
+# much business it is doing, and a free oracle for anyone probing it. Scrapers
+# send a static token; a browser gets a 404, not a 401, because confirming the
+# endpoint exists is itself part of what was being given away.
+_METRICS_TOKEN = os.getenv("METRICS_TOKEN")
+
+
+class MetricsGuardMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/metrics" and _METRICS_TOKEN:
+            supplied = request.headers.get("authorization", "")
+            expected = f"Bearer {_METRICS_TOKEN}"
+            # Constant-time: this compares a secret, and the endpoint is public.
+            import hmac
+
+            if not hmac.compare_digest(supplied, expected):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        return await call_next(request)
+
+
+if not _METRICS_TOKEN:
+    logging.warning(
+        "METRICS_TOKEN is not set — /metrics is publicly readable. Set it in any "
+        "deployment reachable from the internet."
+    )
+
+app.add_middleware(MetricsGuardMiddleware)
 Instrumentator().instrument(app).expose(app)
 
 # --- Customer-facing Routes ---

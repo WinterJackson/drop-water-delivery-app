@@ -470,23 +470,28 @@ async def vendor_get_products(
     if cached:
         return cached
 
+    # One row more than the page, then trimmed. `len(products) == limit` cannot
+    # tell a full page from the last page, so a catalogue that divides exactly by
+    # the page size always offered one more page and answered it with nothing —
+    # a spinner at the bottom of a list that is already complete. A COUNT(*) on
+    # every keystroke of the search box would answer it too, and cost far more.
     products = await get_vendor_products(
         session=db,
         clerk_id=clerk_id,
         search_query=search_query,
         stock_filter=stock_filter,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
         vendor_id=vendor.id,
     )
+    has_more = len(products) > limit
+    products = products[:limit]
 
     result = {
         "items": [_signed(safe_serialize(p), "image_url") for p in products],
         "limit": limit,
         "offset": offset,
-        # The page is short => there is nothing after it. Cheaper and racier-safe
-        # than a COUNT(*) on every keystroke of the search box.
-        "has_more": len(products) == limit,
+        "has_more": has_more,
     }
     await cache_set(cache_key, result, ttl_seconds=60) # Cache for 60 seconds
     return result
@@ -511,20 +516,23 @@ async def vendor_get_orders(
     `page.length < limit` after the unwrap.
     """
     clerk_id = user["sub"]
+    # One row more than the page, then trimmed — see `/products` for why
+    # `len(orders) == limit` is not an answer to "is there more".
     orders = await get_vendor_orders(
         session=db,
         clerk_id=clerk_id,
         search_query=search_query,
         status_filter=status_filter,
         skip=skip,
-        limit=limit,
+        limit=limit + 1,
         vendor_id=vendor.id,
     )
+    has_more = len(orders) > limit
     return {
-        "items": orders,
+        "items": orders[:limit],
         "limit": limit,
         "offset": skip,
-        "has_more": len(orders) == limit,
+        "has_more": has_more,
     }
 
 

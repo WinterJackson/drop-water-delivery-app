@@ -19,6 +19,7 @@ from services.settlement_service import cash_float_required
 import h3
 from decimal import Decimal
 from services.order_service import apply_status_transition
+from utils.paging import stable
 
 
 def _money(value) -> Decimal:
@@ -167,7 +168,30 @@ async def toggle_availability(session: AsyncSession, clerk_id: str, is_available
     return {"message": f"Availability set to {is_available}"}
 
 
-async def get_deliverer_orders(session: AsyncSession, clerk_id: str, skip: int = 0, limit: int = 50, status: str = None):
+async def get_deliverer_orders(
+    session: AsyncSession,
+    clerk_id: str,
+    skip: int = 0,
+    limit: int = 50,
+    status: str = None,
+    search_query: str = None,
+):
+    """One page of this rider's orders, newest first.
+
+    `status` accepts a comma-separated group as well as a single value. The
+    rider's screen has two tabs — the deliveries in progress and the ones that
+    are finished — and each spans several statuses, so a single-value filter left
+    the app fetching everything and splitting the tabs from whatever one page
+    happened to contain. A rider whose last 50 orders were all completed saw an
+    empty "in progress" tab while carrying water.
+
+    `search_query` matches the order reference, the same way the vendor's list
+    does. It has to be here rather than in the app for the same reason the tabs
+    do: a filter applied to the page in hand searches the newest 25 deliveries
+    and reports nothing found for the one a rider is being asked about.
+    """
+    from sqlalchemy import String, cast
+
     deliverer = await get_deliverer_by_clerk_id(session, clerk_id)
     if not deliverer:
         raise HTTPException(status_code=404, detail="Rider not found")
@@ -176,17 +200,33 @@ async def get_deliverer_orders(session: AsyncSession, clerk_id: str, skip: int =
         select(Order)
         .where(Order.deliverer_id == deliverer.id)
     )
-    
+
     if status:
-        query = query.where(Order.order_status == status)
+        wanted = [part.strip().lower() for part in status.split(",") if part.strip()]
+        if wanted:
+            query = query.where(Order.order_status.in_(wanted))
+
+    if search_query and search_query.strip():
+        query = query.where(cast(Order.id, String).ilike(f"%{search_query.strip()}%"))
 
     query = (
         query.options(
             joinedload(Order.order_item).joinedload(OrderItem.product),
             joinedload(Order.vendor),
-            joinedload(Order.user)
+            joinedload(Order.user),
+            # `OrderWithDetails` inherits `deliverer` from `BaseOrder`, so Pydantic
+            # reads this attribute on every row it serialises.
+            #
+            # It worked without the load, by luck: `get_deliverer_by_clerk_id` above
+            # has already put this rider in the session's identity map, and a
+            # many-to-one lazy load checks there before emitting SQL. Every order in
+            # this result belongs to that same rider, so every lookup hit. Change
+            # the order of those two calls, resolve the rider on a different
+            # session, or let one order here belong to somebody else, and the same
+            # line becomes a query per row — under asyncio, an exception per row.
+            joinedload(Order.deliverer),
         )
-        .order_by(Order.created_at.desc())
+        .order_by(*stable(Order.created_at.desc(), key=Order.id))
         .offset(skip)
         .limit(limit)
     )
@@ -209,10 +249,18 @@ async def get_trip_radar_orders(session: AsyncSession, clerk_id: str):
         .options(
             joinedload(Order.order_item).joinedload(OrderItem.product),
             joinedload(Order.vendor),
-            joinedload(Order.user)
+            joinedload(Order.user),
+            # Serialised by `OrderWithDetails`, same as above. An `unassigned`
+            # order normally has a null `deliverer_id`, and a many-to-one with a
+            # null foreign key resolves to `None` without touching the database —
+            # which is the only reason this was safe. It stops being safe the
+            # moment one row in this list carries a rider, and a re-offered order
+            # is exactly that: unassigned again, with the previous rider still on
+            # the row until the reassignment clears it.
+            joinedload(Order.deliverer),
         )
         .order_by(Order.created_at.desc())
-        .limit(50) 
+        .limit(50)
     )
     result = await session.execute(query)
     orders = result.unique().scalars().all()
@@ -284,7 +332,17 @@ async def update_delivery_status(session: AsyncSession, clerk_id: str, order_id:
             )
 
         deliverer.is_available = True # F-030: Free the rider for the next order
-        
+
+        # Acquisition is a *delivery*, so this is the moment it becomes true.
+        #
+        # In this transaction, before the commit: a rollback must not leave a
+        # customer recorded as acquired by an order that never completed. The call
+        # never raises — a growth figure is not worth failing a delivery over, and
+        # `customer_cohort_service.reconcile` repairs anything lost here.
+        from services import customer_cohort_service
+
+        await customer_cohort_service.record_acquisition(session, order)
+
         # --- Wallet settlement ---
         # Every movement below goes through `apply_wallet_delta`, which mutates the
         # balance and writes the matching WalletTransaction in one step. These five
@@ -1066,7 +1124,7 @@ async def get_deliverer_reviews(session: AsyncSession, clerk_id: str, limit: int
                 Review.hidden_at.is_(None),
             )
         )
-        .order_by(Review.created_at.desc())
+        .order_by(*stable(Review.created_at.desc(), key=Review.id))
         .offset(max(0, offset))
         .limit(max(1, min(limit, 100)))
     )

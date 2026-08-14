@@ -117,6 +117,31 @@ def test_identity_documents_never_go_through_the_image_optimiser():
         assert "<img" in code
 
 
+def test_every_requested_image_quality_is_configured():
+    """An `<Image quality={n}>` must name a value `next.config.ts` allows.
+
+    Next 16 stopped honouring arbitrary qualities. The quality is part of the
+    optimiser's cache key and reachable from the query string, so an open range
+    lets anyone mint unlimited re-encodes of the same file; the allowlist is the
+    fix. An unlisted value is **not** an error — the image is served at the
+    default and a warning goes to a log nobody is reading, which is how the
+    sign-in hero spent its life asking for 90 and rendering at 75.
+    """
+    config = (ADMIN / "next.config.ts").read_text()
+    listed = re.search(r"qualities:\s*\[([^\]]*)\]", config)
+    allowed = {int(n) for n in re.findall(r"\d+", listed.group(1))} if listed else {75}
+
+    offenders = []
+    for path in _sources("app/**/*.tsx", "components/**/*.tsx"):
+        for requested in re.findall(r"quality=\{(\d+)\}", _code_only(path)):
+            if int(requested) not in allowed:
+                offenders.append(f"{path.relative_to(ADMIN).as_posix()}: quality={requested}")
+    assert offenders == [], (
+        f"these ask for a quality next.config.ts does not list ({sorted(allowed)}); "
+        f"they render at the default instead: {offenders}"
+    )
+
+
 # ── Accessibility ─────────────────────────────────────────────────────────
 
 
@@ -587,6 +612,25 @@ def test_use_server_modules_only_export_async_functions():
 # ── Authentication ────────────────────────────────────────────────────────
 
 
+def _request_gate() -> pathlib.Path:
+    """The one file Next.js runs in front of every request.
+
+    Next 16 renamed the convention from `middleware.ts` to `proxy.ts`. Both
+    names still resolve, which is the trap: leaving the old file behind gets a
+    deprecation warning on every boot, and *adding* the new one without deleting
+    the old gives the console two gates where only one runs — the sign-in route
+    list would then be edited in a file Next never reads, and the page that
+    looked protected would be open.
+    """
+    present = [name for name in ("proxy.ts", "middleware.ts") if (ADMIN / name).exists()]
+    assert present, "the console has no proxy.ts — every route is unauthenticated"
+    assert present == ["proxy.ts"], (
+        f"expected proxy.ts alone, found {present}. Next 16 renamed the middleware "
+        "convention; two gate files means one of them is not the one running."
+    )
+    return ADMIN / present[0]
+
+
 def test_only_sign_in_is_public():
     """No `/sign-up` route may be public on the admin origin.
 
@@ -595,16 +639,42 @@ def test_only_sign_in_is_public():
     only ever produce a customer account that lands on "you don't have access",
     while putting a sign-up form on the privileged origin.
     """
-    import re
-
-    source = (ADMIN / "middleware.ts").read_text()
+    source = _request_gate().read_text()
     # The public list itself, not the import line that also names the helper.
     matcher = re.search(r"createRouteMatcher\(\[(.*?)\]\)", source, re.S)
-    assert matcher, "no createRouteMatcher([...]) call found in the middleware"
+    assert matcher, "no createRouteMatcher([...]) call found in the request gate"
 
     routes = matcher.group(1)
     assert "/sign-in" in routes
     assert "sign-up" not in routes, "sign-up must not be a public route on the console"
+
+
+def test_the_request_gate_protects_everything_it_does_not_name_public():
+    """The gate must *default* to protected.
+
+    `if (isPublic(request)) return;` reads almost identically to the correct
+    form and inverts the whole console: every route not explicitly listed as
+    public would fall through unauthenticated. The matcher decides what is
+    exempt; everything else has to reach `auth.protect()`.
+    """
+    source = _request_gate().read_text()
+    assert "auth.protect()" in source, "the request gate never calls auth.protect()"
+    assert re.search(r"if\s*\(\s*!\s*isPublic\(", source), (
+        "the gate must protect what the public matcher does *not* match"
+    )
+
+
+def test_the_request_gate_declares_no_runtime():
+    """A proxy always runs on Node.js, and Next refuses route segment config here.
+
+    Carrying `export const runtime` across from the middleware era is an error
+    in a production build and a line that has quietly stopped meaning anything
+    in dev.
+    """
+    source = _request_gate().read_text()
+    assert not re.search(r"export\s+const\s+runtime\b", source), (
+        "route segment config is not allowed in proxy.ts — a proxy is always Node.js"
+    )
 
 
 def test_the_console_signs_an_idle_administrator_out():

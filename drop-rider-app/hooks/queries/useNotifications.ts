@@ -1,6 +1,7 @@
 import RiderApiRoutes from '@/API/routes/RiderApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { flattenPages, nextOffset } from '@/utils/paging';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface NotificationItem {
@@ -18,17 +19,49 @@ export interface NotificationItem {
 /** Defeats any intermediate cache; these are polled and must not be served stale. */
 const NO_CACHE = { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
 
+const NOTIFICATIONS_KEY = ['rider', 'notifications'];
+
+/**
+ * Rows per request. See the customer app's copy for the whole story: the
+ * endpoint has always paged, no app asked it to, and each therefore showed the
+ * newest 50 as though they were all of them.
+ */
+const PAGE_SIZE = 30;
+
+type NotificationPages = InfiniteData<NotificationItem[]>;
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
+
+/**
+ * The rider's notification history.
+ *
+ * Polling stops once the rider has paged back into it. Refetching an infinite
+ * query refetches *every* page it holds, one request each — so a rider six
+ * pages deep would have re-fetched all six every thirty seconds, on a handset
+ * on mobile data, for a whole shift, to discover something that can only ever
+ * appear on page one. While one page is held the poll costs what it always did;
+ * past that the unread badge keeps its own thirty-second poll and pulling to
+ * refresh returns to the top.
+ */
 export function useNotifications() {
     const { get } = useApiRequest();
-    return useQuery<NotificationItem[], Error>({
-        queryKey: ['rider', 'notifications'],
-        queryFn: () =>
-            get<NotificationItem[]>(`${RiderApiRoutes.GetNotifications.path}&t=${Date.now()}`, {
-                headers: NO_CACHE,
-            }),
-        refetchInterval: 30000, // Poll every 30 seconds for new notifications
+    return useInfiniteQuery<NotificationItem[], Error>({
+        queryKey: NOTIFICATIONS_KEY,
+        initialPageParam: 0,
+        queryFn: ({ pageParam }) =>
+            get<NotificationItem[]>(
+                `${RiderApiRoutes.GetNotifications.path}&skip=${pageParam as number}&limit=${PAGE_SIZE}&t=${Date.now()}`,
+                { headers: NO_CACHE }
+            ),
+        getNextPageParam: nextOffset<NotificationItem>(PAGE_SIZE),
+        refetchInterval: (query) =>
+            (query.state.data?.pages.length ?? 0) > 1 ? false : 30000,
     });
+}
+
+/** Every notification fetched so far, newest first, each appearing once. */
+export function notificationRows(data: NotificationPages | undefined): NotificationItem[] {
+    return flattenPages<NotificationItem>(data);
 }
 
 export function useMarkNotificationRead() {
@@ -38,7 +71,7 @@ export function useMarkNotificationRead() {
         mutationFn: (notificationId: string) =>
             post(RiderApiRoutes.MarkNotificationRead.path, { notification_id: notificationId }),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['rider', 'notifications'] });
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
         },
     });
 }
@@ -49,7 +82,7 @@ export function useMarkAllNotificationsRead() {
     return useMutation({
         mutationFn: () => post(RiderApiRoutes.MarkAllNotificationsRead.path),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['rider', 'notifications'] });
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
         },
     });
 }
@@ -74,7 +107,7 @@ export function useDeleteNotification() {
         mutationFn: (notificationId: string) =>
             del(RiderApiRoutes.DeleteNotification(notificationId).path),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['rider', 'notifications'] });
+            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY });
             queryClient.invalidateQueries({ queryKey: ['rider', 'notifications', 'unread-count'] });
         },
     });

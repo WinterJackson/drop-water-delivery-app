@@ -98,4 +98,4 @@ class Deliverer(Base):
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   
   # relationships
-  order = relationship("Order", back_populates="deliverer")
+  order = relationship("Order", back_populates="deliverer", lazy="raise_on_sql")

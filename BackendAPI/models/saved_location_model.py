@@ -35,4 +35,4 @@ class SavedLocation(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     # Relationship
-    user = relationship("User", back_populates="saved_locations")
+    user = relationship("User", back_populates="saved_locations", lazy="raise_on_sql")

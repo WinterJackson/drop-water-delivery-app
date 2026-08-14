@@ -1,8 +1,9 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 
 import { ApiError } from '../../API/errors';
 import { useApiRequest } from '../../API/useApiClient';
 import RiderApiRoutes from '../../API/routes/RiderApiRoutes';
+import { flattenPages, nextOffset } from '../../utils/paging';
 import { saveOrdersLocal, getOrdersLocal } from '../../config/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -83,6 +84,36 @@ export interface RiderProfile {
  */
 export const RIDER_ORDERS_PAGE_SIZE = 50;
 
+/**
+ * The two tabs on My Deliveries, as sets of order statuses.
+ *
+ * These were spelled inline in the screen and used to split one unpaged fetch
+ * with two `.filter()` calls. Between them they named ten of the platform's
+ * eleven statuses, so a status added on the server — or the one already
+ * missing — put an order in *neither* tab and it disappeared from the rider's
+ * app entirely while still being theirs to deliver. Keeping them here, adjacent
+ * and exhaustive, is what makes that checkable; `test_route_contract.py`'s
+ * sibling `test_rider_order_tabs_cover_every_status` asserts it.
+ *
+ * `unassigned` is deliberately absent: an unassigned order has no rider, so it
+ * cannot appear in a list scoped to `deliverer_id`. It reaches riders through
+ * the Trip Radar instead.
+ */
+export const RIDER_ORDER_TABS = {
+    Incoming: [
+        'pending', 'accepted', 'preparing', 'ready', 'picked_up',
+        'mismatch_pending', 'pending_review',
+    ],
+    History: ['delivered', 'cancelled', 'rejected'],
+} as const;
+
+export type RiderOrderTab = keyof typeof RIDER_ORDER_TABS;
+
+/** The statuses a tab asks the server for, as `?status=` wants them. */
+export function statusesForTab(tab: RiderOrderTab): string {
+    return (RIDER_ORDER_TABS[tab] as readonly string[]).join(',');
+}
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
 /**
@@ -123,25 +154,30 @@ export function useRiderOrders() {
  * `FlashList`'s `onEndReached` drives `fetchNextPage`; a short final page means
  * the end, which is the only signal the endpoint gives.
  */
-export function useRiderOrdersPaginated(status?: string) {
+export function useRiderOrdersPaginated(status?: string, searchQuery?: string) {
     const { get } = useApiRequest();
+    const search = (searchQuery ?? '').trim();
+
     return useInfiniteQuery<RiderOrder[], Error>({
-        queryKey: ['rider', 'orders', 'paginated', status ?? 'all'],
+        queryKey: ['rider', 'orders', 'paginated', status ?? 'all', search],
         initialPageParam: 0,
         queryFn: async ({ pageParam }) => {
             const route = RiderApiRoutes.GetOrdersPaged(
                 status,
                 pageParam as number,
-                RIDER_ORDERS_PAGE_SIZE
+                RIDER_ORDERS_PAGE_SIZE,
+                search || undefined,
             );
             return get<RiderOrder[]>(route.path);
         },
-        getNextPageParam: (lastPage, allPages) =>
-            lastPage.length < RIDER_ORDERS_PAGE_SIZE
-                ? undefined
-                : allPages.reduce((n, page) => n + page.length, 0),
+        getNextPageParam: nextOffset<RiderOrder>(RIDER_ORDERS_PAGE_SIZE),
         staleTime: 1000 * 60 * 5,
     });
+}
+
+/** Every order fetched so far, newest first, each appearing once. */
+export function riderOrderRows(data: InfiniteData<RiderOrder[]> | undefined): RiderOrder[] {
+    return flattenPages<RiderOrder>(data);
 }
 
 export function useRiderEarningsHistory() {

@@ -19,9 +19,9 @@ class Cart(Base):
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=datetime.now(timezone.utc))
   
   # relationships
-  user = relationship("User", back_populates="cart")
+  user = relationship("User", back_populates="cart", lazy="raise_on_sql")
   # vendor = relationship("Vendor", back_populates="cart")
-  cart_item = relationship("CartItem" , back_populates="cart", cascade="all, delete-orphan")
+  cart_item = relationship("CartItem" , back_populates="cart", cascade="all, delete-orphan", lazy="raise_on_sql")
 
 
 class CartItem(Base):
@@ -38,6 +38,6 @@ class CartItem(Base):
   Subtotal = Column(Numeric(10, 2), nullable=False)
   
   # relationships
-  cart = relationship("Cart" , back_populates="cart_item")
-  vendor = relationship("Vendor" , back_populates="cart_item")
-  product = relationship("Product" , back_populates="cart_item")
+  cart = relationship("Cart" , back_populates="cart_item", lazy="raise_on_sql")
+  vendor = relationship("Vendor" , back_populates="cart_item", lazy="raise_on_sql")
+  product = relationship("Product" , back_populates="cart_item", lazy="raise_on_sql")

@@ -77,10 +77,15 @@ def generate_presigned_url(s3_key: str, expires_in: int = 900) -> str:
     """
     Generates a presigned URL for secure access to a private S3 object.
     Defaults to a 15 minute (900s) expiration.
+
+    **This is for private objects only** — identity documents, KYC photographs,
+    delivery proof, dispute evidence. For a product photograph, a store logo or an
+    avatar, use `public_asset_url`: see its docstring for why presigning one of
+    those is a bandwidth defect rather than a security measure.
     """
     if not s3_key:
         return None
-        
+
     if not os.getenv('AWS_ACCESS_KEY_ID'):
         # Fallback for development if using local storage paths
         if s3_key.startswith("/api/uploads/"):
@@ -97,3 +102,54 @@ def generate_presigned_url(s3_key: str, expires_in: int = 900) -> str:
     except ClientError as e:
         logger.error(f"Error generating presigned URL: {e}", exc_info=True)
         return None
+
+
+#: Origin that serves the public asset bucket — CloudFront in production. Unset,
+#: everything falls back to presigning exactly as before, so this ships dark and
+#: turns on when the distribution exists.
+PUBLIC_ASSET_BASE_URL = (os.getenv("PUBLIC_ASSET_BASE_URL") or "").rstrip("/")
+
+
+def public_asset_url(s3_key: str) -> str:
+    """A **stable** URL for an asset that is not a secret.
+
+    Every image on this platform was presigned, including the ones that are not
+    private: product photographs, store logos, customer and rider avatars. A
+    presigned URL embeds `X-Amz-Date` and an expiry in its signature, so the same
+    product photo has a *different URL in every response*.
+
+    Every image cache in the stack keys on the URL — `expo-image`, React Native's
+    own, the OS HTTP cache, and any CDN. A URL that changes per response therefore
+    means a cache key that changes per response, so **every image is re-downloaded
+    every time a list is refreshed**, whether or not the device already holds a
+    byte-identical copy. Twenty-six components across the three apps render images
+    this way, and the `cachePolicy` props already set in the vendor app were doing
+    nothing at all.
+
+    In numbers: a twenty-item catalogue at roughly 40 KB an image is 800 KB
+    re-fetched on every refresh, on metered Kenyan mobile data, repeated on every
+    foreground. It is the largest single data cost in the platform and the reason
+    the apps feel broken on exactly the handsets most of Drop's customers own. It
+    also means a customer who browses and then loses signal holds images that
+    expire in fifteen minutes.
+
+    The presigning was right for what it was designed for and stays exactly as it
+    is for those objects. The defect was applying the same mechanism to a
+    photograph of a water bottle.
+
+    A key is served from `PUBLIC_ASSET_BASE_URL` unchanged, so the URL is a pure
+    function of the object: it changes if and only if the image does, which is what
+    makes `Cache-Control: public, max-age=31536000, immutable` safe on the bucket.
+    Uploads must therefore write content-addressed keys — never overwrite a key
+    with different bytes, or caches will serve the old image forever.
+    """
+    if not s3_key:
+        return None
+    if str(s3_key).startswith("http"):
+        return s3_key
+    if not PUBLIC_ASSET_BASE_URL:
+        # No distribution configured. Presign, so behaviour is unchanged rather
+        # than broken — this is the state every environment is in until the
+        # bucket split is provisioned.
+        return generate_presigned_url(s3_key)
+    return f"{PUBLIC_ASSET_BASE_URL}/{str(s3_key).lstrip('/')}"

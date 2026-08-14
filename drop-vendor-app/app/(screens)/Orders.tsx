@@ -22,6 +22,8 @@ import { useDashboard } from "@/hooks/queries/useDashboard";
 import { PERMISSIONS, useCan, useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useDebounce } from "@/hooks/useDebounce";
+import { flattenPages, keepPaging } from "@/utils/paging";
+import { useQueryClient } from "@tanstack/react-query";
 import { trackEvent } from "@/utils/analytics";
 import { errorMessage } from "@/API/errors";
 import { ORDER_FILTERS, isUnderReview, orderStatusStyle } from "@/constants/orderStatus";
@@ -171,13 +173,12 @@ export default function Orders() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [updatingOrder, setUpdatingOrder] = useState<string | null>(null);
 
+  const ordersQuery = useVendorOrdersPaginated(searchState, statusFilter, 20);
   const { 
     data: ordersData, 
     isFetching: productLoading, 
-    fetchNextPage: fetchNextOrders, 
-    hasNextPage: hasNextOrders, 
     refetch 
-  } = useVendorOrdersPaginated(searchState, statusFilter, 20);
+  } = ordersQuery;
   
   const { mutateAsync: updateStatusMutation } = useUpdateOrderStatus();
   const canManageOrders = useCan(PERMISSIONS.manageOrders);
@@ -185,13 +186,24 @@ export default function Orders() {
   const { data: vendorProfile } = useVendorProfile();
   const vendorId = dashboard?.vendor_id;
 
-  // `page.items` — the server no longer pretends to be an `InfiniteData`.
-  const filteredOrders = ordersData?.pages?.flatMap((page) => page.items ?? []) || [];
+  // `page.items` — the server no longer pretends to be an `InfiniteData` — and
+  // deduped on the order id, because an order placed while the vendor is
+  // scrolling shifts the offset window and re-serves the previous page's last
+  // row. Named `filteredOrders` for history: the search and the status chips are
+  // both query parameters, and filtering here would only search the page held.
+  const filteredOrders = flattenPages<any>(ordersData);
 
   // WebSocket hook for real-time order updates
+  // The search term and the status chip are both part of the query key, so
+  // `refetch()` refreshes only the combination on screen. A new order arriving
+  // while the vendor is looking at "Preparing" has to reach the "Pending" cache
+  // too — that is the one they switch to in order to accept it.
+  const queryClient = useQueryClient();
   const { connected } = useWebSocket('vendor', vendorId || "", (updateData) => {
     if (updateData.action === 'heartbeat') return;
-    refetch();
+    queryClient.invalidateQueries({ queryKey: ["vendorOrdersPaginated"] });
+    queryClient.invalidateQueries({ queryKey: ["vendorOrders"] });
+    queryClient.invalidateQueries({ queryKey: ["vendorDashboard"] });
   });
 
   React.useEffect(() => {
@@ -264,6 +276,8 @@ export default function Orders() {
               width="flex-1 ml-3"
               height="h-[50px]"
               buttonStyle=""
+              value={searchQuery}
+              placeholder="Search by order reference"
               setFunc={setSearchQuery}
             />
           </View>
@@ -302,9 +316,7 @@ export default function Orders() {
           // @ts-ignore
           refreshControl={<RefreshControl refreshing={productLoading} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
-          onEndReached={() => {
-            if (hasNextOrders) fetchNextOrders();
-          }}
+          onEndReached={keepPaging(ordersQuery)}
           onEndReachedThreshold={0.5}
           ListEmptyComponent={
           productLoading && filteredOrders.length === 0 ? (

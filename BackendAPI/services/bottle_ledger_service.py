@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.bottle_ledger_model import BottleLedgerEntry, BottleLedgerEntryType
 from models.vendor_rider_model import VendorRiderRegistry
 from typing import Iterable, Sequence
+from utils.paging import stable
 
 logger = logging.getLogger(__name__)
 
@@ -429,8 +430,12 @@ async def get_ledger_history(
         conditions.append(BottleLedgerEntry.vendor_id == vendor_id)
     query = (
         query.where(and_(*conditions))
-        .order_by(BottleLedgerEntry.created_at.desc())
-        .limit(min(limit, 200))
+        .order_by(*stable(BottleLedgerEntry.created_at.desc(), key=BottleLedgerEntry.id))
+        # 201, not 200: the route's ceiling is 200 rows *per page* and it asks
+        # for `limit + 1` to learn whether another page exists. Clamping at 200
+        # would swallow that extra row at the maximum page size and report the
+        # last full page as the end of the ledger.
+        .limit(min(limit, 201))
         .offset(offset)
     )
 

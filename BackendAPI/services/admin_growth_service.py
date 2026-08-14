@@ -58,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.acquisition_spend_model import AcquisitionSpend
 from models.order_model import Order
+from services import customer_cohort_service
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,11 @@ ZERO = Decimal("0")
 #: platform has served, and a cancelled one that was refunded earned nothing —
 #: counting either inflates both the cohort and its contribution, in the
 #: direction that makes acquisition look like it worked.
-ACQUIRED_STATUS = "delivered"
+#:
+#: Imported rather than restated: `customer_cohort_service` decides which orders
+#: land in `Customer_First_Delivery`, and a second literal here is how the table
+#: and the report that reads it come to disagree about what "acquired" means.
+ACQUIRED_STATUS = customer_cohort_service.ACQUIRED_STATUS
 
 #: Bounded because each query below aggregates the orders table. Two years of
 #: monthly cohorts is already a grid nobody reads.
@@ -246,19 +251,25 @@ async def _first_delivered_month(session: AsyncSession):
     month's simply because the window starts after they joined — which is what a
     `MIN()` computed inside the window would do, and it would invent new
     customers out of loyal ones.
+
+    That definition has not changed; where it is evaluated has. This used to be
+
+        SELECT customer_id, MIN(date_trunc('month', created_at))
+        FROM "Orders" WHERE order_status = 'delivered' GROUP BY customer_id
+
+    computed live, on every load of the growth screen. Being unbounded is the
+    *point* — and it is also why the query could only ever get slower: it must
+    read every delivered order that has ever existed, no index can narrow it, and
+    nothing about it improves as the platform succeeds. At seven million orders
+    that is tens of seconds, holding a connection, on a screen people refresh.
+
+    `Customer_First_Delivery` holds one row per customer, written at delivery and
+    reconciled nightly against this exact definition
+    (`services/customer_cohort_service`). The report joins fifty thousand rows
+    instead of aggregating seven million, and the arithmetic downstream is
+    untouched — the subquery returns the same two columns under the same names.
     """
-    return (
-        select(
-            Order.customer_id.label("customer_id"),
-            func.min(func.date_trunc("month", Order.created_at)).label("cohort"),
-        )
-        .where(
-            Order.order_status == ACQUIRED_STATUS,
-            Order.customer_id.isnot(None),
-        )
-        .group_by(Order.customer_id)
-        .subquery()
-    )
+    return customer_cohort_service.first_delivery_source()
 
 
 async def cohort_economics(

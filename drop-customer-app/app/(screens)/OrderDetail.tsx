@@ -3,7 +3,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { OrderDetailSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND, TOAST } from "@/constants/brandColors";
-import { useOrders, useActiveOrder, useCancelOrder, useResolveMismatch, Order, useOrderTrackingLogs } from "@/hooks/queries/useOrders";
+import { useOrder, useActiveOrder, useCancelOrder, useResolveMismatch, Order, useOrderTrackingLogs } from "@/hooks/queries/useOrders";
 import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
@@ -115,17 +115,18 @@ export default function OrderDetail() {
         });
     };
 
-    const { data: orders = [], isLoading: ordersLoading, isFetching: ordersFetching } = useOrders();
+    // Fetched by id, not searched for in the order list. The list is one page,
+    // and the order somebody has just tapped a notification about is routinely
+    // not on it — which rendered as a detail screen that never stopped loading.
+    const { data: fetchedOrder, isLoading: ordersLoading, isFetching: ordersFetching } = useOrder(orderId);
     const { data: activeOrder } = useActiveOrder();
 
     const order: Order | null = useMemo(() => {
-        let found = orders.find((o: Order) => o.id === orderId) || null;
-        // Fallback to activeOrder if it perfectly matches the param but isn't in the cached orders array yet
-        if (!found && activeOrder?.id === orderId) {
-            found = activeOrder;
-        }
-        return found;
-    }, [orders, orderId, activeOrder]);
+        // `activeOrder` is already in cache on the common path, so preferring the
+        // fetched row but falling back to it keeps the screen painting instantly
+        // for the order the customer is actually waiting on.
+        return fetchedOrder ?? (activeOrder?.id === orderId ? activeOrder : null);
+    }, [fetchedOrder, orderId, activeOrder]);
 
     // Use query loading state natively, or local state during intermediate transitions
     // If order is not found but we're fetching in the background, consider it loading to prevent UI flashes

@@ -90,7 +90,8 @@ the commit. `drop-admin/.env.example` ships; it holds no values.
 Free Hobby plan. No card, no domain.
 
 **Why Vercel and not GitHub Pages:** Pages serves static files. Half of this
-console is server code — Server Actions, middleware, and `lib/api/server.ts`,
+console is server code — Server Actions, the `proxy.ts` request gate, and
+`lib/api/server.ts`,
 which mints the Clerk token per request precisely so the browser never holds one.
 Pages cannot run any of it. This is not a preference; the app would not function.
 
@@ -156,7 +157,7 @@ per-PR previews, and each one is a live door to production data.
 ### After it deploys
 
 Open the URL. You should reach **the sign-in page**. That alone proves the Clerk
-publishable key, the middleware and the build are all correct. You cannot get
+publishable key, the `proxy.ts` gate and the build are all correct. You cannot get
 past it yet — that is part 4.
 
 ---

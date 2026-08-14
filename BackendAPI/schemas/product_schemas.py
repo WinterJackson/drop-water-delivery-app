@@ -2,7 +2,7 @@ from pydantic import BaseModel, computed_field, field_validator
 from uuid import UUID
 from typing import Optional
 
-from utils.s3_utils import generate_presigned_url
+from utils.s3_utils import public_asset_url
 from utils.money import MoneyField
 
 
@@ -16,7 +16,12 @@ def _presign(v: str | None) -> str | None:
     images were the one image on the platform that did not.
     """
     if v and not v.startswith("http") and not v.startswith("/api/uploads/"):
-        return generate_presigned_url(v)
+        # `public_asset_url`, not `generate_presigned_url`. This is a
+        # photograph, not a document: presigning it produced a different URL
+        # in every response, which changes the cache key in every response,
+        # which means every client re-downloads every image on every refresh.
+        # See `utils/s3_utils.public_asset_url`.
+        return public_asset_url(v)
     return v
 
 

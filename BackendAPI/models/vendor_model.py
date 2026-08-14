@@ -109,11 +109,11 @@ class Vendor(Base):
   
   # relationship
   # cart = relationship("Cart", back_populates="vendor")
-  cart_item = relationship("CartItem", back_populates="vendor")
-  products = relationship("Product", back_populates="vendor")
-  order = relationship("Order", back_populates="vendor")
-  vendor_favorites = relationship("VendorFavorite", back_populates="vendor")
+  cart_item = relationship("CartItem", back_populates="vendor", lazy="raise_on_sql")
+  products = relationship("Product", back_populates="vendor", lazy="raise_on_sql")
+  order = relationship("Order", back_populates="vendor", lazy="raise_on_sql")
+  vendor_favorites = relationship("VendorFavorite", back_populates="vendor", lazy="raise_on_sql")
   #: Many staff per store — see `models/vendor_staff_model.py`. The
   #: `staff_clerk_id` / `staff_push_token` columns below are the single-staff
   #: predecessor: they are backfilled into this table and no longer read.
-  staff = relationship("VendorStaff", back_populates="vendor", cascade="all, delete-orphan")
+  staff = relationship("VendorStaff", back_populates="vendor", cascade="all, delete-orphan", lazy="raise_on_sql")

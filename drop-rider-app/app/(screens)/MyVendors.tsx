@@ -1,6 +1,6 @@
 import { ApiError, errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { View, StatusBar, FlatList, RefreshControl, Image, TouchableOpacity, ActivityIndicator, Linking } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -33,15 +33,33 @@ export default function MyVendors() {
   
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
+  /**
+   * Which search this component is currently showing.
+   *
+   * Two searches in flight can finish in either order — "wa" over a slow cell
+   * and "waterpoint" over a good one — and the slower, staler one wins simply
+   * by landing last. The result is a list that does not match the box above it,
+   * which reads as the search being broken. Every response is checked against
+   * the term that is current when it arrives, and a stale one is dropped.
+   */
+  const inFlightFor = useRef<string>("");
+
   const fetchRegisteredVendors = async (search?: string) => {
+    const term = search ?? "";
+    inFlightFor.current = term;
     try {
-      setVendors(await get<any[]>(RiderApiRoutes.RegisteredVendors(search).path));
+      const rows = await get<any[]>(RiderApiRoutes.RegisteredVendors(search).path);
+      if (inFlightFor.current !== term) return;
+      setVendors(rows);
     } catch (e) {
+      if (inFlightFor.current !== term) return;
       if (e instanceof ApiError && e.status === 401) return;
       Toast.error("Error", errorMessage(e, "Failed to fetch vendors"));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (inFlightFor.current === term) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 

@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy.future import select
 from models.product_model import Product
 from schemas.product_schemas import ProductFull,BaseProduct
+from utils.paging import stable
 
 
 def live_product():
@@ -43,7 +44,10 @@ async def get_product_for_cart(session : AsyncSession, id : UUID) -> BaseProduct
   return product
 
 async def fetch_products_with_offer(session: AsyncSession, limit: int = 20, offset: int = 0) -> list[BaseProduct]:
-  query = select(Product).where(Product.discount > 0, Product.is_available == True, live_product()).order_by(Product.discount.desc()).offset(offset).limit(limit)
+  # `discount` is a percentage: on any real catalogue dozens of products share
+  # each value, so this ordering ties almost everywhere and the offset window
+  # would land differently on every execution — see `utils/paging`.
+  query = select(Product).where(Product.discount > 0, Product.is_available == True, live_product()).order_by(*stable(Product.discount.desc(), key=Product.id)).offset(offset).limit(limit)
   result = await session.execute(query)
   products = result.unique().scalars().all()
   if not products :
@@ -52,7 +56,7 @@ async def fetch_products_with_offer(session: AsyncSession, limit: int = 20, offs
 
 async def fetch_paginated_products(session: AsyncSession, page: int) ->  list[BaseProduct]:
   offset = (page - 1 ) * 16
-  query = select(Product).where(Product.is_available == True, live_product()).order_by(Product.created_at.desc()).offset(offset).limit(16)
+  query = select(Product).where(Product.is_available == True, live_product()).order_by(*stable(Product.created_at.desc(), key=Product.id)).offset(offset).limit(16)
   result = await session.execute(query)
   products = result.scalars().all()
   return products
@@ -68,7 +72,7 @@ async def fetch_products_by_category(session: AsyncSession, category: str, limit
   total = count_result.scalar() or 0
   
   # Get paginated results
-  query = base_query.order_by(Product.created_at.desc()).offset(offset).limit(limit)
+  query = base_query.order_by(*stable(Product.created_at.desc(), key=Product.id)).offset(offset).limit(limit)
   result = await session.execute(query)
   products = result.scalars().all()
   

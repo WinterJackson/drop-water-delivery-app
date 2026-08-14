@@ -12,6 +12,7 @@ import React, { useEffect } from "react";
 import { useColorScheme, LogBox, AppState, AppStateStatus, Platform } from "react-native";
 import { configureReanimatedLogger, ReanimatedLogLevel } from 'react-native-reanimated';
 import { useFonts } from 'expo-font';
+import { retryTransientOnly } from '@/API/errors';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import { useSessionCleanup } from '@/hooks/useSessionCleanup';
 import ThemeContextProvider, { UIThemeContext } from "../context/ThemeContext";
@@ -35,8 +36,26 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 2,
       gcTime: 1000 * 60 * 10,
-      retry: 2,
+      // A 4xx is a refusal, not a dropped packet. A plain `retry: 2` — which is
+      // what this was, while the customer and rider apps had both already been
+      // corrected — made every refusal cost three round trips before the vendor
+      // saw it, and because the client signs out on a 401, fired the sign-out
+      // handler **three times for one expired session**. On the surface where a
+      // shop that cannot see its orders is losing money by the minute.
+      retry: retryTransientOnly(2),
       refetchOnWindowFocus: true, // Enables refetch on app foreground
+      // Read from cache first and fire the request behind it, rather than
+      // suspending on the network. A store's counter is often the worst
+      // reception in the building; the orders it already has must render while
+      // the refresh is in flight, not after it.
+      networkMode: 'offlineFirst',
+    },
+    mutations: {
+      // A mutation is an *action*. Retrying a refused one changes nothing and
+      // retrying a timed-out one risks applying it twice, so replay belongs to
+      // the queue that can carry an idempotency key, not to a blind retry.
+      retry: retryTransientOnly(0),
+      networkMode: 'offlineFirst',
     },
   },
 });

@@ -54,7 +54,7 @@ import BackButton from "@/components/ui/BackButton";
 import { BRAND } from "@/constants/brandColors";
 
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useOrders } from "@/hooks/queries/useOrders";
+import { useOrders, orderRows } from "@/hooks/queries/useOrders";
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
 import { useApiRequest } from "@/API/useApiClient";
 import { ROUTES } from "@/API/routes/ApiRoutes";
@@ -559,7 +559,11 @@ export default function Maps() {
 	const [riderCoordinates, setRiderCoordinates] = useState<{lat: number, lng: number} | null>(null);
 
     const { data: allVendors = [], isLoading: vendorsLoading } = useAllVendors();
-    const { data: orders = [] } = useOrders();
+    // The newest page only — this panel is a shortcut to recent orders beside the
+    // map, not the history screen. `orderRows` is how a paged query becomes a
+    // list; never read `.pages` here.
+    const ordersQuery = useOrders();
+    const orders = orderRows(ordersQuery.data);
     const { data: savedLocations = [] } = useSavedLocations();
     const { data: User, isPending: loadingUser, refetch: refetchUser } = useUserDetails();
     const { isLoaded, isSignedIn } = useAuth();

@@ -357,11 +357,25 @@ def test_contribution_is_platform_net_and_is_never_re_derived():
 
 def test_a_cohort_is_a_first_delivered_order_not_a_signup():
     """An account that never received water was not acquired, and a signup
-    cohort makes every retention figure look worse than the business is."""
-    source = _code_only(BACKEND / "services/admin_growth_service.py")
+    cohort makes every retention figure look worse than the business is.
 
+    The `MIN()` this used to look for in `admin_growth_service` now lives in
+    `customer_cohort_service._derived_query`, which is the one place the
+    definition is written: the table is backfilled from it, reconciled against it
+    nightly, and the report reads the table. The invariant did not move — only the
+    module did — so this follows it rather than being relaxed.
+    `tests/test_customer_cohorts.py` checks the derivation itself in detail.
+    """
     assert growth.ACQUIRED_STATUS == "delivered"
+
+    source = _code_only(BACKEND / "services/customer_cohort_service.py")
     assert "func.min" in source, "the cohort must be the customer's *first* delivered order"
+
+    report = _code_only(BACKEND / "services/admin_growth_service.py")
+    assert "customer_cohort_service" in report, (
+        "the growth report no longer reads the cohort table; if it has gone back "
+        "to deriving cohorts live, that is a full scan of Orders per page load"
+    )
 
 
 @pytest.mark.asyncio

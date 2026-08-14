@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { ROUTES } from "@/API/routes/ApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
+import { flattenPages } from "@/utils/paging";
 
 export interface WalletTransaction {
   id: string;
@@ -63,9 +64,16 @@ export const useWalletTransactionsPaginated = (search: string, type: string, lim
   });
 };
 
-/** Flatten an infinite wallet query into a single row list. */
+/**
+ * Flatten an infinite wallet query into a single row list.
+ *
+ * Delegates to the shared `flattenPages`, which keys on the ledger id: offset
+ * paging over a ledger that grows at the top re-serves the last row of the
+ * previous page whenever a transaction lands mid-scroll, and this list renders
+ * money.
+ */
 export const flattenWalletPages = (pages?: { pages: WalletPage[] }): WalletTransaction[] =>
-  pages?.pages.flatMap((page) => page?.data ?? []) ?? [];
+  flattenPages<WalletTransaction>(pages);
 
 export const useWalletTopUp = () => {
   const api = useApiRequest();

@@ -28,6 +28,7 @@ import SearchBar from "@/components/common/Search";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useVendorProducts } from "@/hooks/queries/useVendorProducts";
 import { useDebounce } from "@/hooks/useDebounce";
+import { flattenPages, keepPaging } from "@/utils/paging";
 import { formatMoney } from "@/utils/money";
 
 const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggleAvailability, onUpdateStock }: { item: any, darkTheme: boolean, canEdit: boolean, onDelete: (id: string) => void, onEdit: (id: string) => void, onToggleAvailability: (id: string, isAvailable: boolean) => void, onUpdateStock: (id: string, newStock: number) => void }) => {
@@ -119,17 +120,18 @@ export default function Products() {
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
   const [searchState, setSearchState] = useState("");
 
+  const productsQuery = useVendorProducts(searchState, filter, 20);
   const {
     data: productsData,
     isFetching: productLoading,
-    fetchNextPage: fetchNextProducts,
-    hasNextPage: hasNextProducts,
     refetch,
     isError
-  } = useVendorProducts(searchState, filter, 20);
+  } = productsQuery;
 
-  // `page.items` — the server no longer pretends to be an `InfiniteData`.
-  const filteredProducts = productsData?.pages?.flatMap((page) => page.items ?? []) || [];
+  // `page.items` — the server no longer pretends to be an `InfiniteData` — and
+  // deduped on the product id. Named `filteredProducts` for history: the search
+  // and the stock filter are both query parameters.
+  const filteredProducts = flattenPages<any>(productsData);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -226,6 +228,8 @@ export default function Products() {
               width="flex-1 ml-3"
               height="h-[50px]"
               buttonStyle=""
+              value={searchQuery}
+              placeholder="Search your products"
               setFunc={setSearchQuery}
             />
           </View>
@@ -268,9 +272,7 @@ export default function Products() {
           // @ts-ignore
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, paddingTop: 8 }}
-          onEndReached={() => {
-            if (hasNextProducts) fetchNextProducts();
-          }}
+          onEndReached={keepPaging(productsQuery)}
           onEndReachedThreshold={0.5}
           ListEmptyComponent={
             productLoading && filteredProducts.length === 0 && !isError ? (

@@ -120,7 +120,7 @@ class VendorStaff(Base):
     #: invitation, so the owner can see an invite that was never taken up.
     accepted_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
-    vendor = relationship("Vendor", back_populates="staff")
+    vendor = relationship("Vendor", back_populates="staff", lazy="raise_on_sql")
 
     @property
     def is_pending(self) -> bool:

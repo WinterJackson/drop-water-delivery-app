@@ -1,6 +1,20 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 /**
+ * The request gate in front of every route on this origin.
+ *
+ * This is the file Next.js used to call `middleware.ts`. Next 16 renamed the
+ * convention to `proxy.ts` — same position in the request lifecycle, same
+ * default export, same `config.matcher` — and warns on every boot while the old
+ * name is still on disk. Only the *file* is renamed: `clerkMiddleware` keeps its
+ * name, and Clerk finds itself through a header it sets rather than through the
+ * filename, so nothing downstream cares.
+ *
+ * One thing did change and it is the reason not to carry a `runtime` export
+ * across: a proxy always runs on Node.js. Next refuses route segment config
+ * here, so there is no edge/node choice left to make — and no `runtime` line
+ * that could quietly stop meaning anything.
+ *
  * Everything except the sign-in flow requires a session.
  *
  * This only establishes *who* the caller is. Whether they are an administrator

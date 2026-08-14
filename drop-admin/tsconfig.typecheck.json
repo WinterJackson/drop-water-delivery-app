@@ -1,0 +1,22 @@
+{
+  // `pnpm typecheck`, and only that. `tsconfig.json` stays exactly as Next.js
+  // writes it — Next rewrites that file on boot, so anything we changed there
+  // would come back.
+  //
+  // The one difference is `.next/dev/types/**`. Next lists both `.next/types`
+  // and `.next/dev/types` in `tsconfig.json` deliberately, "to avoid config
+  // churn between dev/build modes", and then **filters the dev half out** when
+  // `next build` runs its own type check. A bare `tsc --noEmit` does no such
+  // filtering, so it type-checks the dev server's live scratch output: a
+  // half-written `validator.ts` fails the check with four syntax errors in
+  // generated code, and interrupting `next dev` at the wrong moment leaves one
+  // truncated on disk until something happens to rewrite it. The check then
+  // stays red across restarts while every line of source is fine — and the
+  // reflex it teaches is to stop believing the typecheck.
+  //
+  // Route and page prop types are not lost: `next build` still validates them
+  // from `.next/types`, which is generated in one pass by the build itself.
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next/dev"]
+}

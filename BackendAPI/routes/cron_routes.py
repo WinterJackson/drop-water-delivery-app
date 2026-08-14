@@ -168,6 +168,7 @@ def _job_table() -> dict:
         "deposit-maintenance": worker.deposit_maintenance_task,
         "release-unclaimed-cash": worker.release_unclaimed_cash_task,
         "resume-paused-stores": worker.resume_paused_stores_task,
+        "reconcile-customer-cohorts": worker.reconcile_customer_cohorts_task,
     }
 
 

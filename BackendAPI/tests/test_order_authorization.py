@@ -192,3 +192,73 @@ async def test_missing_entity_row_is_denied():
     session = AsyncMock()
     session.get = AsyncMock(return_value=None)
     assert await owns_entity(session, "rider", str(uuid4()), "rider_a") is False
+
+
+# ── Every customer-facing order-by-id route is scoped to the caller ──────────
+
+
+def _cart_order_routes():
+    """Route functions in `cart_routes` whose path names an `{order_id}`.
+
+    Parsed rather than listed, so a route added tomorrow is covered without
+    anybody remembering to add it here.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "routes" / "cart_routes.py").read_text()
+    tree = ast.parse(source)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        paths = [
+            decorator.args[0].value
+            for decorator in node.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.value.__dict__.get("id") == "router"
+            and decorator.args
+            and isinstance(decorator.args[0], ast.Constant)
+        ]
+        if any("{order_id}" in path for path in paths):
+            yield node.name, ast.get_source_segment(source, node) or ""
+
+
+def test_every_customer_order_route_scopes_the_order_to_the_caller():
+    """An order id in the URL is a claim, not a credential.
+
+    Authenticating proves who is calling; it says nothing about whether they have
+    anything to do with the order they named. There are exactly two acceptable
+    ways to establish that here, and every route must use one:
+
+    * `authorise_order_access(...)`, which resolves the caller's role against the
+      order and raises **404** for a stranger — a 403 would confirm the id exists.
+    * passing the caller's own `user_id` into the service, so the query cannot
+      match somebody else's order in the first place.
+
+    Written as a sweep because the risk is a *new* route: `GET /orders/{id}` was
+    added so the detail screen could stop searching the cached list, and it
+    returns a customer's address, phone number and order total to whoever asks
+    for the id if this line is ever dropped.
+    """
+    unscoped = []
+    for name, body in _cart_order_routes():
+        if "authorise_order_access" in body:
+            continue
+        if "user_id=user_obj.id" in body or "user_id=user.id" in body:
+            continue
+        unscoped.append(name)
+
+    assert not unscoped, (
+        "order-scoped route with no check that the caller is a party to it: "
+        f"{unscoped}"
+    )
+
+
+def test_the_route_sweep_still_finds_the_routes_it_is_meant_to_cover():
+    """A parser that matches nothing passes the test above vacuously."""
+    names = {name for name, _ in _cart_order_routes()}
+
+    assert "get_one_order" in names, "the single-order read must be covered"
+    assert len(names) >= 4, f"the decorator parser has stopped matching (found {names})"

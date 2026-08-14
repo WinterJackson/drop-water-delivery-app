@@ -24,14 +24,16 @@ export const BRAND = {
   white: '#FFFFFF',
   /** Dark text for light backgrounds */
   textDark: '#11181C',
-  /** Search bar text and placeholder in dark mode (70% opacity) */
+  /** Search bar *placeholder* in dark mode (70% opacity). Not the typed term. */
   searchPlaceholderDark: 'rgba(255, 255, 255, 0.7)',
-  /** Search bar text and placeholder in light mode (70% opacity) */
+  /** Search bar *placeholder* in light mode (70% opacity). Not the typed term. */
   searchPlaceholderLight: 'rgba(0, 0, 0, 0.7)',
   /** Standard gray tones for borders and shadows */
   gray200: '#e5e7eb',
   gray500: '#6b7280',
   gray800: '#1f2937',
+  /** Foreground text on a light surface — what somebody has typed, not the hint */
+  gray900: '#111827',
   /** Favorite heart background */
   favorite: '#ef4444',
 } as const;

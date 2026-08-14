@@ -3,6 +3,7 @@ import axios, { AxiosError, AxiosRequestConfig, AxiosResponse, InternalAxiosRequ
 import { useCallback, useMemo } from "react";
 
 import { ApiError, toApiError } from "./errors";
+import { kindForMethod, timeoutFor } from "./netBudget";
 
 /**
  * Centralised HTTP client. Ported unchanged from `drop-customer-app`.
@@ -22,10 +23,25 @@ export const useApiClient = () => {
 
     const apiClient = useMemo(() => {
         const client = axios.create({
-            timeout: 15000,
             headers: {
                 "Content-Type": "application/json",
             },
+        });
+
+        // The timeout is per request, not per client.
+        //
+        // It was a flat 15 s, which is a broadband number. On a congested cell a
+        // request that would have completed at 25 s was aborted, retried twice and
+        // reported as a failure — three quarters of a minute of spinner and three
+        // uploads of the same body over metered data, manufacturing exactly the
+        // hang the timeout existed to prevent. `netBudget` reads the live
+        // connection and the request kind instead.
+        client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+            if (config.timeout === undefined || config.timeout === 0) {
+                const kind = config.data instanceof FormData ? "upload" : kindForMethod(config.method?.toUpperCase());
+                config.timeout = timeoutFor(kind);
+            }
+            return config;
         });
 
         // Inject Clerk Auth Token strictly onto non-public routes

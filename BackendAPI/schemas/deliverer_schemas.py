@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from uuid import UUID
 from pydantic import field_validator
-from utils.s3_utils import generate_presigned_url
+from utils.s3_utils import generate_presigned_url, public_asset_url
 from decimal import Decimal
 from utils.money import MoneyField
 from typing import Literal, Optional, Any
@@ -57,7 +57,20 @@ class DelivererProfileResponse(BaseModel):
     #: would have left a rider looking at a map, and reading a promise, that
     #: were both a kilometre short of the truth.
     operation_radius_km: float | None = None
-    @field_validator('profile_pic', 'driver_license', mode='after')
+    # Two fields, two treatments, and the difference is the whole point.
+    #
+    # A rider's avatar is a photograph shown to a customer watching a delivery —
+    # not a secret, and re-signed on every response it was re-downloaded on every
+    # response. A driving licence is an identity document: it stays presigned,
+    # short-lived and unguessable, exactly as before.
+    @field_validator('profile_pic', mode='after')
+    @classmethod
+    def public_image_urls(cls, v: str | None) -> str | None:
+        if v and not v.startswith('http') and not v.startswith('/api/uploads/'):
+            return public_asset_url(v)
+        return v
+
+    @field_validator('driver_license', mode='after')
     @classmethod
     def secure_urls(cls, v: str | None) -> str | None:
         if v and not v.startswith('http') and not v.startswith('/api/uploads/'):

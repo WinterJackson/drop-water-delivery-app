@@ -27,7 +27,10 @@ Client components therefore never fetch. They call a **Server Action**
 
 ### 1a. Four layers, and only one of them decides
 
-1. **Middleware** — a Clerk session is required for everything but `/sign-in`.
+1. **`proxy.ts`** — a Clerk session is required for everything but `/sign-in`.
+   Next 16 renamed the `middleware.ts` convention to `proxy.ts`; both names still
+   resolve, so shipping the two together gives the console a gate it edits and a
+   gate it runs. A test asserts there is exactly one.
    There is no public `/sign-up`: administrators are invited and bound on first
    sign-in, and a test fails the build if that route becomes public.
 2. **`Admin_Users`, per request** — the session says who; the backend says

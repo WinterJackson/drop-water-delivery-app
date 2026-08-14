@@ -106,6 +106,13 @@ def test_the_schedule_covers_every_job_that_used_to_be_an_arq_cron():
         # than none, since the vendor has already assumed it failed and paused
         # a second time.
         "resume-paused-stores",
+        # Re-derives `Customer_First_Delivery` from the orders table and repairs
+        # it. Nightly, because the table is a *cache* of a definition — the fast
+        # path is the write on the delivery, and this is what makes it safe to
+        # depend on. What it reports matters more than what it fixes: a drift
+        # count that keeps coming back means a delivery path is not calling
+        # `record_acquisition`, which is a code defect nothing else would surface.
+        "reconcile-customer-cohorts",
     }
     assert set(cron_routes._job_table()) == expected
 

@@ -74,3 +74,62 @@ async def test_validate_status_transition_allows_valid():
     # Unassigned path
     assert validate_status_transition("pending", "unassigned") is True
     assert validate_status_transition("unassigned", "pending") is True
+
+
+def test_the_roster_row_reads_only_columns_the_registry_actually_has():
+    """`GET /my-riders` answered 500 to every store with a rider on its roster.
+
+    The mapping read `reg.created_at`. `VendorRiderRegistry` has no such column —
+    it has `requested_at` — so the loop raised `AttributeError` on its first
+    iteration. A store with an *empty* roster never entered the loop and got a
+    clean `[]` back, so the endpoint worked for precisely the vendors who had
+    nothing to see, and every check that only asked "does this path resolve"
+    passed. Building one row from two ordinary model instances is the cheapest
+    thing that would have caught it.
+    """
+    from datetime import datetime, timezone
+
+    from models.deliverer_model import Deliverer
+    from models.vendor_rider_model import VendorRiderRegistry
+    from routes.vendor_rider_routes import roster_row
+
+    columns = {c.name for c in VendorRiderRegistry.__table__.columns}
+    assert "created_at" not in columns and "requested_at" in columns, (
+        "this test exists because of that distinction"
+    )
+
+    registration = VendorRiderRegistry(
+        id=uuid4(),
+        status="pending",
+        requested_at=datetime(2026, 3, 4, 9, 30, tzinfo=timezone.utc),
+        pending_10L_empties=3,
+        pending_20L_empties=0,
+    )
+    rider = Deliverer(id=uuid4(), name="Brian", phone_number="+254700000000", rating=4.6)
+
+    row = roster_row(registration, rider, 12)
+
+    assert row["applied_at"] == "2026-03-04T09:30:00+00:00"
+    assert row["status"] == "pending"
+    assert row["pending_10L_empties"] == 3
+
+
+def test_the_roster_row_carries_what_the_sort_chips_order_by():
+    """The app's "Rating" and "Trips" chips sorted on fields never sent.
+
+    Its roster card renders each badge behind an `!= null` guard, so both were
+    permanently invisible, and both comparisons were `NaN` — two controls that
+    reached the vendor and not the platform. A rider who has never delivered for
+    this store has no row in the trips aggregate at all, so the outer join hands
+    back `None` and the count must read as zero rather than as absent.
+    """
+    from models.deliverer_model import Deliverer
+    from models.vendor_rider_model import VendorRiderRegistry
+    from routes.vendor_rider_routes import roster_row
+
+    registration = VendorRiderRegistry(id=uuid4(), status="approved")
+    rider = Deliverer(id=uuid4(), name="Asha", rating=4.9)
+
+    assert roster_row(registration, rider, 7)["rating"] == 4.9
+    assert roster_row(registration, rider, 7)["total_deliveries"] == 7
+    assert roster_row(registration, rider, None)["total_deliveries"] == 0

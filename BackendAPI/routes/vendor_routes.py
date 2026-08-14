@@ -87,7 +87,8 @@ async def get_top_brands(db : AsyncSession = Depends(get_db), user = Depends(get
 @router.get("/vendors/directory", response_model=list[VendorWithProductsThin])
 async def fetch_vendor_directory(
     db: AsyncSession = Depends(get_db), 
-    limit: int = Query(50, ge=1, le=100), 
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     search_query: Optional[str] = Query(None),
     vendor_type: Optional[str] = Query("all"),
     user = Depends(get_current_customer)
@@ -98,10 +99,11 @@ async def fetch_vendor_directory(
   if not coords or not coords.lat or not coords.lng:
       return []
   vendors = await get_vendor_directory(
-      session=db, 
-      lat=coords.lat, 
-      lng=coords.lng, 
+      session=db,
+      lat=coords.lat,
+      lng=coords.lng,
       limit=limit,
+      offset=offset,
       search_query=search_query,
       vendor_type=vendor_type
   )

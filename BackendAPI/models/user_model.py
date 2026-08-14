@@ -125,8 +125,8 @@ class User(Base):
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   
   # relationships
-  cart = relationship("Cart", back_populates="user")
-  order = relationship("Order", back_populates="user")
-  favorite = relationship("Favorite", back_populates="user")
-  vendor_favorites = relationship("VendorFavorite", back_populates="user")
-  saved_locations = relationship("SavedLocation", back_populates="user", cascade="all, delete-orphan")
+  cart = relationship("Cart", back_populates="user", lazy="raise_on_sql")
+  order = relationship("Order", back_populates="user", lazy="raise_on_sql")
+  favorite = relationship("Favorite", back_populates="user", lazy="raise_on_sql")
+  vendor_favorites = relationship("VendorFavorite", back_populates="user", lazy="raise_on_sql")
+  saved_locations = relationship("SavedLocation", back_populates="user", cascade="all, delete-orphan", lazy="raise_on_sql")

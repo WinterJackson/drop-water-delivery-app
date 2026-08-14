@@ -4,3 +4,9 @@ node_modules
 .env.local
 next-env.d.ts
 *.tsbuildinfo
+
+# Clerk writes here in development. In keyless mode — which is what runs when
+# the publishable key is missing — it holds a real publishable *and secret* key
+# for an auto-provisioned instance, so this is `.env.local` under another name.
+# It is also where `detectKeylessEnvDriftAction` drops its telemetry marker.
+.clerk

@@ -2,7 +2,8 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentRecordSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { usePaymentHistory, type PaymentHistoryEntry } from "@/hooks/queries/useOrders";
+import { usePaymentHistory, paymentRows, type PaymentHistoryEntry } from "@/hooks/queries/useOrders";
+import { keepPaging } from "@/utils/paging";
 import { formatMoney } from "@/utils/money";
 import { useRouter } from "expo-router";
 import { useContext } from "react";
@@ -32,7 +33,9 @@ export default function PaymentHistory() {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { data: payments = [], isLoading: loading, refetch: fetchPayments } = usePaymentHistory();
+    const paymentsQuery = usePaymentHistory();
+    const { isLoading: loading, isFetchingNextPage, hasNextPage, refetch: fetchPayments } = paymentsQuery;
+    const payments = paymentRows(paymentsQuery.data);
 
     // These are *payment* statuses — the values `Payment.status` and the cash
     // branch of `/api/payments/history` actually take. The screen previously
@@ -96,6 +99,21 @@ export default function PaymentHistory() {
                             onRefresh={fetchPayments}
                             tintColor={darkTheme ? "#fff" : "#000"}
                         />
+                    }
+                    onEndReached={keepPaging(paymentsQuery)}
+                    onEndReachedThreshold={0.5}
+                    ListFooterComponent={
+                        isFetchingNextPage ? (
+                            <View className="py-4">
+                                <PaymentRecordSkeleton />
+                            </View>
+                        ) : !hasNextPage && payments.length > 0 ? (
+                            // The receipt somebody is hunting for may be the oldest
+                            // one; say plainly when there are no more to load.
+                            <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                That's everything.
+                            </Text>
+                        ) : null
                     }
                     ListEmptyComponent={() => {
                         if (loading) return null;

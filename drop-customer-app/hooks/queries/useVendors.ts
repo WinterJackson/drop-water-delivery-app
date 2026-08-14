@@ -1,7 +1,8 @@
 import { retryTransientOnly } from '@/API/errors';
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
-import { useQuery } from '@tanstack/react-query';
+import { flattenPages, nextOffset } from '@/utils/paging';
+import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 
 /**
  * Vendor discovery.
@@ -65,20 +66,42 @@ export function useTopBrandsVendors() {
     });
 }
 
+/** Stores per request. The endpoint caps `limit` at 100. */
+export const DIRECTORY_PAGE_SIZE = 20;
+
+/**
+ * The directory of stores a customer can order from, nearest first.
+ *
+ * The endpoint took a `limit` and no `offset` at all, and the app sent neither,
+ * so the directory was permanently the nearest 50 stores with no way to ask for
+ * the 51st. Both halves are fixed: `offset` exists server-side now, and the
+ * search term and the type filter are still the *server's* — filtering these
+ * rows in the app would search one page and report "no wholesale stores near
+ * you" to somebody with one just past the cut.
+ */
 export function useVendorDirectory(searchQuery: string = '', filter: string = 'all') {
     const api = useApiRequest();
-    return useQuery({
+    return useInfiniteQuery<any[], Error>({
         queryKey: ['vendors', 'directory', searchQuery, filter],
-        queryFn: async () =>
+        initialPageParam: 0,
+        queryFn: async ({ pageParam }) =>
             unwrap(
                 await api.get(ROUTES.GET_VENDOR_DIRECTORY, {
                     params: {
+                        limit: DIRECTORY_PAGE_SIZE,
+                        offset: pageParam as number,
                         ...(searchQuery ? { search_query: searchQuery } : {}),
                         ...(filter ? { vendor_type: filter } : {}),
                     },
                 })
             ),
+        getNextPageParam: nextOffset<any>(DIRECTORY_PAGE_SIZE),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
     });
+}
+
+/** Every store fetched so far, nearest first, each appearing once. */
+export function directoryRows(data: InfiniteData<any[]> | undefined): any[] {
+    return flattenPages<any>(data);
 }

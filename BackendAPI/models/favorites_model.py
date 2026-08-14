@@ -18,5 +18,5 @@ class Favorite (Base):
   product_id  = Column(UUID(as_uuid=True),ForeignKey("Products.id"), index=True, nullable=False)
   
   # relationships
-  user = relationship("User", back_populates="favorite")
-  product = relationship("Product", back_populates="favorite")
+  user = relationship("User", back_populates="favorite", lazy="raise_on_sql")
+  product = relationship("Product", back_populates="favorite", lazy="raise_on_sql")

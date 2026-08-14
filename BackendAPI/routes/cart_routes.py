@@ -17,7 +17,7 @@ from utils.money import money_str
 from schemas.common_schemas import RequestBodyIdAndQuantity, RequestBodyId
 from schemas.cart_schemas import CartDetailed
 from services.payment_service import initiate_stk_push, check_payment
-from services.order_service import create_order, fetch_orders_by_id, update_orders_payment_status_by_checkout_id, cancel_customer_order
+from services.order_service import OrderStatusEnum, create_order, fetch_orders_by_id, update_orders_payment_status_by_checkout_id, cancel_customer_order
 from uuid import UUID
 
 # payment imports
@@ -489,12 +489,34 @@ async def payment_confirmation(request: Request, body: RequestCheckoutRequestID,
 async def get_orders_by_id(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    status: str | None = Query(
+        None,
+        description="Comma-separated order statuses, e.g. 'delivered' or 'cancelled,rejected'.",
+    ),
     db: AsyncSession= Depends(get_db),
     user = Depends(get_current_customer)
 ):
   clerkId = user["sub"]
   user = await get_user(session=db, clerk_id=clerkId)
-  orders = await fetch_orders_by_id(session=db, user_id=user.id, skip=skip, limit=limit)
+
+  # Validated against the enum rather than passed through. An unknown status
+  # would produce an empty page, which the screen can only render as "you have
+  # no orders" — a typo in a client's filter table reads to the customer as
+  # their history having been lost.
+  statuses: list[str] | None = None
+  if status:
+    statuses = [part.strip().lower() for part in status.split(",") if part.strip()]
+    known = {member.value for member in OrderStatusEnum}
+    unknown = sorted(set(statuses) - known)
+    if unknown:
+      raise HTTPException(
+          status_code=400,
+          detail=f"Unknown order status: {', '.join(unknown)}.",
+      )
+
+  orders = await fetch_orders_by_id(
+      session=db, user_id=user.id, skip=skip, limit=limit, statuses=statuses
+  )
   return orders
 
 @router.get("/orders/last-completed", response_model=BaseOrder | None)
@@ -692,6 +714,48 @@ async def customer_cancel_order(
     user_obj = await get_user(session=db, clerk_id=clerk_id)
     result = await cancel_customer_order(session=db, user_id=user_obj.id, order_id=order_id)
     return result
+
+@router.get("/orders/{order_id}", response_model=BaseOrder)
+async def get_one_order(
+    order_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_customer),
+):
+    """One of the caller's own orders, by id.
+
+    The detail screen and the live map both used to find their order by
+    searching the list already in the cache. That worked only while the list was
+    every order the customer had, and stopped working the moment it became one
+    page: an order older than the newest 25 simply did not exist as far as those
+    screens were concerned, so a push notification about it opened a spinner
+    that never resolved. The vendor app had exactly this defect and it was fixed
+    the same way — see `useVendorOrder`.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+    from services.order_service import annotate_is_rated
+    from models.order_model import Order as OrderModel, OrderItem as OrderItemModel
+
+    # Authenticating proves who is calling, not that they have anything to do
+    # with this order.
+    await authorise_order_access(db, order_id, user["sub"], allowed_roles=("customer",))
+
+    result = await db.execute(
+        select(OrderModel)
+        .where(OrderModel.id == order_id)
+        .options(
+            joinedload(OrderModel.order_item).joinedload(OrderItemModel.product),
+            joinedload(OrderModel.vendor),
+            joinedload(OrderModel.deliverer),
+        )
+    )
+    order = result.unique().scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    await annotate_is_rated(db, [order])
+    return order
+
 
 @router.get("/orders/{order_id}/tracking-logs")
 async def get_order_tracking_logs(

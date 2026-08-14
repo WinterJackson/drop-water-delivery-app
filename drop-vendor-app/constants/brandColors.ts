@@ -24,9 +24,9 @@ export const BRAND = {
   white: '#FFFFFF',
   /** Dark text for light backgrounds */
   textDark: '#11181C',
-  /** Search bar text and placeholder in dark mode (70% opacity) */
+  /** Search bar *placeholder* in dark mode (70% opacity). Not the typed term. */
   searchPlaceholderDark: 'rgba(255, 255, 255, 0.7)',
-  /** Search bar text and placeholder in light mode (70% opacity) */
+  /** Search bar *placeholder* in light mode (70% opacity). Not the typed term. */
   searchPlaceholderLight: 'rgba(0, 0, 0, 0.7)',
   /** Standard gray tones for borders, shadows, and text */
   gray100: '#f3f4f6',

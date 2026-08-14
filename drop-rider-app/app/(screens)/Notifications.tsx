@@ -9,7 +9,8 @@ import { RefreshControl, StatusBar, View, TouchableOpacity } from "react-native"
 import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
-import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead, NotificationItem } from "@/hooks/queries/useNotifications";
+import { useNotifications, notificationRows, useMarkNotificationRead, useMarkAllNotificationsRead, useUnreadNotificationCount } from "@/hooks/queries/useNotifications";
+import { keepPaging } from "@/utils/paging";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
@@ -22,7 +23,9 @@ const Notifications = () => {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
 
-    const { data: notifications = [], isLoading: loading, refetch } = useNotifications();
+    const notificationsQuery = useNotifications();
+    const { isLoading: loading, isFetchingNextPage, hasNextPage, refetch } = notificationsQuery;
+    const notifications = notificationRows(notificationsQuery.data);
     const { mutateAsync: markAsReadMutation } = useMarkNotificationRead();
     const { mutateAsync: markAllAsReadMutation } = useMarkAllNotificationsRead();
 
@@ -44,7 +47,13 @@ const Notifications = () => {
         }
     };
 
-    const unreadCount = notifications.filter((n: NotificationItem) => !n.is_read).length;
+    // The server's count, not a pass over the rows in hand. Counting the loaded
+    // pages was exactly right while the screen fetched every notification there
+    // was; now that it fetches one page, it would report "3 new" to somebody with
+    // forty — and the "Mark all read" control beside it, which acts on all of
+    // them, would disappear as soon as the unread ones fell past the first page.
+    const { data: unread } = useUnreadNotificationCount();
+    const unreadCount = unread?.unread_count ?? 0;
 
     const getTypeColor = (type: string) => {
         switch (type) {
@@ -136,6 +145,22 @@ const Notifications = () => {
                     ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                     refreshControl={
                         <RefreshControl refreshing={loading} onRefresh={refetch} tintColor={darkTheme ? "#fff" : "#000"} />
+                    }
+                    onEndReached={keepPaging(notificationsQuery)}
+                    onEndReachedThreshold={0.5}
+                    ListFooterComponent={
+                        isFetchingNextPage ? (
+                            <View className="py-6">
+                                <RiderNotificationItemSkeleton />
+                            </View>
+                        ) : !hasNextPage && notifications.length > 0 ? (
+                            // The end of the history, said out loud. Without it a
+                            // list that simply stops is indistinguishable from one
+                            // that failed to load the next page.
+                            <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                That's everything.
+                            </Text>
+                        ) : null
                     }
                     ListEmptyComponent={() => {
                         if (loading && groupedNotifications.length === 0) {

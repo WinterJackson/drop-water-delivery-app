@@ -16,6 +16,13 @@ class Order(Base):
       Index('idx_orders_deliverer_created', 'deliverer_id', 'created_at'),
       Index('idx_orders_customer_status', 'customer_id', 'order_status'),
       Index('idx_orders_payment_status', 'payment_status'),
+      # Added by migration and recorded here so the model and the database agree.
+      # `(order_status, created_at)` serves the sweeps, which always name a status
+      # first; `created_at DESC` alone serves the console's analytics, which never
+      # do. Without the second, every date-ranged panel is a sequential scan of the
+      # whole order history.
+      Index('ix_orders_status_created_at', 'order_status', 'created_at'),
+      Index('ix_orders_created_at_desc', text('created_at DESC')),
       # One order per M-Pesa transaction. Partial so cash orders — which have no
       # CheckoutRequestID — are unconstrained.
       Index(
@@ -44,7 +51,10 @@ class Order(Base):
   payment_method = Column(String, nullable=True)
   # `Numeric`, not `Double`. This is summed into vendor and rider payouts, and a
   # binary float cannot represent a fee like 68.30 exactly.
-  delivery_fee = Column(Numeric(10, 2), nullable=True, index=True)
+  # Not indexed. It carried `index=True` and nothing has ever filtered, joined or
+  # sorted on a delivery fee — pure write cost on the fastest-growing table on the
+  # platform, paid on every order forever. Dropped in `a7f4e29b81c6`.
+  delivery_fee = Column(Numeric(10, 2), nullable=True)
   vehicle_class = Column(String(20), nullable=True, default="motorbike")  # V6: motorbike / tuktuk / truck
   delivery_time = Column(Integer, nullable=True)
   
@@ -104,10 +114,10 @@ class Order(Base):
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   
   # relationships
-  order_item = relationship("OrderItem", back_populates="order")
-  user = relationship("User", back_populates="order")
-  vendor = relationship("Vendor", back_populates="order")
-  deliverer = relationship("Deliverer", back_populates="order")
+  order_item = relationship("OrderItem", back_populates="order", lazy="raise_on_sql")
+  user = relationship("User", back_populates="order", lazy="raise_on_sql")
+  vendor = relationship("Vendor", back_populates="order", lazy="raise_on_sql")
+  deliverer = relationship("Deliverer", back_populates="order", lazy="raise_on_sql")
 
 class OrderItem(Base):
   __tablename__ = "Order_Items"
@@ -122,5 +132,5 @@ class OrderItem(Base):
   Subtotal = Column(Numeric(10, 2), nullable=False)
   
   # relationships
-  order = relationship("Order", back_populates="order_item")
-  product = relationship("Product", back_populates="order_item")
+  order = relationship("Order", back_populates="order_item", lazy="raise_on_sql")
+  product = relationship("Product", back_populates="order_item", lazy="raise_on_sql")

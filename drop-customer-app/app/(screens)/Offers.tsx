@@ -7,7 +7,8 @@ import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { BRAND } from "@/constants/brandColors";
 import { FlashList } from "@shopify/flash-list";
-import { useProductsWithOffer } from "@/hooks/queries/useProducts";
+import { useProductsWithOffer, offerRows } from "@/hooks/queries/useProducts";
+import { keepPaging } from "@/utils/paging";
 import { OfferItemSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +20,9 @@ export default function Offers() {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
 
-    const { data: Offers = [], isLoading, refetch } = useProductsWithOffer();
+    const offersQuery = useProductsWithOffer();
+    const { isLoading, isFetchingNextPage, hasNextPage, refetch } = offersQuery;
+    const Offers = offerRows(offersQuery.data);
     const [refreshing, setRefreshing] = useState(false);
 
     const onRefresh = useCallback(async () => {
@@ -122,6 +125,20 @@ export default function Offers() {
                     ListEmptyComponent={renderEmpty}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "#fff" : "#000"} />
+                    }
+                    onEndReached={keepPaging(offersQuery)}
+                    onEndReachedThreshold={0.6}
+                    ListFooterComponent={
+                        isFetchingNextPage ? (
+                            <View className="py-6 flex-row">
+                                <View style={{ width: '50%' }}><OfferItemSkeleton /></View>
+                                <View style={{ width: '50%' }}><OfferItemSkeleton /></View>
+                            </View>
+                        ) : !hasNextPage && Offers.length > 0 ? (
+                            <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                That's every offer on right now.
+                            </Text>
+                        ) : null
                     }
                 />
             )}

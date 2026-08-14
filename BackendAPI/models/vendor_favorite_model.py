@@ -17,5 +17,5 @@ class VendorFavorite(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     # relationships
-    user = relationship("User", back_populates="vendor_favorites")
-    vendor = relationship("Vendor", back_populates="vendor_favorites")
+    user = relationship("User", back_populates="vendor_favorites", lazy="raise_on_sql")
+    vendor = relationship("Vendor", back_populates="vendor_favorites", lazy="raise_on_sql")

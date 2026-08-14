@@ -105,6 +105,16 @@ async def process_sms_webhook(
                 order.order_status, order.id, refusal.detail,
             )
             return {"status": "error", "message": "invalid state transition"}
+
+        # The other path an order reaches `delivered` by. A customer acquired
+        # through the SMS fallback is acquired exactly as much as one acquired
+        # through the app, and leaving this out would have made every offline
+        # completion invisible to the cohort report — quietly, and in the
+        # direction that understates acquisition.
+        from services import customer_cohort_service
+
+        await customer_cohort_service.record_acquisition(session, order)
+
         await session.commit()
         
         # Broadcast real-time order status update via WebSocket for SMS completion

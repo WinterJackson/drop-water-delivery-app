@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BRAND } from '../../constants/brandColors';
 import { UIThemeContext } from '../../context/ThemeContext';
 import BackButtonMinimal from '../../components/ui/BackButtonMinimal';
-import { useEarningsHistoryPaginated, RiderOrder } from '../../hooks/queries/useRiderData';
+import { useEarningsHistoryPaginated, riderOrderRows, RiderOrder } from '../../hooks/queries/useRiderData';
 import { RiderEarningsHistorySkeleton } from '../../components/skeletons/ContextualSkeletons';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useRouter } from 'expo-router';
@@ -141,7 +141,10 @@ export default function EarningsHistory() {
         isFetchingNextPage,
     } = useEarningsHistoryPaginated();
 
-    const orders = useMemo(() => data?.pages.flat() ?? [], [data]);
+    // `riderOrderRows`, not `.pages.flat()`: offset paging over a feed that
+    // grows at the top re-serves a row at each page boundary, and a duplicate
+    // key in a grouped list renders the same delivery twice under one date.
+    const orders = useMemo(() => riderOrderRows(data), [data]);
 
     // Group orders by date (e.g., "Today", "Yesterday", "May 20, 2026")
     const groupedOrders = useMemo(() => {

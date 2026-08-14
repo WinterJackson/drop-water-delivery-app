@@ -7,6 +7,7 @@ from models.notification_model import Notification
 from models.user_model import User
 from models.deliverer_model import Deliverer
 import logging
+from utils.paging import stable
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ async def get_notifications(session: AsyncSession, clerk_id: str, user_type: str
     query = (
         select(Notification)
         .where(Notification.user_id == user_id, Notification.user_type == user_type)
-        .order_by(desc(Notification.created_at))
+        .order_by(*stable(desc(Notification.created_at), key=Notification.id))
         .offset(skip)
         .limit(limit)
     )

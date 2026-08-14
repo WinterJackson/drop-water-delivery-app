@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import images from "@/constants/images/images";
 import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { usePaginatedProducts, useProductsWithOffer } from "@/hooks/queries/useProducts";
+import { usePaginatedProducts, useProductsWithOffer, offerRows } from "@/hooks/queries/useProducts";
 import { useUserDetails } from "@/hooks/queries/useUser";
 import { useNearByVendors, useTopBrandsVendors, useTopRatedVendors } from "@/hooks/queries/useVendors";
 import { useLocation } from "@/hooks/useLocation";
@@ -154,7 +154,10 @@ export default function Home() {
 	const { data: TopBrands = [], isLoading: topBrandsLoad, refetch: r6 } = useTopBrandsVendors();
 	const TopBrandsloaded = !topBrandsLoad;
 
-	const { data: Offers = [], isLoading: offersLoad, refetch: r7 } = useProductsWithOffer();
+	// The home rail shows the first page only, which is what it always showed.
+	const offersQuery = useProductsWithOffer();
+	const { isLoading: offersLoad, refetch: r7 } = offersQuery;
+	const Offers = offerRows(offersQuery.data);
 	const OffersLoaded = !offersLoad;
 
 	// Random products (pagination)

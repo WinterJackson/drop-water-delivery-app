@@ -38,7 +38,8 @@ so CORS is done.
 
 Four independent things, in the order a request meets them:
 
-1. **Clerk middleware.** Everything except `/sign-in` requires a session. The
+1. **The Clerk proxy** (`drop-admin/proxy.ts` — Next 16's name for what was
+   `middleware.ts`). Everything except `/sign-in` requires a session. The
    sign-up route is deliberately *not* public — administrators are invited, never
    self-registered, and the sign-in page hides the sign-up link.
 2. **`Admin_Users`, on every request.** A session only proves who you are; the

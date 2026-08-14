@@ -1,10 +1,10 @@
 import React, { useContext, useState, useMemo } from 'react';
-import { View, ScrollView, StatusBar, Image, Platform } from 'react-native';
+import { View, ScrollView, StatusBar, Image, Platform, ActivityIndicator } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UIThemeContext } from '@/context/ThemeContext';
-import { useVendorDirectory } from '@/hooks/queries/useVendors';
+import { useVendorDirectory, directoryRows } from '@/hooks/queries/useVendors';
 import { PressableScale } from '@/components/ui/PressableScale';
 import BackButtonMinimal from '@/components/ui/BackButtonMinimal';
 import SearchBar from '@/components/common/Search';
@@ -15,6 +15,7 @@ import { Skeleton, SkeletonText } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { VendorCardSkeleton } from '@/components/skeletons/ContextualSkeletons';
 import { useDebounce } from '@/hooks/useDebounce';
+import { keepPaging } from '@/utils/paging';
 import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, UrlTile, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from "@expo/vector-icons";
@@ -40,9 +41,12 @@ export default function VendorDirectory() {
 
     const mapRef = React.useRef<MapView>(null);
 
-    const { data: vendors, isLoading } = useVendorDirectory(debouncedSearchQuery, filter);
+    const directoryQuery = useVendorDirectory(debouncedSearchQuery, filter);
+    const { isLoading, isFetchingNextPage, hasNextPage } = directoryQuery;
 
-    const filteredVendors = vendors || [];
+    // Named `filteredVendors` for history; the filtering happens on the server.
+    // Anything narrowed here would only narrow the page in hand.
+    const filteredVendors = directoryRows(directoryQuery.data);
 
     React.useEffect(() => {
         if (filteredVendors.length > 0 && mapRef.current) {
@@ -131,6 +135,8 @@ export default function VendorDirectory() {
                         width="flex-1"
                         height="h-[46px]"
                         buttonStyle=""
+                        value={searchQuery}
+                        placeholder="Search stores near you"
                         setFunc={setSearchQuery}
                     />
                 </View>
@@ -235,6 +241,19 @@ export default function VendorDirectory() {
                         renderItem={renderVendor}
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{ paddingBottom: 120 }}
+                        onEndReached={keepPaging(directoryQuery)}
+                        onEndReachedThreshold={0.6}
+                        ListFooterComponent={
+                            isFetchingNextPage ? (
+                                <View className="py-6 items-center">
+                                    <ActivityIndicator color={BRAND.primary} />
+                                </View>
+                            ) : !hasNextPage && filteredVendors.length > 0 ? (
+                                <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                    That's every store that delivers to you.
+                                </Text>
+                            ) : null
+                        }
                     />
                 )}
             </View>

@@ -17,6 +17,7 @@ import { trackEvent } from "@/utils/analytics";
 import { useLocation } from "@/hooks/useLocation";
 import { Ionicons } from "@expo/vector-icons";
 import { useDebounce } from "@/hooks/useDebounce";
+import { flattenPages } from "@/utils/paging";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 import { formatMoney } from "@/utils/money";
 
@@ -69,6 +70,7 @@ export default function Search() {
 		isFetching: productLoading,
 		fetchNextPage: fetchNextProducts,
 		hasNextPage: hasNextProducts,
+		isFetchingNextPage: isFetchingNextProducts,
 		isError: productError
 	} = useSearchProducts(searchState, productCategoryFilter, 20, searchMode);
 
@@ -77,6 +79,7 @@ export default function Search() {
 		isFetching: vendorLoading,
 		fetchNextPage: fetchNextVendors,
 		hasNextPage: hasNextVendors,
+		isFetchingNextPage: isFetchingNextVendors,
 		isError: vendorError
 	} = useSearchVendors(searchState, 20);
 
@@ -93,12 +96,17 @@ export default function Search() {
 		}
 	}, [searchMode, productCategoryFilter]);
 
+	// Recent searches are **not** written here. This effect fires on every pause
+	// in typing, so history filled up with the prefixes of one word — typing
+	// "waterpoint" left "wat", "water" and "waterpo" behind it, and the list a
+	// customer keeps for re-running a search became a transcript of them typing.
+	// It is written where somebody has actually committed to a term instead:
+	// submitting one, or tapping a result it found.
 	useEffect(() => {
 		if (debouncedSearch.trim().length > 1) {
 			setSearchState(debouncedSearch);
 			setHasSearched(true);
 			setShowHistory(false);
-			saveToHistory(debouncedSearch.trim());
 		} else {
 			setSearchState("");
 			// When in a mode-based search (Bento card), never reset the view
@@ -149,17 +157,34 @@ export default function Search() {
 		}
 	};
 
-	const handleSearch = () => {
-		if (!search.trim() || search.trim().length < 2) return;
+	/**
+	 * Run a search now, rather than waiting out the debounce.
+	 *
+	 * Takes the term explicitly because the caller often has one React has not
+	 * committed yet: tapping a recent search ran `setSearch(h)` and then this
+	 * function, which read `search` from the render that was still on screen —
+	 * so the first tap searched nothing and every tap after it searched the
+	 * *previously* tapped term. State updates are not synchronous, and the box
+	 * being uncontrolled hid it: the wrong results appeared under the old text.
+	 */
+	const handleSearch = (term: string = search) => {
+		const trimmed = term.trim();
+		if (trimmed.length < 2) return;
 		Keyboard.dismiss();
-		setSearchState(search);
+		setSearch(trimmed);
+		setSearchState(trimmed);
 		setHasSearched(true);
 		setShowHistory(false);
-		saveToHistory(search.trim());
+		saveToHistory(trimmed);
 	};
 
-	const productResults = productsData?.pages?.flatMap(page => page) || [];
-	const vendorResults = vendorsData?.pages?.flatMap(page => page) || [];
+	// `flattenPages`, not `.flatMap(page => page)`: offset paging over a result
+	// the catalogue is being added to re-serves a row at each page boundary, and
+	// this list is keyed by id. That duplicate is why the key used to be
+	// `id + index`, which changed for every row whenever the list grew and threw
+	// away FlashList's recycling on the longest list in the app.
+	const productResults = flattenPages<any>(productsData);
+	const vendorResults = flattenPages<any>(vendorsData);
 	
 	const loading = productLoading || vendorLoading;
 	const totalResults = productResults.length + vendorResults.length;
@@ -185,9 +210,16 @@ export default function Search() {
 		}
 	}, [hasSearched, loading, searchState, productCategoryFilter, totalResults]);
 
+	// Page the tab that is on screen, and only that one. Reaching the end of the
+	// product list used to fetch the next page of *both*, so half of every
+	// request was for a list nobody was looking at — and the vendor list quietly
+	// paged ahead while the customer scrolled products.
 	const handleScrollEnd = () => {
-		if (hasNextProducts) fetchNextProducts();
-		if (hasNextVendors) fetchNextVendors();
+		if (selectedResultTab === "products") {
+			if (hasNextProducts && !isFetchingNextProducts) fetchNextProducts();
+		} else {
+			if (hasNextVendors && !isFetchingNextVendors) fetchNextVendors();
+		}
 	};
 
 	return (
@@ -212,9 +244,16 @@ export default function Search() {
 							width="flex-1"
 							height="h-[50px]"
 							buttonStyle=""
+							value={search}
+							placeholder="Search for products or vendors"
+							// Searching *is* this screen, so it is the one place that
+							// should take the keyboard on arrival.
+							autoFocus
 							setFunc={setSearch}
 						/>
-						<PressableScale accessibilityLabel="Search" onPress={handleSearch} className={`w-[50px] h-[50px] items-center border justify-center rounded-2xl ${darkTheme ? "bg-white/5 border-transparent" : "bg-white border-gray-200"}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
+						{/* `() => handleSearch()`, never `handleSearch` — as a bare handler it
+						    receives the touch event, which would arrive as the search term. */}
+						<PressableScale accessibilityLabel="Search" onPress={() => handleSearch()} className={`w-[50px] h-[50px] items-center border justify-center rounded-2xl ${darkTheme ? "bg-white/5 border-transparent" : "bg-white border-gray-200"}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
 							<Ionicons name="search" size={24} color={BRAND.primary} />
 						</PressableScale>
 					</View>
@@ -237,10 +276,7 @@ export default function Search() {
 									style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 								>
 									<PressableScale
-										onPress={() => {
-											setSearch(h);
-											handleSearch();
-										}}
+										onPress={() => handleSearch(h)}
 										className="px-4 py-2 flex-row items-center gap-2"
 									>
 										<Ionicons name="search" size={24} color={BRAND.primary} />
@@ -373,7 +409,7 @@ export default function Search() {
 									contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}
 									onEndReached={handleScrollEnd}
 									onEndReachedThreshold={0.5}
-									keyExtractor={(item: any, index: number) => item.id ? item.id.toString() + index : index.toString()}
+									keyExtractor={(item: any, index: number) => item.id ? String(item.id) : index.toString()}
 									renderItem={({ item }: { item: any }) => {
 
 										if (item.isProduct) {
@@ -382,7 +418,12 @@ export default function Search() {
 											return (
 												<PressableScale
 													activeOpacity={0.7}
-													onPress={() => router.push(`/(screens)/product-details/${product.id}`)}
+													onPress={() => {
+														// The term found something the customer wanted,
+														// which is what makes it worth offering back.
+														if (searchState.trim()) saveToHistory(searchState.trim());
+														router.push(`/(screens)/product-details/${product.id}`);
+													}}
 												>
 													<View className={`flex-row items-center gap-4 p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-white/5 border-transparent" : "bg-white border-gray-200"}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
 														{product.image_url ? (
@@ -412,7 +453,10 @@ export default function Search() {
 										if (item.isVendor) {
 											const vendor = item;
 											return (
-												<PressableScale activeOpacity={0.7} onPress={() => router.push(`/(screens)/vendor/${vendor.id}`)}>
+												<PressableScale activeOpacity={0.7} onPress={() => {
+													if (searchState.trim()) saveToHistory(searchState.trim());
+													router.push(`/(screens)/vendor/${vendor.id}`);
+												}}>
 													<View className={`flex-row items-center gap-4 p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-white/5 border-transparent" : "bg-white border-gray-200"}`} style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}>
 														{vendor.profile_pic ? (
 															<Image source={{ uri: vendor.profile_pic }} className="w-14 h-14 rounded-full" />

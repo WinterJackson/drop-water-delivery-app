@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
-import { useVendorRiders } from "@/hooks/queries/useVendorRiders";
+import { useVendorRiders, riderRows } from "@/hooks/queries/useVendorRiders";
 import { Toast } from "@/lib/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
@@ -59,11 +59,11 @@ export default function OrderDetail() {
 
   // The roster comes from the shared hook, which already refetches and caches
   // it; this screen used to keep a third copy in `useState`.
-  const { data: allRiders = [] } = useVendorRiders();
-  const riders = useMemo(
-    () => allRiders.filter((r: any) => r.status === "approved" && r.is_available),
-    [allRiders]
-  );
+  // Approved *and* available is the server's question now. Filtering it here
+  // filtered the page in hand, so a store whose roster runs past one page could
+  // find its available riders missing from the assign sheet.
+  const ridersQuery = useVendorRiders({ status: "approved", availableOnly: true });
+  const riders = useMemo(() => riderRows(ridersQuery.data), [ridersQuery.data]);
 
   const assignRiderSheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ["50%", "75%"], []);

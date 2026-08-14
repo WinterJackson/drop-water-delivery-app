@@ -84,8 +84,8 @@ class Product(Base):
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   
   # relationships
-  vendor = relationship("Vendor", back_populates="products")
-  cart_item = relationship("CartItem", back_populates="product")
-  order_item = relationship("OrderItem", back_populates="product")
-  favorite = relationship("Favorite", back_populates="product")
+  vendor = relationship("Vendor", back_populates="products", lazy="raise_on_sql")
+  cart_item = relationship("CartItem", back_populates="product", lazy="raise_on_sql")
+  order_item = relationship("OrderItem", back_populates="product", lazy="raise_on_sql")
+  favorite = relationship("Favorite", back_populates="product", lazy="raise_on_sql")
   

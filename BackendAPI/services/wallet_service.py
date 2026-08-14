@@ -10,6 +10,7 @@ from models.vendor_model import Vendor
 from models.deliverer_model import Deliverer
 from services.payment_service import initiate_stk_push, initiate_b2c_payout
 from utils.money import money_str
+from utils.paging import stable
 
 logger = logging.getLogger(__name__)
 
@@ -594,7 +595,7 @@ async def get_wallet_transactions(
     total_count = (await session.execute(total_query)).scalar() or 0
 
     result = await session.execute(
-        query.order_by(WalletTransaction.created_at.desc())
+        query.order_by(*stable(WalletTransaction.created_at.desc(), key=WalletTransaction.id))
         .limit(limit).offset(offset)
     )
 

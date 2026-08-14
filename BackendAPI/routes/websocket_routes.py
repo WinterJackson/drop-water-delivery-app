@@ -13,24 +13,99 @@ router = APIRouter()
 
 from core.redis_client import get_redis
 
+#: Statuses an order can never move out of.
+#:
+#: Kept in step with `order_service.apply_status_transition`, which refuses a move
+#: out of any of these with a 409. Nothing follows one, so every per-order
+#: resource this module holds can be released the moment one arrives.
+TERMINAL_ORDER_STATUSES = frozenset({"delivered", "cancelled", "rejected"})
+
+#: Ceiling on each order→entity mapping cache.
+#:
+#: These were plain dicts that were only ever written to. Connections are removed
+#: on disconnect; the *mappings* never were, so `order_rider_map[order_id]` was
+#: written when an order was first broadcast and then survived that order's
+#: delivery, its cancellation, and the rest of the process's life. A replica that
+#: stays up for a week accumulated an entry for every order it had ever seen a
+#: message about — a leak whose size is proportional to platform volume, on the
+#: process that also holds every live WebSocket. The symptom is the API being
+#: OOM-killed during the busiest hour it has ever had, taking every delivery's
+#: socket with it.
+#:
+#: They are caches. Redis is the authority (`resolve_order_rider` reads it, the
+#: database backs that), so evicting an entry costs one lookup and nothing else.
+_MAPPING_CACHE_MAX = 5000
+
+
+class _BoundedMap:
+    """A dict that forgets its oldest entries instead of growing forever.
+
+    Insertion-ordered, which Python guarantees, so the first key is the
+    least-recently *inserted*. That is the right eviction order here: an order's
+    mapping stops being interesting once the order is delivered, and orders are
+    delivered roughly in the order they were created.
+    """
+
+    def __init__(self, maximum: int = _MAPPING_CACHE_MAX) -> None:
+        self._data: Dict[str, str] = {}
+        self._maximum = maximum
+
+    def get(self, key: str, default=None):
+        return self._data.get(key, default)
+
+    def __setitem__(self, key: str, value: str) -> None:
+        if key not in self._data and len(self._data) >= self._maximum:
+            for oldest in list(self._data.keys())[: max(1, self._maximum // 10)]:
+                self._data.pop(oldest, None)
+        self._data[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def pop(self, key: str, default=None):
+        return self._data.pop(key, default)
+
+
 class ConnectionManager:
-    """Manages WebSocket connections for live delivery tracking, backed by Redis Pub/Sub for infinite horizontal scalability."""
+    """WebSocket connections for live delivery tracking, fanned out over Redis.
+
+    Two properties matter more than anything else in here, and both are about
+    what happens per *GPS ping* rather than per order:
+
+    1. **A ping is matched by lookup, not by search.** `rider_tracked_orders` is
+       the reverse of `order_rider_map`, so relaying a rider's location touches
+       only that rider's own orders. It used to walk every tracked order on the
+       worker and discard almost all of them — quadratic in live deliveries, and
+       worse with every replica added rather than better.
+    2. **Nothing in the send path awaits a lookup.** The mapping is resolved when
+       a tracker connects and when a status broadcast arrives. A miss inside the
+       fan-out loop meant a Redis round trip — or a database query — *per tracked
+       order, per ping*, and a cold replica after a deploy hits that on every
+       single one.
+    """
 
     def __init__(self):
         # rider_id -> WebSocket (rider sending location)
         self.rider_connections: Dict[str, WebSocket] = {}
         # order_id -> list of WebSockets (customers watching)
         self.tracking_connections: Dict[str, List[WebSocket]] = {}
-        self.order_rider_map: Dict[str, str] = {}
-        self.order_vendor_map: Dict[str, str] = {}
-        # rider_id -> latest location
+        self.order_rider_map = _BoundedMap()
+        self.order_vendor_map = _BoundedMap()
+        #: rider_id -> the order ids this worker is tracking for that rider. The
+        #: reverse of `order_rider_map`, and the reason the fan-out is a lookup.
+        self.rider_tracked_orders: Dict[str, set] = {}
+        # rider_id -> latest location. Bounded by connected riders: popped in
+        # `disconnect_rider`, which the socket handler calls in a `finally`.
         self.rider_locations: Dict[str, dict] = {}
-        
+
         # Entity Order Connections (Real-Time State Tracking)
         self.vendor_orders: Dict[str, List[WebSocket]] = {}
         self.customer_orders: Dict[str, List[WebSocket]] = {}
         self.rider_orders: Dict[str, List[WebSocket]] = {}
-        
+
         self.pubsub_task: Optional[asyncio.Task] = None
 
     async def start_pubsub(self):
@@ -138,6 +213,21 @@ class ConnectionManager:
                     except Exception as e:
                         logger.error(f"Failed broadcasting WS locally to {entity_type} {entity_id}: {e}")
 
+        # Release *after* delivering the message, so the parties watching still
+        # receive the one that says the order is finished. Terminal is terminal —
+        # `apply_status_transition` guarantees nothing follows — so from here the
+        # mapping is only ever a memory cost.
+        #
+        # Both keys are read because the twelve broadcast sites do not agree on
+        # one: most send `status`, a few send `order_status`. Reading only the key
+        # this module happened to be written against would make the release fire
+        # for some cancellations and not others — the kind of half-working cleanup
+        # that looks fine in a test and leaks in production.
+        if order_id:
+            status = payload.get("status") or payload.get("order_status")
+            if status in TERMINAL_ORDER_STATUSES:
+                self.release_order(str(order_id))
+
     async def broadcast_to_riders(self, rider_ids: List[str], payload: dict):
         """Publishes Trip Radar/Dispatch payloads to Redis."""
         r = get_redis()
@@ -187,6 +277,11 @@ class ConnectionManager:
                 self.tracking_connections[order_id].remove(websocket)
                 if not self.tracking_connections[order_id]:
                     del self.tracking_connections[order_id]
+                    # Nobody on this worker is watching this order any more, so it
+                    # must leave the reverse index — otherwise the rider's pings
+                    # keep resolving to an order with no listeners, which is the
+                    # slow leak the index would otherwise reintroduce.
+                    self._unlink_order(order_id, self.order_rider_map.get(order_id))
             except ValueError:
                 pass
 
@@ -205,15 +300,22 @@ class ConnectionManager:
     async def _local_update_rider_location(self, rider_id: str, location: dict):
         self.rider_locations[rider_id] = location
 
-        # Fan out to every locally-connected tracker whose order is served by this
-        # rider. The order→rider mapping is resolved per socket at connect time
-        # (see `connect_tracker`) and cached in Redis, so a worker that never
-        # happened to relay an order-status broadcast still knows the mapping.
-        for order_id in list(self.tracking_connections.keys()):
-            mapped_rider = self.order_rider_map.get(order_id)
-            if mapped_rider is None:
-                mapped_rider = await self.resolve_order_rider(order_id)
-            if mapped_rider != rider_id:
+        # Fan out to this rider's own orders, by lookup.
+        #
+        # This used to iterate `self.tracking_connections` in full — every tracked
+        # order on the worker, for every ping from every rider on the platform —
+        # and `await` a Redis or database resolution inside that loop whenever the
+        # mapping was missing. At 1,200 concurrent deliveries that is quadratic
+        # work per ping, and a replica that has just started has *no* mappings, so
+        # the first ping pays a round trip per tracked order.
+        #
+        # The reverse index is maintained by `map_order_to_rider` and released by
+        # `disconnect_tracker` / `release_order`, so this is a set lookup and the
+        # send path never blocks on I/O it could have done earlier.
+        for order_id in list(self.rider_tracked_orders.get(rider_id, ())):
+            if order_id not in self.tracking_connections:
+                # The last watcher left between the index write and here.
+                self._unlink_order(order_id, rider_id)
                 continue
 
             payload = {"rider_id": rider_id, "location": location, "order_id": order_id}
@@ -262,7 +364,11 @@ class ConnectionManager:
                 cached = await r.get(f"order_rider_map:{order_id}")
                 if cached:
                     rider_id = cached.decode() if isinstance(cached, bytes) else str(cached)
-                    self.order_rider_map[order_id] = rider_id
+                    # Through `map_order_to_rider`, not a bare assignment: that is
+                    # the only thing that maintains the reverse index, and a
+                    # mapping learned from Redis has to reach it too or the very
+                    # first tracker on a fresh replica is invisible to the fan-out.
+                    self.map_order_to_rider(order_id, rider_id)
                     return rider_id
             except Exception as e:
                 logger.warning("Redis lookup failed for order_rider_map:%s — %s", order_id, e)
@@ -286,11 +392,51 @@ class ConnectionManager:
         return None
 
     def map_order_to_rider(self, order_id: str, rider_id: str):
+        previous = self.order_rider_map.get(order_id)
+        if previous and previous != rider_id:
+            # Reassignment: a rider dropped the order and another took it. Without
+            # this the old rider keeps relaying their position to the customer
+            # watching an order they are no longer carrying.
+            self._unlink_order(order_id, previous)
+
         self.order_rider_map[order_id] = rider_id
-        # Also persist this map to Redis so other workers know
+        self.rider_tracked_orders.setdefault(rider_id, set()).add(order_id)
+
+        # Also persist this map to Redis so other workers know. Fire-and-forget,
+        # and guarded: this is a synchronous method, so a caller outside a running
+        # loop would otherwise take a `RuntimeError` from the *cache write* and
+        # lose the mapping it had already resolved correctly.
         r = get_redis()
         if r:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return
             asyncio.create_task(r.setex(f"order_rider_map:{order_id}", 86400, rider_id))
+
+    def _unlink_order(self, order_id: str, rider_id: Optional[str]) -> None:
+        """Drop one order from the reverse index, and the rider's entry if empty."""
+        if not rider_id:
+            return
+        orders = self.rider_tracked_orders.get(rider_id)
+        if not orders:
+            return
+        orders.discard(order_id)
+        if not orders:
+            self.rider_tracked_orders.pop(rider_id, None)
+
+    def release_order(self, order_id: str) -> None:
+        """Forget an order entirely. Called when it reaches a terminal status.
+
+        Nothing more will happen to a delivered or cancelled order, so holding its
+        rider and vendor mapping is pure accumulation. The bounded maps make that
+        survivable; releasing on the event that makes it certain makes it correct,
+        and keeps the working set the size of the *live* platform rather than of
+        everything the replica has ever seen.
+        """
+        rider_id = self.order_rider_map.pop(order_id, None)
+        self._unlink_order(order_id, rider_id)
+        self.order_vendor_map.pop(order_id, None)
 
 
 manager = ConnectionManager()

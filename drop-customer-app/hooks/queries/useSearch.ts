@@ -1,6 +1,7 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
 import { useInfiniteQuery } from '@tanstack/react-query';
+import { nextOffset } from '@/utils/paging';
 import { useLocation } from '@/hooks/useLocation';
 
 export function useSearchProducts(query: string, category: string = 'all', limit: number = 20, mode: string | null = null) {
@@ -23,10 +24,11 @@ export function useSearchProducts(query: string, category: string = 'all', limit
                 },
             }),
         initialPageParam: 0,
-        getNextPageParam: (lastPage, allPages) => {
-            if (!lastPage || lastPage.length < limit) return undefined;
-            return allPages.length * limit;
-        },
+        // Counted from the rows actually held. `allPages.length * limit` assumes
+        // every page came back full, and the first that does not sends the next
+        // offset past rows nobody ever sees — silently, in the middle of a
+        // search result.
+        getNextPageParam: nextOffset<any>(limit),
         enabled: query.trim().length > 1 || category !== 'all' || !!mode,
         staleTime: 30000,
     });
@@ -50,10 +52,11 @@ export function useSearchVendors(query: string, limit: number = 20) {
                 },
             }),
         initialPageParam: 0,
-        getNextPageParam: (lastPage, allPages) => {
-            if (!lastPage || lastPage.length < limit) return undefined;
-            return allPages.length * limit;
-        },
+        // Counted from the rows actually held. `allPages.length * limit` assumes
+        // every page came back full, and the first that does not sends the next
+        // offset past rows nobody ever sees — silently, in the middle of a
+        // search result.
+        getNextPageParam: nextOffset<any>(limit),
         enabled: true,
         staleTime: 30000,
     });

@@ -1,6 +1,6 @@
 from uuid import UUID
 from pydantic import field_validator
-from utils.s3_utils import generate_presigned_url
+from utils.s3_utils import public_asset_url
 from decimal import Decimal
 from utils.money import MoneyField
 from pydantic import BaseModel, EmailStr
@@ -22,7 +22,12 @@ class BaseUser(BaseModel):
     @classmethod
     def secure_urls(cls, v: str | None) -> str | None:
         if v and not v.startswith('http') and not v.startswith('/api/uploads/'):
-            return generate_presigned_url(v)
+            # `public_asset_url`, not `generate_presigned_url`. This is a
+            # photograph, not a document: presigning it produced a different URL
+            # in every response, which changes the cache key in every response,
+            # which means every client re-downloads every image on every refresh.
+            # See `utils/s3_utils.public_asset_url`.
+            return public_asset_url(v)
         return v
     
     model_config = {"from_attributes": True}
@@ -72,7 +77,12 @@ class CustomerPublicProfile(BaseModel):
     @classmethod
     def secure_urls(cls, v: str | None) -> str | None:
         if v and not v.startswith('http') and not v.startswith('/api/uploads/'):
-            return generate_presigned_url(v)
+            # `public_asset_url`, not `generate_presigned_url`. This is a
+            # photograph, not a document: presigning it produced a different URL
+            # in every response, which changes the cache key in every response,
+            # which means every client re-downloads every image on every refresh.
+            # See `utils/s3_utils.public_asset_url`.
+            return public_asset_url(v)
         return v
 
     model_config = {"from_attributes": True}

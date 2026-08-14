@@ -9,6 +9,7 @@ from sqlalchemy import select, desc
 from uuid import UUID
 from fastapi import Query
 from models.review_model import Review
+from utils.paging import stable
 
 router = APIRouter()
 
@@ -40,7 +41,7 @@ async def list_reviews_for_target(
             # Moderated reviews stay in the table and out of every public read.
             Review.hidden_at.is_(None),
         )
-        .order_by(desc(Review.created_at))
+        .order_by(*stable(desc(Review.created_at), key=Review.id))
         .offset(offset)
         .limit(limit)
     )

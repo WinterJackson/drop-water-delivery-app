@@ -11,6 +11,7 @@ import PressableScale from "@/components/ui/PressableScale";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useBottleLedger, type BottleLedgerEntry } from "@/hooks/queries/useBottleLedger";
+import { flattenPages } from "@/utils/paging";
 
 /**
  * Every bottle movement between this store and its riders, newest first.
@@ -62,10 +63,10 @@ export default function BottleLedgerScreen() {
     isFetchingNextPage,
   } = useBottleLedger();
 
-  const entries = useMemo(
-    () => (data?.pages ?? []).flatMap((page) => page.entries),
-    [data],
-  );
+  // Deduped on the entry id: the ledger grows at the top, so an accrual written
+  // while the vendor is scrolling re-serves the previous page's last row —
+  // which on this screen would read as a bottle counted twice.
+  const entries = useMemo(() => flattenPages<BottleLedgerEntry>(data), [data]);
 
   const renderItem = ({ item }: { item: BottleLedgerEntry }) => {
     const meta = TYPE_META[item.entry_type] ?? {

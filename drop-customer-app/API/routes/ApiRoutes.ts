@@ -79,6 +79,10 @@ export const ROUTES = {
 
     // Orders
     GET_ORDERS: `${BASE_URL}/api/cart/get_orders`,
+    // One order by id. The detail screen and the live map used to find their
+    // order inside the cached list, so an order past the first page could not be
+    // opened at all — from a push notification, a deep link or a scroll.
+    GET_ORDER: (orderId: string) => `${BASE_URL}/api/cart/orders/${orderId}`,
     GET_ACTIVE_ORDER: `${BASE_URL}/api/cart/orders/active`,
     GET_LAST_COMPLETED_ORDER: `${BASE_URL}/api/cart/orders/last-completed`,
     // These three were previously built inline as `/api/orders/{id}/…`, which the

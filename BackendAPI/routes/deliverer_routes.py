@@ -17,6 +17,7 @@ from services.deliverer_service import (
     get_deliverer_reviews,
     cancel_delivery,
 )
+from services.order_service import OrderStatusEnum
 from pydantic import BaseModel, Field
 from uuid import UUID
 from typing import Optional, List
@@ -217,12 +218,29 @@ async def rider_toggle_availability(
 async def rider_get_orders(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    status: Optional[str] = Query(None, description="Filter orders by status (e.g. delivered)"),
+    status: Optional[str] = Query(
+        None,
+        description="Comma-separated statuses, e.g. 'delivered' or 'delivered,cancelled,rejected'.",
+    ),
+    search_query: Optional[str] = Query(None, description="Match against the order reference."),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_rider),
 ):
+    if status:
+        wanted = [part.strip().lower() for part in status.split(",") if part.strip()]
+        known = {member.value for member in OrderStatusEnum}
+        unknown = sorted(set(wanted) - known)
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown order status: {', '.join(unknown)}.",
+            )
+
     clerk_id = user["sub"]
-    orders = await get_deliverer_orders(session=db, clerk_id=clerk_id, skip=skip, limit=limit, status=status)
+    orders = await get_deliverer_orders(
+        session=db, clerk_id=clerk_id, skip=skip, limit=limit, status=status,
+        search_query=search_query,
+    )
     return orders
 
 

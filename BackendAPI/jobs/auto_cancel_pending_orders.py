@@ -1,7 +1,7 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.expression import text
 from dependencies.dependencies import get_db_session
 from models.cart_model import Cart
 from models.user_model import User
@@ -11,7 +11,7 @@ from services.notification_service import create_notification
 from services.order_service import apply_status_transition, revert_order_side_effects
 from services import platform_config_service
 from routes.websocket_routes import manager
-from sqlalchemy import select, and_, func, update
+from sqlalchemy import select, and_, update
 from models.order_model import Order, OrderItem
 from models.product_model import Product
 
@@ -54,15 +54,28 @@ async def run_auto_cancel_orders(batch_size: int = 100):
         await platform_config_service.ensure_fresh(session)
         cutoff_minutes = platform_config_service.get_int("order_auto_cancel_minutes")
 
+        # `created_at < cutoff`, not `now() - created_at > interval`.
+        #
+        # The two are arithmetically identical and only one is sargable. With the
+        # column wrapped in an expression, Postgres can use
+        # `ix_orders_status_created_at` for the status half and must then evaluate
+        # the subtraction for every row that survives it. Standing the column alone
+        # on one side lets the same index seek straight to the range, so the sweep
+        # reads the handful of rows it will actually cancel instead of every live
+        # order on the platform.
+        #
+        # The cutoff is computed here rather than in SQL for the same reason it is
+        # `func.now()` elsewhere and not `datetime.now()`: this is a comparison
+        # against a value the database supplies, and both sides must mean UTC. The
+        # timezone is explicit so a container running in local time cannot shift it.
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=cutoff_minutes)
+
         query = (
             select(Order)
             .where(
                 and_(
                     Order.order_status.in_(["pending", "unassigned"]),
-                    func.now() - Order.created_at
-                    > text("make_interval(mins => :cutoff_minutes)").bindparams(
-                        cutoff_minutes=cutoff_minutes
-                    ),
+                    Order.created_at < cutoff,
                 )
             )
             .order_by(Order.created_at.asc())

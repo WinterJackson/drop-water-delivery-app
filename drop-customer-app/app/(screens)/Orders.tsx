@@ -3,7 +3,9 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OrderCardSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
-import { useOrders, isAwaitingPayment, matchesOrderFilter, ORDER_STATUS_GROUPS, type Order, type OrderFilter } from "@/hooks/queries/useOrders";
+import { useOrders, orderRows, isAwaitingPayment, ORDER_STATUS_GROUPS, type Order, type OrderFilter } from "@/hooks/queries/useOrders";
+import { keepPaging } from "@/utils/paging";
+import { useQueryClient } from "@tanstack/react-query";
 import useWebSocket from "@/hooks/useWebSocket";
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
@@ -26,7 +28,14 @@ const Orders = () => {
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
 	const insets = useSafeAreaInsets();
-	const { data: Orders = [], isLoading, refetch } = useOrders();
+	// The filter is the query, not a pass over the rows. Filtering client-side
+	// searched the page in hand, so "Delivered" answered "no orders" to anybody
+	// whose last delivery was further back than one page — and answered
+	// differently once they had scrolled. Changing the filter starts a new query
+	// at page 1, which is also what somebody expects when they tap one.
+	const ordersQuery = useOrders(selectedFilter);
+	const { isLoading, isFetchingNextPage, hasNextPage, refetch } = ordersQuery;
+	const Orders = orderRows(ordersQuery.data);
 	const OrdersLoaded = !isLoading;
 	const [refreshing, setRefreshing] = useState(false);
 
@@ -34,21 +43,26 @@ const Orders = () => {
 	const { data: UserData } = useUserDetails();
 	const userId = UserData?.id || null;
 
-	// MEMOIZE heavy array filtering to prevent full re-renders on layout passes
-	const filteredOrders = useMemo(() => {
-		if (!Orders) return [];
-		// Grouping lives in the hook so every screen filters the same way and no
-		// status can fall between two filters — see ORDER_STATUS_GROUPS.
-		return Orders.filter((o: any) => matchesOrderFilter(o.order_status, selectedFilter));
-	}, [Orders, selectedFilter]);
+	// Already the filtered set: the server was asked for this status group. See
+	// ORDER_STATUS_GROUPS, which is asserted to cover every status the backend
+	// can return, so no order can fall between two filters and vanish.
+	const filteredOrders = Orders;
 
 	// FIX-RERENDER-01: Stabilize the WebSocket callback with useCallback so it
 	// doesn't create a new function reference on every render cycle.
-	// The refetch reference from react-query is already stable.
+	//
+	// It invalidates the whole `['customer','orders']` prefix rather than calling
+	// `refetch()`. Now that the filter is part of the query key there is a cache
+	// per filter, and `refetch` only refreshes the one on screen — so an order
+	// moving from In Transit to Delivered would leave the *other* tab holding it
+	// in its old state, for the five minutes of `staleTime`, with `refetchOnMount`
+	// off. The customer would watch it arrive, tap Delivered, and not find it.
+	const queryClient = useQueryClient();
 	const handleOrderUpdate = useCallback((updateData: any) => {
 		if (__DEV__) console.log('[WS] order_update:', updateData?.order_id);
-		refetch();
-	}, [refetch]);
+		queryClient.invalidateQueries({ queryKey: ['customer', 'orders'] });
+		queryClient.invalidateQueries({ queryKey: ['customer', 'order', updateData?.order_id] });
+	}, [queryClient]);
 
 	// HIGH-05: Only connect WebSocket when userId is available.
 	// The hook internally ignores heartbeats so refetch() is only called
@@ -57,6 +71,8 @@ const Orders = () => {
 
 	// Orders whose M-Pesa payment was started but never confirmed. The customer
 	// may have backgrounded the app mid-payment, so give them a way back in.
+	// Unpaid orders are always among the newest, so the first page holds them
+	// whichever filter is on — and this banner is a prompt, not a list.
 	const awaitingPayment = useMemo(
 		() => (Orders as Order[]).filter(isAwaitingPayment),
 		[Orders]
@@ -251,6 +267,21 @@ const Orders = () => {
 										ListHeaderComponent={awaitingPaymentBanner}
 										keyExtractor={keyExtractor}
 										renderItem={renderItem}
+										onEndReached={keepPaging(ordersQuery)}
+										onEndReachedThreshold={0.5}
+										ListFooterComponent={
+											isFetchingNextPage ? (
+												<View className="mt-2">
+													<OrderCardSkeleton />
+												</View>
+											) : !hasNextPage && filteredOrders.length > 0 ? (
+												// A list that simply stops reads as one that failed to
+												// load; say where the history ends.
+												<Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+													That's everything.
+												</Text>
+											) : null
+										}
 									/>
 								</View>
 						)

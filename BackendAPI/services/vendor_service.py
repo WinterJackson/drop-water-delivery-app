@@ -11,6 +11,7 @@ from uuid import UUID
 from services import platform_config_service
 from services.dispatch_policy import DispatchPolicy
 from services.product_service import live_product
+from utils.paging import stable
 
 
 #: Statuses that take a store out of the customer-facing app entirely.
@@ -85,7 +86,7 @@ async def get_all_vendors(session: AsyncSession, limit: int = 20, offset: int = 
   query = (
       select(Vendor)
       .where(discoverable_vendor())
-      .order_by(Vendor.created_at.desc())
+      .order_by(*stable(Vendor.created_at.desc(), key=Vendor.id))
       .offset(offset)
       .limit(limit)
   )
@@ -248,9 +249,16 @@ async def get_vendor_directory(
     lat: float, 
     lng: float, 
     limit: int = 50,
+    offset: int = 0,
     search_query: Optional[str] = None,
     vendor_type: Optional[str] = "all"
 ) -> list[VendorWithProductsThin]:
+    """One page of the stores a customer can order from, nearest first.
+
+    Took a `limit` and no `offset`, so the directory was permanently the nearest
+    50 stores and the screen had no way to ask for the 51st. In a dense estate
+    that is half a suburb.
+    """
     # "all" spans both business models, so bound it by the wider of the two radii
     # and let the per-type filter narrow it when the customer picks one.
     bounds_type = vendor_type if vendor_type in ("retail_refill", "wholesale_b2b") else "wholesale_b2b"
@@ -278,7 +286,17 @@ async def get_vendor_directory(
         tsquery = func.websearch_to_tsquery('english', search_term)
         query = query.where(Vendor.search_vector.op("@@")(tsquery))
         
-    query = query.order_by(ST_Distance(Vendor.location, user_point)).limit(limit)
-    
+    # `joinedload` on a collection multiplies rows, so a LIMIT applied to the
+    # joined result would count *product* rows — page 1 would be four stores and
+    # half of a fifth store's catalogue. SQLAlchemy sees the collection load and
+    # wraps the limited select in a subquery so the window counts vendors, which
+    # is the behaviour this relies on; a rewrite to a plain join must page in a
+    # subquery by hand.
+    query = (
+        query.order_by(*stable(ST_Distance(Vendor.location, user_point), key=Vendor.id))
+        .limit(limit)
+        .offset(offset)
+    )
+
     result = await session.execute(query)
     return await _annotated(session, result.unique().scalars().all())

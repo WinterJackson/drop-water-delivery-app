@@ -36,6 +36,21 @@ export const initDB = async () => {
         return;
     }
     try {
+        // Money is TEXT here, exactly as it is NUMERIC in Postgres and a decimal
+        // string on the wire.
+        //
+        // `total_amount` and `delivery_fee` were `REAL`. The platform is emphatic
+        // about this everywhere else — `utils/money.py` serialises a Decimal to a
+        // string, `utils/money.ts` does the arithmetic in integer cents via
+        // `BigInt`, and a test walks every schema and every response dict to stop
+        // a float reappearing — and the chain broke at the last link, in the
+        // offline cache. A value round-tripped through a binary float is no longer
+        // the figure the ledger holds, and this is the copy a rider reads when
+        // they are offline, which is precisely when they cannot check it against
+        // anything. `formatMoney` would also have rendered `120` where the server
+        // said `"120.00"`.
+        //
+        // Coordinates stay REAL: they are measurements, not money.
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
@@ -47,13 +62,51 @@ export const initDB = async () => {
                 lng_from REAL,
                 lat REAL,
                 lng REAL,
-                total_amount REAL,
+                total_amount TEXT,
                 order_status TEXT,
                 payment_status TEXT,
-                delivery_fee REAL,
+                delivery_fee TEXT,
                 updated_at TEXT
             );
         `);
+
+        // --- money-as-text migration ---
+        // `CREATE TABLE IF NOT EXISTS` checks the table name and not its column
+        // types, so a handset that already has this app installed keeps the REAL
+        // columns and keeps the defect. SQLite has no ALTER COLUMN TYPE, and this
+        // table is a *cache* of server state — it is rebuilt from the next
+        // successful fetch — so the honest migration is to drop and let it refill
+        // rather than to convert values that are already lossy.
+        //
+        // `offline_actions` is deliberately untouched by this: it holds work the
+        // rider has done and not yet synced, which is not reconstructible from
+        // anywhere.
+        const orderCols = (await db.getAllAsync(`PRAGMA table_info(orders)`)) as any[];
+        const moneyIsFloat = orderCols.some(
+            (c: any) => (c.name === 'total_amount' || c.name === 'delivery_fee') && String(c.type).toUpperCase() === 'REAL'
+        );
+        if (moneyIsFloat) {
+            await db.execAsync(`DROP TABLE IF EXISTS orders;`);
+            await db.execAsync(`
+                CREATE TABLE IF NOT EXISTS orders (
+                    id TEXT PRIMARY KEY,
+                    vendor_id TEXT,
+                    customer_id TEXT,
+                    delivery_address TEXT,
+                    phone TEXT,
+                    lat_from REAL,
+                    lng_from REAL,
+                    lat REAL,
+                    lng REAL,
+                    total_amount TEXT,
+                    order_status TEXT,
+                    payment_status TEXT,
+                    delivery_fee TEXT,
+                    updated_at TEXT
+                );
+            `);
+            if (__DEV__) console.log('[initDB] Rebuilt the offline order cache with money as TEXT.');
+        }
 
         // --- offline_actions migration ---
         // CREATE TABLE IF NOT EXISTS only checks the table NAME, not its columns. Devices
@@ -169,10 +222,15 @@ export const saveOrdersLocal = async (orders: any[]) => {
                 $lng_from: o.lng_from,
                 $lat: o.lat,
                 $lng: o.lng,
-                $total_amount: o.total_amount,
+                // Bound as text, never as a number. The server sends a decimal
+                // string and it is stored unchanged; coercing here rather than
+                // relying on SQLite's column affinity means a value that somehow
+                // arrives as a number is at least recorded as what it was, instead
+                // of becoming `"120"` where the server said `"120.00"`.
+                $total_amount: o.total_amount == null ? null : String(o.total_amount),
                 $order_status: o.order_status,
                 $payment_status: o.payment_status,
-                $delivery_fee: o.delivery_fee,
+                $delivery_fee: o.delivery_fee == null ? null : String(o.delivery_fee),
                 $updated_at: o.updated_at
             });
         }

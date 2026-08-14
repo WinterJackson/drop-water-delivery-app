@@ -5,7 +5,6 @@ import { ApiError, errorMessage } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
 import { useCallback, useContext, useEffect, useState } from "react";
 import {
-    FlatList,
     RefreshControl,
     StatusBar,
     View,
@@ -25,7 +24,9 @@ import { Toast } from "@/lib/toast";
 import { useRouter } from "expo-router";
 import { useRiderStore } from "@/stores/useRiderStore";
 import { trackEvent } from "@/utils/analytics";
-import { useRiderProfile } from "@/hooks/queries/useRiderData";
+import { useRiderProfile, useRiderOrdersPaginated, riderOrderRows, statusesForTab, type RiderOrderTab } from "@/hooks/queries/useRiderData";
+import { keepPaging } from "@/utils/paging";
+import { useQueryClient } from "@tanstack/react-query";
 import { Popup } from "@/lib/popup";
 import { useDebounce } from "@/hooks/useDebounce";
 import { RiderOrderCardSkeleton, RiderTripRadarSkeleton } from "@/components/skeletons/ContextualSkeletons";
@@ -46,39 +47,44 @@ const STATUS_TEXT: Record<string, string> = {
 export default function Orders() {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const { get, post } = useApiRequest();
+  const { post } = useApiRequest();
   const router = useRouter();
   const { data: profile } = useRiderProfile();
 
-  const [orders, setOrders] = useState<any[]>([]);
   const [radarOrders, setRadarOrders] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
   // Read riderId from centralized Zustand store instead of redundant API call
   const riderId = useRiderStore((s) => s.riderId);
-  const [tab, setTab] = useState<"Incoming" | "History">("Incoming");
+  const [tab, setTab] = useState<RiderOrderTab>("Incoming");
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
   const [claimingOrder, setClaimingOrder] = useState<string | null>(null);
 
   const { mutateAsync: rejectDelivery, isPending: isRejecting } = useRejectDelivery();
 
-  const filteredOrders = orders.filter((o: any) => 
-     o.id && o.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const historyOrders = filteredOrders.filter((o: any) => o.order_status === "delivered" || o.order_status === "cancelled" || o.order_status === "rejected");
-  const incomingOrders = filteredOrders.filter((o: any) => 
-    o.order_status === "pending" || 
-    o.order_status === "accepted" || 
-    o.order_status === "preparing" ||
-    o.order_status === "ready" || 
-    o.order_status === "picked_up" ||
-    o.order_status === "mismatch_pending" ||
-    o.order_status === "pending_review"
-  );
+  // The tab and the search box are both query parameters. This screen used to
+  // fetch every order the rider had — capped at the server's default 50 with no
+  // way past it — then split the tabs and match the search with three
+  // `.filter()` calls over that one page. So a rider's History ended somewhere
+  // in the middle of last month, and searching an order reference they had just
+  // been given on the phone found nothing unless that delivery happened to be
+  // among the newest fifty. The debounce existed and fed only an analytics
+  // event; the filter itself ran on every keystroke.
+  const ordersQuery = useRiderOrdersPaginated(statusesForTab(tab), debouncedSearchQuery);
+  const { isLoading: loading, isFetchingNextPage, hasNextPage, refetch } = ordersQuery;
+  const currentList = riderOrderRows(ordersQuery.data);
 
   // WebSocket hook for real-time order updates
+  // Invalidating the `['rider','orders']` prefix, not `refetch()`. The tab and
+  // the search term are both part of the query key now, so there is a cache per
+  // combination and `refetch` refreshes only the one on screen — a delivery
+  // completing would leave Incoming still holding it and History still without
+  // it until whichever tab the rider opened next happened to go stale.
+  const queryClient = useQueryClient();
+  const refreshOrders = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['rider', 'orders'] });
+  }, [queryClient]);
+
   const { connected } = useWebSocket('rider', riderId || "", (updateData) => {
     if (__DEV__) console.log('Received order update via WebSocket:', updateData);
     if (updateData?.action === "TRIP_RADAR_BROADCAST") {
@@ -89,28 +95,16 @@ export default function Orders() {
         });
     } else if (updateData?.action === "ORDER_ASSIGNED") {
         setRadarOrders(prev => prev.filter(o => o.id !== updateData.order_id));
-        fetchOrders(); // Pull the newly locked order if it was assigned to us
+        refreshOrders(); // Pull the newly locked order if it was assigned to us
     } else if (updateData?.action === "ORDER_STATUS_UPDATE" && updateData.status === "cancelled") {
         setRadarOrders(prev => prev.filter(o => o.id !== updateData.order_id));
-        fetchOrders();
+        refreshOrders();
     } else {
-        fetchOrders();
+        refreshOrders();
     }
   });
 
-  const fetchOrders = async () => {
-    try {
-      const data = await get<any[]>(RiderApiRoutes.GetOrders().path);
-      if (Array.isArray(data)) setOrders(data);
-    } catch (e) {
-      // The client signs out on a 401 itself; everything else is transient here
-      // and the pull-to-refresh is the retry.
-      if (__DEV__) console.warn("[Orders] fetch failed:", errorMessage(e));
-    } finally { setLoading(false); }
-  };
-
-  const onRefresh = useCallback(async () => { setRefreshing(true); await fetchOrders(); setRefreshing(false); }, []);
-  useEffect(() => { fetchOrders(); }, []);
+  const onRefresh = useCallback(async () => { setRefreshing(true); await refetch(); setRefreshing(false); }, [refetch]);
 
   useEffect(() => {
     if (debouncedSearchQuery.trim().length > 1) {
@@ -125,7 +119,7 @@ export default function Orders() {
       await post(RiderApiRoutes.AcceptDelivery(orderId).path);
       Toast.success("Success", "Delivery claimed successfully!");
       setRadarOrders(prev => prev.filter(o => o.id !== orderId));
-      fetchOrders();
+      refreshOrders();
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 401) return;
       Toast.error("Radar Update", errorMessage(e, "Failed to claim order"));
@@ -146,7 +140,7 @@ export default function Orders() {
            Popup.hide();
            try {
              await rejectDelivery(orderId);
-             setOrders(orders.filter(o => o.id !== orderId));
+             refreshOrders();
              Toast.success("Rejected", "Delivery reassigned.");
            } catch (e: unknown) {
              Toast.error("Error", (e as Error).message || "Failed to reject delivery");
@@ -154,8 +148,6 @@ export default function Orders() {
         }
     });
   };
-
-  const currentList = tab === "Incoming" ? incomingOrders : historyOrders;
 
   return (
     <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
@@ -212,7 +204,10 @@ export default function Orders() {
               <TextInput
                   value={searchQuery}
                   onChangeText={setSearchQuery}
-                  placeholder={`Search ${tab} deliveries by ID...`}
+                  placeholder={`Search ${tab} deliveries by order reference`}
+                  accessibilityLabel={`Search ${tab} deliveries by order reference`}
+                  autoCorrect={false}
+                  autoCapitalize="none"
                   placeholderTextColor={darkTheme ? BRAND.gray400 : BRAND.gray500}
                   className={`flex-1 font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}
               />
@@ -260,13 +255,34 @@ export default function Orders() {
           keyExtractor={(item: any) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 }}
+          onEndReached={keepPaging(ordersQuery)}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <RiderOrderCardSkeleton />
+            ) : !hasNextPage && currentList.length > 0 ? (
+              <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                That's everything.
+              </Text>
+            ) : null
+          }
         ListEmptyComponent={
           loading ? <RiderOrderCardSkeleton /> : (
             <View className="mt-10">
-              <EmptyState 
-                  mood={tab === "Incoming" ? "proud" : "sad"} 
-                  title={tab === "Incoming" ? "No Incoming Deliveries" : "No Delivery History"} 
-                  subtitle={tab === "Incoming" ? "You currently have no active deliveries. Wait for auto-assignment or check the Trip Radar." : "Your past completed or cancelled deliveries will appear here."} 
+              <EmptyState
+                  mood={debouncedSearchQuery.trim() ? "sad" : tab === "Incoming" ? "proud" : "sad"}
+                  title={
+                    debouncedSearchQuery.trim()
+                      ? "No Matching Deliveries"
+                      : tab === "Incoming" ? "No Incoming Deliveries" : "No Delivery History"
+                  }
+                  subtitle={
+                    debouncedSearchQuery.trim()
+                      ? `No ${tab.toLowerCase()} delivery matches "${debouncedSearchQuery.trim()}". The search covers your whole history, so check the reference and try again.`
+                      : tab === "Incoming"
+                        ? "You currently have no active deliveries. Wait for auto-assignment or check the Trip Radar."
+                        : "Your past completed or cancelled deliveries will appear here."
+                  }
               />
             </View>
           )

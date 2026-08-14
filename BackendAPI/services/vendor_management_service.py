@@ -16,6 +16,7 @@ from services.notification_service import create_notification, push_allowed
 from sqlalchemy import func, and_, update
 import asyncio
 from services.order_service import apply_status_transition
+from utils.paging import stable
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +298,7 @@ async def get_vendor_orders(
             joinedload(Order.user),
             joinedload(Order.deliverer)
         )
-        .order_by(Order.created_at.desc())
+        .order_by(*stable(Order.created_at.desc(), key=Order.id))
         .offset(skip)
         .limit(limit)
     )
@@ -342,7 +343,7 @@ async def get_vendor_products(
     query = (
         select(Product)
         .where(and_(*conditions))
-        .order_by(*order_by_clauses)
+        .order_by(*stable(*order_by_clauses, key=Product.id))
         .offset(offset)
         .limit(limit)
     )

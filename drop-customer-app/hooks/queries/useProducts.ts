@@ -1,6 +1,7 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
-import { useQuery } from '@tanstack/react-query';
+import { flattenPages } from '@/utils/paging';
+import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface Product {
@@ -49,16 +50,47 @@ export function useVendorDetails(vendorId: string) {
     });
 }
 
+/** Rows per request on the offers list. The endpoint caps `limit` at 100. */
+const OFFERS_PAGE_SIZE = 20;
+
+interface OffersPage {
+    data: Product[];
+    limit: number;
+    offset: number;
+}
+
+/**
+ * Discounted products, page by page.
+ *
+ * Sent no `limit`, so it took the server's default 20 and the screen showed
+ * those twenty as the whole of the platform's offers — the one screen whose
+ * entire purpose is browsing, capped at a single screenful with no way to go on.
+ */
 export function useProductsWithOffer() {
     const api = useApiRequest();
-    return useQuery({
+    return useInfiniteQuery<OffersPage, Error>({
         queryKey: ['products', 'offers'],
-        queryFn: async () => {
-            const json: any = await api.get(ROUTES.GET_PRODUCTS_WITH_OFFER);
-            // This endpoint answers with a {"data": [...], "total": …} envelope.
-            return Array.isArray(json) ? json : json?.data ?? [];
+        initialPageParam: 0,
+        queryFn: async ({ pageParam }) => {
+            const json: any = await api.get(ROUTES.GET_PRODUCTS_WITH_OFFER, {
+                params: { limit: OFFERS_PAGE_SIZE, offset: pageParam as number },
+            });
+            // This endpoint answers with a {"data": [...], "limit": …, "offset": …}
+            // envelope; older builds of it answered with a bare array.
+            const rows: Product[] = Array.isArray(json) ? json : json?.data ?? [];
+            return { data: rows, limit: OFFERS_PAGE_SIZE, offset: (pageParam as number) ?? 0 };
         },
+        // No `has_more` on this endpoint, so a short page is the only end signal.
+        getNextPageParam: (lastPage, allPages) =>
+            lastPage.data.length < OFFERS_PAGE_SIZE
+                ? undefined
+                : allPages.reduce((n, page) => n + page.data.length, 0),
     });
+}
+
+/** Every offer fetched so far, each appearing once. */
+export function offerRows(data: InfiniteData<OffersPage> | undefined): Product[] {
+    return flattenPages<Product>(data);
 }
 
 export function useCategories() {

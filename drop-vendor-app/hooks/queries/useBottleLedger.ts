@@ -18,8 +18,22 @@ export interface BottleLedgerEntry {
   created_at: string | null;
 }
 
-interface LedgerPage {
+/** What the endpoint sends. */
+interface LedgerResponse {
   entries: BottleLedgerEntry[];
+  has_more: boolean;
+}
+
+/**
+ * What this hook hands on.
+ *
+ * `items` rather than the server's `entries`, so a page of the ledger has the
+ * same shape as a page of anything else and `flattenPages` needs no special
+ * case for it — this endpoint is the only one on the platform that names its
+ * rows something bespoke.
+ */
+interface LedgerPage {
+  items: BottleLedgerEntry[];
   has_more: boolean;
 }
 
@@ -43,12 +57,19 @@ export function useBottleLedger() {
   return useInfiniteQuery<LedgerPage, Error>({
     queryKey: ["vendorBottleLedger"],
     initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      get<LedgerPage>(
+    queryFn: async ({ pageParam }) => {
+      const page = await get<LedgerResponse>(
         VendorApiRoutes.BottleLedger(PAGE_SIZE, pageParam as number).path,
-      ),
+      );
+      return { items: page?.entries ?? [], has_more: !!page?.has_more };
+    },
+    // Counted from the rows actually held, not `allPages.length * PAGE_SIZE`.
+    // The two agree only while every page is exactly full, and the moment one is
+    // not, the multiplication walks the offset past rows nobody ever sees.
     getNextPageParam: (lastPage, allPages) =>
-      lastPage.has_more ? allPages.length * PAGE_SIZE : undefined,
+      lastPage.has_more
+        ? allPages.reduce((total, page) => total + page.items.length, 0)
+        : undefined,
     enabled: isLoaded && isSignedIn,
     retry: retryTransientOnly(),
   });

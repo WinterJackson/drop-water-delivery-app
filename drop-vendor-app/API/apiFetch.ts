@@ -15,16 +15,21 @@
  * if the session really is gone.
  */
 import { ApiError, toApiError } from "./errors";
-
-/** Same budget as `useApiRequest`. */
-const DEFAULT_TIMEOUT_MS = 15_000;
+import { kindForMethod, timeoutFor, type RequestKind } from "./netBudget";
 
 export interface ApiFetchOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   token?: string | null;
   body?: unknown;
   headers?: Record<string, string>;
+  /**
+   * Override the budget. Leave it unset: `netBudget` picks one from the
+   * connection and the method, which is right far more often than a number
+   * written at a call site can be.
+   */
   timeoutMs?: number;
+  /** `upload` where the body is a photograph — see `netBudget`. */
+  kind?: RequestKind;
   /** Pass a `FormData` through untouched, letting the platform set the boundary. */
   formData?: FormData;
   /**
@@ -50,11 +55,16 @@ export async function apiFetch<T = unknown>(
     token,
     body,
     headers = {},
-    timeoutMs = DEFAULT_TIMEOUT_MS,
     formData,
     signal,
     storeId,
+    kind,
   } = options;
+
+  // Method decides the kind unless the caller knows better; `formData` is
+  // always an upload, because in these apps it only ever carries an image.
+  const requestKind: RequestKind = kind ?? (formData ? "upload" : kindForMethod(method));
+  const timeoutMs = options.timeoutMs ?? timeoutFor(requestKind);
 
   if (!__DEV__ && url.startsWith("http://")) {
     throw new ApiError(

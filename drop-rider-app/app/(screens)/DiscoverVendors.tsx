@@ -92,10 +92,26 @@ export default function DiscoverVendors() {
 
   const activeVendorCount = vendors.filter((v: any) => v.status === "pending" || v.status === "approved").length;
 
+  /**
+   * Which search this component is currently showing.
+   *
+   * Two searches in flight can finish in either order — a short term over a slow
+   * cell and a longer one over a good one — and the staler response wins simply
+   * by landing last, leaving a list that does not match the box above it. Every
+   * response is checked against the term current when it arrives; a stale one is
+   * dropped rather than rendered.
+   */
+  const inFlightFor = useRef<string>("");
+
   const fetchVendors = async (lat: number, lng: number, search?: string) => {
+    const term = search ?? "";
+    inFlightFor.current = term;
     try {
-      setVendors(await get<any[]>(RiderApiRoutes.DiscoverVendors(lat, lng, search).path));
+      const rows = await get<any[]>(RiderApiRoutes.DiscoverVendors(lat, lng, search).path);
+      if (inFlightFor.current !== term) return;
+      setVendors(rows);
     } catch (e) {
+      if (inFlightFor.current !== term) return;
       if (e instanceof ApiError && e.status === 401) return;
       Toast.error("Error", errorMessage(e, "Could not load nearby vendors. Pull to refresh to try again."));
     }

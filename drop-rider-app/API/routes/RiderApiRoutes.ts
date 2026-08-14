@@ -77,9 +77,18 @@ const RiderApiRoutes = {
    * 50 most recent deliveries with no "load more" and no empty state — it read
    * as data loss rather than a page boundary.
    */
-  GetOrdersPaged: (status: string | undefined, skip: number, limit: number): ApiRoute => {
+  GetOrdersPaged: (
+    status: string | undefined,
+    skip: number,
+    limit: number,
+    searchQuery?: string,
+  ): ApiRoute => {
     const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+    // `status` is a comma-separated *group* — the screen's tabs each span
+    // several statuses, and splitting them in the app only ever split the page
+    // in hand.
     if (status) params.append("status", status);
+    if (searchQuery) params.append("search_query", searchQuery);
     return {
       path: `${BASE_URL}/api/rider/orders?${params.toString()}`,
       method: "GET",

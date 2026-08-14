@@ -258,7 +258,7 @@ full — they were built after the shell.
 | Concern | Choice | Why |
 |---|---|---|
 | Framework | Next.js App Router, TypeScript strict | Server Components make the BFF natural |
-| Auth | `@clerk/nextjs` middleware | Same instance as the apps |
+| Auth | `clerkMiddleware` in `proxy.ts` | Same instance as the apps |
 | Styling | Tailwind CSS v4 | Matches NativeWind vocabulary already in the repo |
 | Components | `components/ui/primitives.tsx` | Eight primitives, one file, all read |
 | Server state | Server Components + Server Actions | No client cache to keep coherent |

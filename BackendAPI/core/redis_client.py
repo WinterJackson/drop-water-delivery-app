@@ -18,7 +18,6 @@ except Exception as e:
     redis_pool = None
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 redis_is_available = False
 storage_uri = "memory://"
@@ -31,10 +30,24 @@ try:
 except Exception:
     logger.warning("Redis not accessible for rate limiting, falling back to memory://")
 
-# Global Redis-backed Rate Limiter
+# Global Redis-backed Rate Limiter.
+#
+# Keyed on the **authenticated subject**, not the client address — see
+# `core/rate_limit.py` for why. On this platform an address is a mobile carrier's
+# NAT pool shared by thousands of customers, so an address-keyed limit is a
+# platform-wide budget wearing a per-user label.
+#
+# The default is the ceiling for one *account*, which is why it is generous: a
+# customer opening the app fires a burst of parallel reads (profile, cart, active
+# order, catalogue, notifications) and none of that is abuse. Unauthenticated
+# callers still fall back to an address key and still meet this number, so an
+# anonymous flood from one connection is bounded without the whole of Safaricom
+# sharing one bucket.
+from core.rate_limit import rate_limit_key
+
 redis_limiter = Limiter(
-    key_func=get_remote_address, 
-    default_limits=["100/minute"],
+    key_func=rate_limit_key,
+    default_limits=["300/minute"],
     storage_uri=storage_uri
 )
 

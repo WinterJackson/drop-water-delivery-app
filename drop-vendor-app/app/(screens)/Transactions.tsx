@@ -21,7 +21,8 @@ import { useDebounce } from "@/hooks/useDebounce";
 import SearchBar from "@/components/common/Search";
 import { ScrollView } from "react-native-gesture-handler";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useWalletTransactionsPaginated } from "@/hooks/queries/useWallet";
+import { useWalletTransactionsPaginated, type WalletTransaction } from "@/hooks/queries/useWallet";
+import { flattenPages, keepPaging } from "@/utils/paging";
 import { formatMoney } from "@/utils/money";
 
 const TRANSACTION_COLORS: Record<string, string> = {
@@ -123,15 +124,12 @@ export default function Transactions() {
   const [searchState, setSearchState] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
 
-  const { 
-    data: txData, 
-    isFetching: txLoading, 
-    fetchNextPage: fetchNextTx, 
-    hasNextPage: hasNextTx, 
-    refetch 
-  } = useWalletTransactionsPaginated(searchState, typeFilter, 20);
+  const txQuery = useWalletTransactionsPaginated(searchState, typeFilter, 20);
+  const { data: txData, isFetching: txLoading, refetch } = txQuery;
 
-  const filteredTransactions = txData?.pages?.flatMap(page => page.data || []) || [];
+  // Deduped on the ledger id: a top-up landing while somebody scrolls shifts
+  // the offset window and re-serves the last row of the previous page.
+  const filteredTransactions = flattenPages<WalletTransaction>(txData);
 
   React.useEffect(() => {
     if (debouncedSearchQuery.trim().length > 1) {
@@ -171,6 +169,8 @@ export default function Transactions() {
               width="flex-1 ml-3"
               height="h-[50px]"
               buttonStyle=""
+              value={searchQuery}
+              placeholder="Search by reference, receipt or note"
               setFunc={setSearchQuery}
             />
           </View>
@@ -223,9 +223,7 @@ export default function Transactions() {
             keyExtractor={(item: any) => item.id.toString()}
             {...{ estimatedItemSize: 120 } as any}
             showsVerticalScrollIndicator={false}
-            onEndReached={() => {
-              if (hasNextTx) fetchNextTx();
-            }}
+            onEndReached={keepPaging(txQuery)}
             onEndReachedThreshold={0.5}
             refreshControl={
               <RefreshControl 

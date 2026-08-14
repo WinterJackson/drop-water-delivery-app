@@ -7,7 +7,9 @@ import PressableScale from "@/components/ui/PressableScale";
 import { errorMessage } from "@/API/errors";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
-import { useVendorRiders } from "@/hooks/queries/useVendorRiders";
+import { useVendorRiders, riderRows } from "@/hooks/queries/useVendorRiders";
+import { useDebounce } from "@/hooks/useDebounce";
+import { keepPaging } from "@/utils/paging";
 import { Toast } from "@/lib/toast";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
@@ -126,26 +128,32 @@ export default function RiderManagement() {
   
   // One reader for the roster, shared with `OrderDetail`'s assign sheet. This
   // screen used to keep its own copy in `useState` and refetch it by hand.
-  const {
-    data: riders = [],
-    isLoading: initialLoading,
-    isRefetching: refreshing,
-    refetch: fetchRiders,
-  } = useVendorRiders();
-
   const [filter, setFilter] = useState("Pending");
   const [actioningRider, setActioningRider] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"none" | "rating" | "trips">("none");
+  const debouncedSearchQuery = useDebounce(searchQuery, 400);
 
-  const filteredRiders = riders
-    .filter(r => r.status.toLowerCase() === filter.toLowerCase())
-    .filter(r => !searchQuery || (r.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (r.phone_number || "").includes(searchQuery))
-    .sort((a, b) => {
-      if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
-      if (sortBy === "trips") return (b.total_deliveries || 0) - (a.total_deliveries || 0);
-      return 0;
-    });
+  // The status chip, the search box and the two sort chips are all query
+  // parameters now. They used to be a `.filter().filter().sort()` over the whole
+  // roster held in memory — which the endpoint returned unbounded and unordered,
+  // and whose rows carried neither `rating` nor `total_deliveries`, so both sort
+  // chips compared `undefined` and did nothing.
+  const ridersQuery = useVendorRiders({
+    status: filter,
+    search: debouncedSearchQuery,
+    sort: sortBy === "none" ? "recent" : sortBy,
+  });
+  const {
+    isLoading: initialLoading,
+    isRefetching: refreshing,
+    isFetchingNextPage,
+    hasNextPage,
+    refetch: fetchRiders,
+  } = ridersQuery;
+
+  const riders = riderRows(ridersQuery.data);
+  const filteredRiders = riders;
 
   const onRefresh = useCallback(async () => {
     await fetchRiders();
@@ -269,10 +277,23 @@ export default function RiderManagement() {
       <View style={{ flex: 1 }}>
         <FlashList
           data={filteredRiders}
-          keyExtractor={(item: any) => item.registry_id || Math.random().toString()}
+          // Never `|| Math.random()`: a fresh key on every render makes React
+          // throw the row away and rebuild it, on the list this screen scrolls.
+          keyExtractor={(item: any) => item.registry_id}
           // @ts-ignore
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
+          onEndReached={keepPaging(ridersQuery)}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <Skeleton width="100%" height={180} borderRadius={24} />
+            ) : !hasNextPage && filteredRiders.length > 0 ? (
+              <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                That's everyone.
+              </Text>
+            ) : null
+          }
           ListEmptyComponent={
             initialLoading ? (
               <View className="pt-2 gap-4">
@@ -282,10 +303,14 @@ export default function RiderManagement() {
               </View>
             ) : (
               <View className="mt-16">
-                <EmptyState 
-                  mood="sad" 
-                  title={`No ${filter.toLowerCase()} riders`}
-                  subtitle="When a rider requests to join your fleet, they will appear here." 
+                <EmptyState
+                  mood="sad"
+                  title={debouncedSearchQuery.trim() ? "No Matching Riders" : `No ${filter.toLowerCase()} riders`}
+                  subtitle={
+                    debouncedSearchQuery.trim()
+                      ? `No ${filter.toLowerCase()} rider matches "${debouncedSearchQuery.trim()}". The search covers your whole roster.`
+                      : "When a rider requests to join your fleet, they will appear here."
+                  } 
                 />
               </View>
             )

@@ -140,6 +140,32 @@ async def resume_paused_stores_task(ctx):
     return str(result)
 
 
+async def reconcile_customer_cohorts_task(ctx):
+    """Re-derive `Customer_First_Delivery` from the orders table, and repair it.
+
+    The table is written on the delivery path, which makes the growth report a
+    join instead of an aggregate over every delivered order there has ever been.
+    That fast path depends on every route that can mark an order delivered
+    remembering to call `record_acquisition` — and "every path remembers" is the
+    assumption this codebase has been caught by before, which is how
+    `commission_lost` came to be null on exactly the most common kind of
+    cancellation.
+
+    So the hook keeps the table current and this makes it *true*. It is a set
+    operation, not a walk: one pass whatever the platform's size.
+
+    The count it returns is the point. Zero means every delivery path is calling
+    the hook. A number that keeps coming back means one is not, and that is a
+    defect in the code which nothing else would report.
+    """
+    from dependencies.dependencies import get_db_session
+    from services import customer_cohort_service
+
+    async with get_db_session() as session:
+        result = await customer_cohort_service.reconcile(session)
+    return str(result)
+
+
 async def deposit_maintenance_task(ctx):
     """The deposit book's nightly upkeep, including the reconciliation.
 
@@ -205,6 +231,7 @@ class WorkerSettings:
         deposit_maintenance_task,
         release_unclaimed_cash_task,
         resume_paused_stores_task,
+        reconcile_customer_cohorts_task,
         dispatch_trip_radar_task,
     ]
     redis_settings = redis_settings

@@ -1,5 +1,6 @@
 import logging
 import math
+from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
 from enum import Enum as PyEnum
@@ -20,6 +21,7 @@ from utils.money import MoneyIn, money_str
 from services.notification_service import create_notification, push_allowed, queue_push
 from services.dispatch_policy import DispatchPolicy
 import asyncio
+from utils.paging import stable
 
 EARTH_RADIUS_KM = 6371.0
 MINUTES_PER_KM = 3.0  # Average bike speed in Nairobi urban traffic
@@ -448,6 +450,18 @@ def calculate_revenue_splits(
     }
 
 
+#: How many riders one radar sweep may return.
+#:
+#: `get_radar_deliverers` had no ceiling at all, so in a dense market it
+#: materialised every available rider inside the ring — the whole of central
+#: Nairobi's fleet — and pushed to all of them. Beyond a couple of dozen the extra
+#: riders add nothing: the order is claimed by whoever taps first, and the rest
+#: get a notification for an order that is already gone, which is the surest way
+#: to teach a rider to stop opening them. Ordered by distance, so the ceiling
+#: keeps the *nearest* riders rather than an arbitrary page.
+RADAR_FANOUT_LIMIT = 25
+
+
 def rider_search_bounds(lat: float, lng: float, vendor_type: str):
     """`(pickup_point, h3_cells, max_distance_m)` for a rider search.
 
@@ -498,9 +512,14 @@ async def get_radar_deliverers(session: AsyncSession, lat: float, lng: float, ve
           Deliverer.vehicle_type == vehicle_enum, 
           Deliverer.h3_index_res8.in_(nearby_hexes),
           Deliverer.location.isnot(None),
-          ST_Distance(Deliverer.location, pickup_point) <= max_distance_m
+          # `ST_DWithin`, never `ST_Distance(...) <= x`. The first is
+          # index-assisted and can use `idx_deliverer_location_gist`; the second
+          # forces the distance to be computed for every row the H3 pre-filter
+          # let through before any of them can be discarded. The H3 ring bounds
+          # that today, but a res-8 k-ring covers a wide area of a dense city.
+          ST_DWithin(Deliverer.location, pickup_point, max_distance_m),
       )
-  )
+  ).order_by(ST_Distance(Deliverer.location, pickup_point)).limit(RADAR_FANOUT_LIMIT)
   
   if vendor_id:
       query = query.join(VendorRiderRegistry, VendorRiderRegistry.rider_id == Deliverer.id).where(
@@ -544,7 +563,8 @@ async def get_closest_deliverer(session: AsyncSession, lat: float, lng: float, v
               Deliverer.vehicle_type == vehicle_enum,
               Deliverer.h3_index_res8.in_(nearby_hexes),
               Deliverer.location.isnot(None),
-              ST_Distance(Deliverer.location, pickup_point) <= max_distance_m,
+              # Index-assisted; see the fallback below for the full reasoning.
+              ST_DWithin(Deliverer.location, pickup_point, max_distance_m),
           )
       )
       .order_by(ST_Distance(Deliverer.location, pickup_point))
@@ -670,8 +690,10 @@ async def dispatch_order_to_riders(
                 Deliverer.location.isnot(None),
             ]
             if max_distance_m is not None:
+                # `ST_DWithin`, for the same reason as the other two search
+                # paths: this one runs first and on every single dispatch.
                 tier1_conditions.append(
-                    ST_Distance(Deliverer.location, pickup_point) <= max_distance_m
+                    ST_DWithin(Deliverer.location, pickup_point, max_distance_m)
                 )
 
             tier1_query = (
@@ -1463,8 +1485,27 @@ async def annotate_is_rated(session: AsyncSession, orders: list) -> list:
   return orders
 
 
-async def fetch_orders_by_id(session: AsyncSession, user_id: UUID, skip: int = 0, limit: int = 50) -> list[BaseOrder]:
-  query = select(Order).where(Order.customer_id == user_id).options(joinedload(Order.order_item).joinedload(OrderItem.product), joinedload(Order.vendor), joinedload(Order.deliverer)).order_by(Order.created_at.desc()).offset(skip).limit(limit)
+async def fetch_orders_by_id(
+    session: AsyncSession,
+    user_id: UUID,
+    skip: int = 0,
+    limit: int = 50,
+    statuses: Sequence[str] | None = None,
+) -> list[BaseOrder]:
+  """One page of a customer's orders, newest first, optionally one status group.
+
+  `statuses` is a *group* rather than a single value because that is the shape
+  the screen asks in: its filters are Pending, In Transit, Delivered and
+  Cancelled, and each covers several statuses. Filtering had to happen on the
+  server once the list was paged — a screen that filters the page it holds
+  answers "no Delivered orders" to a customer whose deliveries start on page 2,
+  which is the same list telling two different stories depending on how far
+  somebody had scrolled first.
+  """
+  query = select(Order).where(Order.customer_id == user_id)
+  if statuses:
+    query = query.where(Order.order_status.in_(list(statuses)))
+  query = query.options(joinedload(Order.order_item).joinedload(OrderItem.product), joinedload(Order.vendor), joinedload(Order.deliverer)).order_by(*stable(Order.created_at.desc(), key=Order.id)).offset(skip).limit(limit)
   result = await session.execute(query)
   orders = result.unique().scalars().all()
   return await annotate_is_rated(session, list(orders))
