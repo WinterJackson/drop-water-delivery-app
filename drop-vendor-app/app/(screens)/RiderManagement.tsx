@@ -113,7 +113,7 @@ const RiderCard = memo(({
 ));
 
 export default function RiderManagement() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { put } = useApiRequest();
   const router = useRouter();

@@ -99,3 +99,48 @@ class Deliverer(Base):
   
   # relationships
   order = relationship("Order", back_populates="deliverer", lazy="raise_on_sql")
+
+  @property
+  def is_suspended(self) -> bool:
+      """Stopped by an administrator.
+
+      Reads `suspended_at` and deliberately **not** `is_active`. Suspension
+      writes both, so either would answer correctly for a suspended rider — but
+      `is_active` is overloaded: `create_deliverer` defaults it to `False`, so
+      it also means "has not finished onboarding". Testing it here would tell a
+      half-registered rider their account was suspended, which is untrue and
+      unactionable. `suspended_at` means one thing and is written by one place.
+      """
+      return self.suspended_at is not None
+
+def dispatchable_rider():
+    """The predicate for a rider the platform may offer work to.
+
+    Every rider search on the dispatch path filtered on `is_available` and
+    nothing else about the rider's standing. `is_available` is the rider's own
+    toggle — it says they are online, not that the platform still wants them
+    working — so the three radar searches offered orders to riders an
+    administrator had suspended and to riders whose KYC was `pending`,
+    `unsubmitted` or explicitly `rejected`.
+
+    The route gates caught half of that: `get_verified_rider` refuses an
+    unapproved KYC at `POST /orders/{id}/accept`. Nothing refused a *suspended*
+    rider anywhere, so a suspension amounted to a toggle the rider could undo —
+    and the unapproved riders were still pushed the pickup address and the
+    customer's area for an order they could never take, while occupying slots in
+    a fan-out that is deliberately bounded (`RADAR_FANOUT_LIMIT`).
+
+    Spread into a query as `.where(*dispatchable_rider())`.
+
+    `is_active` is deliberately absent: it is overloaded — `create_deliverer`
+    defaults it to `False`, so it means "has not finished onboarding" as well as
+    "suspended". Filtering on it here would silently drop riders whose only
+    fault is a lifecycle flag, on the query that decides whether an order gets
+    delivered at all. `suspended_at` is written by exactly one place and means
+    exactly one thing.
+    """
+    return (
+        Deliverer.is_available.is_(True),
+        Deliverer.suspended_at.is_(None),
+        Deliverer.kyc_status == KYCStatus.approved,
+    )

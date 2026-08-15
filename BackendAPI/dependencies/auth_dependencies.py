@@ -9,7 +9,7 @@ from models.deliverer_model import Deliverer
 from models.user_model import User
 from models.vendor_model import Vendor
 from utils.verify_user_token import get_current_user
-from sqlalchemy import select, or_
+from sqlalchemy import select
 
 
 async def get_current_customer(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -34,7 +34,7 @@ async def get_current_vendor(user=Depends(get_current_user), db: AsyncSession = 
     which turned every authenticated vendor endpoint into a 500 the moment an
     owner opened a branch.
     """
-    from models.vendor_staff_model import VendorStaff
+    from models.vendor_staff_model import VendorStaff, live_grant
 
     clerk_id = user["sub"]
     owned = await db.execute(select(Vendor.id).where(Vendor.clerk_id == clerk_id).limit(1))
@@ -43,7 +43,7 @@ async def get_current_vendor(user=Depends(get_current_user), db: AsyncSession = 
 
     staffed = await db.execute(
         select(VendorStaff.id)
-        .where(VendorStaff.clerk_id == clerk_id, VendorStaff.revoked_at.is_(None))
+        .where(VendorStaff.clerk_id == clerk_id, *live_grant())
         .limit(1)
     )
     if staffed.scalars().first():
@@ -83,11 +83,11 @@ async def get_vendor_owner(user=Depends(get_current_user), db: AsyncSession = De
 
     # Distinguish a staff member from a stranger: the first is a real account
     # being told what it may not do, the second has no business here at all.
-    from models.vendor_staff_model import VendorStaff
+    from models.vendor_staff_model import VendorStaff, live_grant
 
     staff = await db.execute(
         select(VendorStaff.id)
-        .where(VendorStaff.clerk_id == clerk_id, VendorStaff.revoked_at.is_(None))
+        .where(VendorStaff.clerk_id == clerk_id, *live_grant())
         .limit(1)
     )
     if staff.scalars().first():
@@ -163,7 +163,7 @@ async def _resolve_access(
     confirming an id exists is itself a small leak, and the caller has no
     legitimate way to tell the two apart.
     """
-    from models.vendor_staff_model import VendorStaff
+    from models.vendor_staff_model import VendorStaff, live_grant
 
     store_id: UUID | None = None
     if requested:
@@ -196,7 +196,7 @@ async def _resolve_access(
         # No owned store. Distinguish a staff member — a real account being told
         # what it may not do — from someone with no vendor relationship at all.
         staff_probe = select(VendorStaff.id).where(
-            VendorStaff.clerk_id == clerk_id, VendorStaff.revoked_at.is_(None)
+            VendorStaff.clerk_id == clerk_id, *live_grant()
         )
         if store_id:
             staff_probe = staff_probe.where(VendorStaff.vendor_id == store_id)
@@ -215,11 +215,7 @@ async def _resolve_access(
     staff_query = (
         select(VendorStaff, Vendor)
         .join(Vendor, Vendor.id == VendorStaff.vendor_id)
-        .where(
-            VendorStaff.clerk_id == clerk_id,
-            VendorStaff.revoked_at.is_(None),
-            VendorStaff.is_active.is_(True),
-        )
+        .where(VendorStaff.clerk_id == clerk_id, *live_grant())
     )
     if store_id:
         staff_query = staff_query.where(Vendor.id == store_id)
@@ -309,13 +305,13 @@ async def staff_membership(db: AsyncSession, clerk_id: str, vendor_id: UUID):
     Used where a `Vendor` row is already in hand — the websocket and order-role
     helpers below — and by `clear_push_token`.
     """
-    from models.vendor_staff_model import VendorStaff
+    from models.vendor_staff_model import VendorStaff, live_grant
 
     result = await db.execute(
         select(VendorStaff).where(
             VendorStaff.vendor_id == vendor_id,
             VendorStaff.clerk_id == clerk_id,
-            VendorStaff.revoked_at.is_(None),
+            *live_grant(),
         )
     )
     return result.scalars().first()
@@ -359,6 +355,29 @@ async def get_verified_rider(user=Depends(get_current_user), db: AsyncSession = 
         raise HTTPException(status_code=403, detail="Access denied. Must be a registered rider.")
 
     from models.deliverer_model import KYCStatus
+
+    # Suspension first, and it outranks KYC. An administrator stopping a rider
+    # today is a different statement from a document review, and the rider needs
+    # to be told which one they are looking at — a suspended rider sent to
+    # VerificationWall would resubmit documents that were never the problem.
+    #
+    # This was enforced *nowhere* on the rider's operational path.
+    # `get_verified_rider` read only `kyc_status`; `toggle_availability` and
+    # `accept_delivery_radar` read only `is_available`, which is the rider's own
+    # toggle. So a suspension was a switch the suspended rider could flip back:
+    # go available, take the next radar offer, deliver. Only cash orders were
+    # refused, and only because `cod_policy` happened to read `suspended_at`.
+    if db_rider.is_suspended:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "type": "account_suspended",
+                "message": (
+                    db_rider.suspension_reason
+                    or "Your account has been suspended. Please contact support."
+                ),
+            },
+        )
 
     status = db_rider.kyc_status
     if status != KYCStatus.approved:

@@ -133,3 +133,40 @@ export function moneyRatio(
   if (denominator === 0n) return 0;
   return Number(toCents(part)) / Number(denominator);
 }
+
+/**
+ * What a product actually costs: `price − discount`, as a decimal string.
+ *
+ * Six screens wrote this inline as `Math.round((price - discount) * 100) / 100`
+ * on two fields the server sends as decimal strings — a float subtraction and
+ * then the round-trip through `* 100` that the whole of this module exists to
+ * avoid. It also hand-prefixed `KSH ` rather than going through `formatMoney`,
+ * so the same figure was grouped on some screens and not on others.
+ *
+ * Clamped at zero: a discount larger than the price is a data fault, and
+ * "KSH -20.00" on a shelf label is the worst possible way to surface it.
+ */
+export function discountedPrice(
+  price: string | number | null | undefined,
+  discount: string | number | null | undefined,
+): string {
+  const net = toCents(price) - toCents(discount);
+  return fromCents(net > 0n ? net : 0n);
+}
+
+/**
+ * The discount as a whole percentage, for the badge on a product card.
+ *
+ * A percentage is not money — it is a label — so this returns a number, and it
+ * rounds *down* so a 49.6% saving is never advertised as 50%.
+ */
+export function discountPercent(
+  price: string | number | null | undefined,
+  discount: string | number | null | undefined,
+): number {
+  const whole = toCents(price);
+  if (whole <= 0n) return 0;
+  const part = toCents(discount);
+  if (part <= 0n) return 0;
+  return Number((part * 100n) / whole);
+}

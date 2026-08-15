@@ -12,6 +12,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import DropButton from '@/components/ui/DropButton';
 import GlassCard from '@/components/ui/GlassCard';
 import { useLastOrderFromVendor } from '@/hooks/queries/useVendorFavorites';
+import { useVendorDetails } from '@/hooks/queries/useProducts';
 import { useAddToCart } from '@/hooks/queries/useCart';
 import { useUserDetails } from '@/hooks/queries/useUser';
 import { Toast } from '@/lib/toast';
@@ -30,14 +31,26 @@ export default function RepeatOrderScreen() {
   const { data: User } = useUserDetails();
 
   const { data: lastOrder, isLoading, isError } = useLastOrderFromVendor(vendorId || '');
+
+  /**
+   * The store's live trading state, for the closed notice below.
+   *
+   * That notice used to be handed `lastOrder.vendor`, which is an
+   * `OrderVendorSnippet` and carries none of `is_accepting_orders`,
+   * `store_state` or `store_reason` — so it read `undefined !== false`, returned
+   * null, and **had never once rendered on this screen**. This is the screen
+   * where it matters most: its whole purpose is to rebuild a basket in one tap,
+   * and doing that against a shut shop wastes every item added.
+   */
+  const { data: vendorDetails } = useVendorDetails(vendorId || '');
   const { mutateAsync: addToCartMutation, isPending: isOrdering } = useAddToCart();
 
   const handleRepeatOrder = async () => {
-    if (!lastOrder?.items?.length) return;
+    if (!lastOrder?.order_item?.length) return;
     try {
       // Add each item from the last order to the cart in parallel
       const results = await Promise.allSettled(
-        lastOrder.items.map((item: any) => 
+        lastOrder.order_item.map((item) => 
           addToCartMutation({
             id: item.product_id,
             quantity: item.quantity
@@ -45,7 +58,7 @@ export default function RepeatOrderScreen() {
         )
       );
       
-      const failed = results.filter(r => r.status === "rejected").length;
+      const failed = results.filter((r) => r.status === "rejected").length;
       fetchCart(); // reflect whatever DID succeed
       
       if (failed === 0) {
@@ -141,7 +154,7 @@ export default function RepeatOrderScreen() {
                       wasted version of the trip — every item added, then
                       refused at the last step. */}
                   <View className="mt-1">
-                    <StoreClosedNotice store={lastOrder.vendor} compact />
+                    <StoreClosedNotice store={vendorDetails} compact />
                   </View>
                 </View>
               </GlassCard>
@@ -150,8 +163,8 @@ export default function RepeatOrderScreen() {
               <View>
                 <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Order Details</Text>
                 <GlassCard darkTheme={darkTheme} className="p-4 gap-4">
-                  {lastOrder.items.map((item: any, index: number) => (
-                    <View key={item.id} className={`flex-row justify-between items-center ${index !== lastOrder.items.length - 1 ? "border-b pb-4" : ""} ${darkTheme ? "border-outline-variant/20" : "border-gray-100"}`}>
+                  {(lastOrder.order_item ?? []).map((item, index) => (
+                    <View key={item.id} className={`flex-row justify-between items-center ${index !== (lastOrder.order_item?.length ?? 0) - 1 ? "border-b pb-4" : ""} ${darkTheme ? "border-outline-variant/20" : "border-gray-100"}`}>
                       <View className="flex-row items-center gap-3 flex-1">
                         <View className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-surface-container-high" : "bg-white"}`}>
                           <Text className={`font-sans-bold ${darkTheme ? "text-primary" : "text-blue-600"}`}>{item.quantity}x</Text>
@@ -161,7 +174,7 @@ export default function RepeatOrderScreen() {
                         </Text>
                       </View>
                       <Text className={`font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
-                        {formatMoney(item.subtotal_at_order)}
+                        {formatMoney(item.Subtotal)}
                       </Text>
                     </View>
                   ))}
@@ -175,7 +188,7 @@ export default function RepeatOrderScreen() {
                   <View className="flex-row justify-between">
                     <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Subtotal</Text>
                     <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
-                      {formatMoney(sumMoney(lastOrder.items.map((i: any) => i.subtotal_at_order)))}
+                      {formatMoney(sumMoney((lastOrder.order_item ?? []).map((i) => i.Subtotal)))}
                     </Text>
                   </View>
                   <View className="flex-row justify-between">

@@ -379,8 +379,23 @@ def test_the_customer_order_filters_cover_every_status_the_backend_can_return():
     """Same rule on the customer's side, where the groups drive `?status=`."""
     from services.order_service import OrderStatusEnum
 
-    source = (ROOT / "drop-customer-app" / "hooks" / "queries" / "useOrders.ts").read_text()
-    table = source.split("ORDER_STATUS_GROUPS = {", 1)[1].split("} as const", 1)[0]
+    # The table moved out of `hooks/queries/useOrders.ts` and into
+    # `constants/orderStatus.ts`: it is a domain rule, not a hook, and keeping it
+    # beside the query meant that reading it pulled in Clerk and React Query.
+    # Located rather than hardcoded, so the next move does not silently turn this
+    # into a test of a file that no longer holds the table.
+    app = ROOT / "drop-customer-app"
+    candidates = [
+        path
+        for path in list((app / "constants").rglob("*.ts")) + list((app / "hooks").rglob("*.ts"))
+        if "__tests__" not in path.parts and "ORDER_STATUS_GROUPS = {" in path.read_text()
+    ]
+    assert len(candidates) == 1, (
+        "expected exactly one definition of ORDER_STATUS_GROUPS, found "
+        f"{[str(c.relative_to(ROOT)) for c in candidates]}"
+    )
+
+    table = candidates[0].read_text().split("ORDER_STATUS_GROUPS = {", 1)[1].split("} as const", 1)[0]
     covered = set(re.findall(r"'([a-z_]+)'", table))
 
     known = {member.value for member in OrderStatusEnum}

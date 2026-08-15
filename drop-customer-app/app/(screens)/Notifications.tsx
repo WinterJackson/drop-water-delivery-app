@@ -3,7 +3,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { NotificationItemSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useContext } from "react";
 import { RefreshControl, StatusBar, View } from "react-native";
 import { Text } from '@/components/ui/Text';
@@ -50,7 +50,12 @@ const Notifications = () => {
         // Whitelist safe route prefixes to prevent malicious deep links from backend payloads
         const allowedPrefixes = ["/(screens)", "/product-details", "/vendor"];
         if (allowedPrefixes.some(prefix => url.startsWith(prefix))) {
-            router.push(url as any);
+            // `Href`, not `any`. The destination is a string chosen by the
+            // server (`action_url`), so it cannot be one of the literals the
+            // generated route table lists — but narrowing it to the router's own
+            // parameter type still checks the *call*, and keeps the whitelist
+            // above as the only thing deciding what may be navigated to.
+            router.push(url as Href);
         } else {
             if (__DEV__) console.warn(`Blocked navigation to unsafe url: ${url}`);
         }

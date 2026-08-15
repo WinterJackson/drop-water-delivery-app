@@ -162,6 +162,19 @@ the binary floating-point error the backend goes out of its way to avoid.
 `BackendAPI/tests/test_money_serialisation.py` fails the build if a money field
 goes back to a float on the server side.
 
+**A product's price is `discountedPrice(price, discount)`.** Six screens wrote
+`Math.round((price - discount) * 100) / 100` inline and hand-prefixed `KSH `,
+which is a float subtraction plus the `* 100` round trip this module exists to
+prevent — on the figure a customer reads before deciding to buy. The badge is
+`discountPercent`, which rounds *down* so a 49.6% saving is never advertised as
+50%, and returns 0 rather than `NaN`/`Infinity` on a free or malformed product.
+
+**There is one `Order` and one `Product`, in `types/models.ts`.** There were two
+of each: a second pair declared inside `hooks/queries/useOrders.ts` and
+`useProducts.ts`, which is the pair most screens actually imported. They had
+drifted eighteen fields apart, and the hook's `Product` typed `price` and
+`discount` as `number`. The hooks re-export from `types/models.ts` now.
+
 **Never re-derive the order total.** `order.total_amount` is what the customer
 was charged, frozen at creation. `OrderCard` and `OrderDetail` both used to sum
 the component lines instead, and both left out the bottle deposit and any
@@ -273,3 +286,46 @@ cache fully populated for the next account on the device.
 `clearPushToken()` is the exception that must stay in the handlers: the endpoint
 is authenticated, so it has to run *before* `signOut()`. Skipping it leaves the
 device receiving the previous account's notifications.
+
+## Tests
+
+`pnpm test` runs the suite; `pnpm test:watch` while working; `pnpm test:coverage`
+for a report. Jest with the `jest-expo` preset, and `jest.setup.js` holds the
+environment — NetInfo is mocked there because `netBudget` subscribes to it at
+import time and a unit test must not need a device.
+
+What is covered, and why these and not others:
+
+- **`utils/money.ts`** — the highest-risk logic in the app. Written against the
+  arithmetic a float gets wrong (`0.10 + 0.20`, a hundred lines of `0.07`, a
+  figure past the safe integer range), because a suite of round numbers would
+  pass over a broken implementation.
+- **`API/errors.ts`** — that every failure reaches the user as the backend's own
+  sentence, that a 4xx is never retried, and that nothing renders as a bare
+  status code or `[object Object]`.
+- **`API/apiFetch.ts`** — the four things it adds over a bare `fetch`: a
+  timeout that actually aborts, HTTPS enforcement, `ApiError` normalisation, and
+  a caller's abort rethrown as-is so a debounced caller can ignore it.
+- **`API/netBudget.ts`** — that an upload always outlasts a write and a write a
+  read, on every connection class, and that a 2G cell gets three times the
+  patience of wifi.
+- **`utils/paging.ts`** — that the duplicate a shifting offset window produces is
+  dropped, and that a row with no id is kept rather than hidden.
+- **`components/ui/Text.tsx`** — both halves of the typography rule: the resolver,
+  and the components actually rendering with what it returned.
+- **`constants/orderStatus.ts`** — that the filter groups cover every status the
+  backend can return, that each status lands in exactly one group, and that the
+  cancellable set matches what `cancel_customer_order` will accept. These live in
+  `constants/` rather than in `useOrders` precisely so asserting them does not
+  require booting Clerk and React Query.
+
+Two things about writing more:
+
+- **`render` is asynchronous** in @testing-library/react-native v14. Without an
+  `await` you get "`render` function has not been called", which reads like a
+  setup fault rather than a missing await.
+- **A `jest.mock` factory may only close over names beginning with `mock`** —
+  the call is hoisted above the imports.
+
+`.github/workflows/ci.yml` runs this suite, `tsc`, the backend suite and the
+console build on every push and pull request.

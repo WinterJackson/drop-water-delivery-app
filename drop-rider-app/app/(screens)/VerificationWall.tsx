@@ -18,7 +18,7 @@ import { apiFetch } from '@/API/apiFetch';
 import { errorMessage } from '@/API/errors';
 
 export default function VerificationWall() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
   const router = useRouter();

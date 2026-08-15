@@ -277,9 +277,77 @@ the binary floating-point error the backend goes out of its way to avoid.
 `BackendAPI/tests/test_money_serialisation.py` fails the build if a money field
 goes back to a float on the server side.
 
+### The order the server sends is `OrderWithDetails`
+
+`RiderOrder` in `hooks/queries/useRiderData.ts` is the one declaration of it,
+and it described a response the server has never sent:
+
+- The customer is **`user`**, not `customer`. Two screens read `customer`, so
+  My Deliveries said "3 items for Customer" on every order on the platform and
+  the active-delivery search matched no name ever typed into it.
+- `delivery_type` was missing, so `activeOrder?.delivery_type === 'quick_swap'`
+  compared `undefined` and the empties counter opened at **0 on every swap
+  order** — the count the rider is asked to confirm, wrong by default on
+  precisely the orders where a count is the point.
+- `payment_method` was missing, and it is what draws the **Collect Cash**
+  banner.
+
+A rider's payout destinations and preferences are `RiderPayoutMethod[]` and
+`RiderPreferences`. The column is free-form JSONB, so those interfaces are the
+only description of it that exists anywhere on the platform — and they were
+`any[]` and `any`, on the thing a rider's money is sent to.
+
+**The vendor registration radius comes from the server too.** `GET
+/api/rider/discover-vendors` returns `registration_max_km` per row, computed
+from the same helper `apply_to_vendor` enforces with. `DiscoverVendors` compared
+every store against a literal `2.0`, so a wholesale depot 10 km away — which the
+server would have accepted at 15 km — was refused on the handset, for a rule the
+platform does not have.
+
 **The float a cash order commits** is `vendor_net + platform_total` — summed
 with `sumMoney` and compared with `compareMoney`. `TripRadar` had six copies of
 that expression in float, deciding both what the rider was told and whether the
 Accept button worked. The server refuses regardless (`cod_policy`); the screen
 only decides what it says before they tap.
 
+## Tests
+
+`pnpm test` runs the suite; `pnpm test:watch` while working; `pnpm test:coverage`
+for a report. Jest with the `jest-expo` preset, and `jest.setup.js` holds the
+environment — NetInfo is mocked there because `netBudget` subscribes to it at
+import time and a unit test must not need a device.
+
+What is covered, and why these and not others:
+
+- **`utils/money.ts`** — the highest-risk logic in the app. Written against the
+  arithmetic a float gets wrong (`0.10 + 0.20`, a hundred lines of `0.07`, a
+  figure past the safe integer range), because a suite of round numbers would
+  pass over a broken implementation.
+- **`API/errors.ts`** — that every failure reaches the user as the backend's own
+  sentence, that a 4xx is never retried, and that nothing renders as a bare
+  status code or `[object Object]`.
+- **`API/apiFetch.ts`** — the four things it adds over a bare `fetch`: a
+  timeout that actually aborts, HTTPS enforcement, `ApiError` normalisation, and
+  a caller's abort rethrown as-is so a debounced caller can ignore it.
+- **`API/netBudget.ts`** — that an upload always outlasts a write and a write a
+  read, on every connection class, and that a 2G cell gets three times the
+  patience of wifi.
+- **`utils/paging.ts`** — that the duplicate a shifting offset window produces is
+  dropped, and that a row with no id is kept rather than hidden.
+- **`components/ui/Text.tsx`** — both halves of the typography rule: the resolver,
+  and the components actually rendering with what it returned.
+- **`services/offlineQueue.ts`** — the most consequential rule in this app.
+  A completed delivery refused with a 4xx is *flagged*, never deleted; a 401 or
+  429 is retried rather than treated as a refusal; a transport failure stops the
+  whole flush instead of burning an attempt on every queued action at once.
+
+Two things about writing more:
+
+- **`render` is asynchronous** in @testing-library/react-native v14. Without an
+  `await` you get "`render` function has not been called", which reads like a
+  setup fault rather than a missing await.
+- **A `jest.mock` factory may only close over names beginning with `mock`** —
+  the call is hoisted above the imports.
+
+`.github/workflows/ci.yml` runs this suite, `tsc`, the backend suite and the
+console build on every push and pull request.

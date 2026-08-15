@@ -68,13 +68,32 @@ async def reversal_result_callback(request: Request, session: AsyncSession = Dep
         from models.order_model import Order
         from models.payment_model import Payment
 
-        pay_stmt = select(Payment).where(Payment.reversal_conversation_id == conversation_id)
+        # Locked, like every other M-Pesa callback: Safaricom retries this until
+        # it gets a 200, and two retries arriving together would both pass the
+        # state check below.
+        pay_stmt = (
+            select(Payment)
+            .where(Payment.reversal_conversation_id == conversation_id)
+            .with_for_update()
+        )
         pay_result = await session.execute(pay_stmt)
         matched_payment = pay_result.scalars().first()
 
         if not matched_payment:
             logger.warning(f"Reversal result: No matching payment found for ConversationID {conversation_id}")
             return {"message": "No matching payment found"}
+
+        # Already settled. Re-assigning the status is harmless — the reversal
+        # itself happens on Safaricom's side and cannot be done twice from here
+        # — but the success branch below tells the customer their money is back,
+        # and it did so once per retry. A duplicate "Refund Complete ✅" about
+        # money is the kind of message someone opens a ticket about.
+        if matched_payment.status in ("refunded", "refund_failed"):
+            logger.info(
+                "Reversal result for %s already recorded as '%s' — no-op.",
+                conversation_id, matched_payment.status,
+            )
+            return {"message": "Reversal result processed"}
 
         order_stmt = select(Order).where(Order.id == matched_payment.order_id)
         order_result = await session.execute(order_stmt)

@@ -1,3 +1,4 @@
+import type { VendorOrderStatus } from "@/types/models";
 import React, { useCallback, useContext, useState, memo } from "react";
 import {
     RefreshControl,
@@ -215,7 +216,7 @@ export default function Orders() {
     }
   }, [debouncedSearchQuery]);
 
-  const updateStatus = useCallback(async (orderId: string, status: string) => {
+  const updateStatus = useCallback(async (orderId: string, status: VendorOrderStatus) => {
     if (updatingOrder === orderId) return;
     if (!canManageOrders) {
       Toast.error("Not allowed", "Ask the store owner to enable order management for you.");

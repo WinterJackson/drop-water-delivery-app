@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.vendor_staff_model import (
     DEFAULT_PERMISSIONS,
     VendorStaff,
+    live_grant,
     normalise_permissions,
 )
 
@@ -278,11 +279,7 @@ async def bind_invitations_for_caller(session: AsyncSession, clerk_id: str) -> i
     Looking up the caller's *own* identity leaks nothing: they already know their
     email address.
     """
-    import asyncio
-
-    secret = os.getenv("CLERK_SECRET_KEY")
-    if not secret:
-        return 0
+    from utils.clerk_identity import verified_email_for
 
     # Cheap pre-check: no unbound invitations at all means no reason to call out.
     any_pending = await session.execute(
@@ -293,26 +290,10 @@ async def bind_invitations_for_caller(session: AsyncSession, clerk_id: str) -> i
     if not any_pending.scalars().first():
         return 0
 
-    def _email() -> str | None:
-        from clerk_backend_api import Clerk
-
-        clerk = Clerk(bearer_auth=secret)
-        user = clerk.users.get(user_id=clerk_id)
-        addresses = getattr(user, "email_addresses", None) or []
-        primary_id = getattr(user, "primary_email_address_id", None)
-        for address in addresses:
-            if getattr(address, "id", None) == primary_id:
-                return getattr(address, "email_address", None)
-        return getattr(addresses[0], "email_address", None) if addresses else None
-
-    try:
-        email = await asyncio.to_thread(_email)
-    except Exception as e:
-        # A failure here must not block sign-in. The invitation stays pending
-        # and binds on the next attempt.
-        logger.warning("STAFF_BIND_LOOKUP_FAILED clerk=%s: %s", clerk_id, e)
-        return 0
-
+    # One implementation of "which mailbox does this caller demonstrably hold?",
+    # shared with the admin invite path — see `utils/clerk_identity`. Both had a
+    # private copy, and both accepted an unverified address.
+    email = await verified_email_for(clerk_id)
     if not email:
         return 0
     return await bind_pending_invitations(session, clerk_id=clerk_id, email=email)
@@ -344,8 +325,8 @@ async def push_tokens_for_store(session: AsyncSession, vendor_id: UUID, permissi
     result = await session.execute(
         select(VendorStaff).where(
             VendorStaff.vendor_id == vendor_id,
-            VendorStaff.revoked_at.is_(None),
             VendorStaff.push_token.isnot(None),
+            *live_grant(),
         )
     )
     return [
@@ -372,7 +353,7 @@ async def is_store_member(session: AsyncSession, clerk_id: str | None, vendor) -
         .where(
             VendorStaff.vendor_id == vendor.id,
             VendorStaff.clerk_id == clerk_id,
-            VendorStaff.revoked_at.is_(None),
+            *live_grant(),
         )
         .limit(1)
     )
@@ -383,7 +364,7 @@ async def staffed_vendor_ids(session: AsyncSession, clerk_id: str) -> list:
     """Ids of every store this person staffs (not owns)."""
     result = await session.execute(
         select(VendorStaff.vendor_id).where(
-            VendorStaff.clerk_id == clerk_id, VendorStaff.revoked_at.is_(None)
+            VendorStaff.clerk_id == clerk_id, *live_grant()
         )
     )
     return list(result.scalars().all())

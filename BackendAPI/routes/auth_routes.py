@@ -111,7 +111,7 @@ def sanitize_phone_number(phone: str) -> str:
 
 # Import limiter from main app
 from core.redis_client import redis_limiter as limiter
-from sqlalchemy import select, or_
+from sqlalchemy import select
 
 # CREATE USER 
 @router.post("/create_user")
@@ -275,8 +275,16 @@ async def register_vendor(request: Request, vendor_data: CreateVendor, session: 
     if vendor_data.business_license:
         existing_vendor.business_license = vendor_data.business_license
     
-    # Auto-activate vendor instantly after onboarding
-    existing_vendor.verification_status = "verified"
+    # Auto-verify on completing onboarding — but never overwrite a decision an
+    # administrator has already made about this store. A vendor whose
+    # verification was *rejected*, or who has been suspended, could otherwise
+    # re-post the onboarding form and relabel themselves "verified": the console
+    # then lists them as approved, and `broadcast_service` targets them as a
+    # verified store. It does not reopen the ordering path — `is_active` is
+    # untouched and `vendor_availability` reads that — but an administrator's
+    # decision silently rewritten by its subject is its own defect.
+    if existing_vendor.verification_status != "rejected" and existing_vendor.suspended_at is None:
+        existing_vendor.verification_status = "verified"
     await session.commit()
     await session.refresh(existing_vendor)
     return {"message" : "Vendor updated successfully", "data": safe_serialize(existing_vendor)}
@@ -313,9 +321,15 @@ async def register_rider(request: Request, rider_data: CreateDeliverer, session:
     if rider_data.plate_number:
         existing_rider.plate_number = rider_data.plate_number
     
-    # Auto-activate rider instantly after onboarding
-    existing_rider.is_active = True
-    existing_rider.is_verified = True
+    # Auto-activate on completing onboarding — but never *re*-activate an account
+    # an administrator stopped. This branch runs whenever the rider app posts its
+    # onboarding form, which a suspended rider can do at any time, so an
+    # unconditional write here let them clear half of their own suspension:
+    # `is_active` went back to True while `suspended_at` stayed set, leaving the
+    # two columns contradicting each other with nothing to say which was meant.
+    if not existing_rider.is_suspended:
+        existing_rider.is_active = True
+        existing_rider.is_verified = True
     await session.commit()
     await session.refresh(existing_rider)
     return {"message" : "Rider updated successfully", "data": safe_serialize(existing_rider)}

@@ -11,7 +11,7 @@ import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useQueryClient } from "@tanstack/react-query";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
-import { useRiderProfile } from "@/hooks/queries/useRiderData";
+import { useRiderProfile, type RiderPayoutMethod } from "@/hooks/queries/useRiderData";
 import { Toast } from "@/lib/toast";
 import { Ionicons } from "@expo/vector-icons";
 import { Popup } from "@/lib/popup";
@@ -77,7 +77,7 @@ export default function BankDetails() {
             return;
         }
 
-        const isDuplicate = paymentMethods.some((pm: any) => pm.phone === phoneTrimmed);
+        const isDuplicate = paymentMethods.some((pm) => pm.phone === phoneTrimmed);
         if (isDuplicate) {
             Toast.error("Duplicate", "This payout method is already added.");
             return;
@@ -85,7 +85,7 @@ export default function BankDetails() {
 
         setIsSaving(true);
         try {
-            const newMethods = [...paymentMethods, {
+            const newMethods: RiderPayoutMethod[] = [...paymentMethods, {
                 type: "mpesa",
                 phone: phoneTrimmed,
                 isDefault: paymentMethods.length === 0

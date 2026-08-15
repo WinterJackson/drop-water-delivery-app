@@ -162,6 +162,22 @@ goes back to a float on the server side.
 The order detail summed the lines above it, omitting the deposit and any settled
 balance, so the store's screen disagreed with the customer's about one order.
 
+### A rider's live position is the socket's, and nothing else
+
+`MyMap` drew the rider marker from `order.deliverer.current_lat` / `current_lng`
+whenever no socket was delivering. `OrderDelivererSnippet` carries `id`,
+`full_name`, `phone_number` and `vehicle_details` — those two fields have never
+been on the wire, so the "last known position" fallback was unreachable and the
+"No GPS Signal" line beside it was the only branch that ever ran.
+
+The same screen read `order.deliverer.name` and `order.user.name`; both are
+`full_name`. The dispatch list therefore showed "Waiting for Rider" for a rider
+who had been assigned for an hour, and the search matched no name.
+
+`types/models.ts` mirrors `schemas/order_schema.py` field for field. This app had
+no domain types at all until recently, which is how four fields the server does
+not send came to be read on the map a shop watches its deliveries on.
+
 ### 6. Access Control
 - The server decides. `get_vendor_owner` / `get_owned_store` gate every route
   that changes what the business *is* or moves its money; hiding a button is a
@@ -346,3 +362,47 @@ start without was the one path never checked against the server. An
 interpolated base URL is not configuration, it is a path built outside the
 table; `test_no_screen_builds_a_backend_path_inline` now matches a `}` before
 `/api/` as well as a quote, which is what found the other two.
+
+## Tests
+
+`pnpm test` runs the suite; `pnpm test:watch` while working; `pnpm test:coverage`
+for a report. Jest with the `jest-expo` preset, and `jest.setup.js` holds the
+environment — NetInfo is mocked there because `netBudget` subscribes to it at
+import time and a unit test must not need a device.
+
+What is covered, and why these and not others:
+
+- **`utils/money.ts`** — the highest-risk logic in the app. Written against the
+  arithmetic a float gets wrong (`0.10 + 0.20`, a hundred lines of `0.07`, a
+  figure past the safe integer range), because a suite of round numbers would
+  pass over a broken implementation.
+- **`API/errors.ts`** — that every failure reaches the user as the backend's own
+  sentence, that a 4xx is never retried, and that nothing renders as a bare
+  status code or `[object Object]`.
+- **`API/apiFetch.ts`** — the four things it adds over a bare `fetch`: a
+  timeout that actually aborts, HTTPS enforcement, `ApiError` normalisation, and
+  a caller's abort rethrown as-is so a debounced caller can ignore it.
+- **`API/netBudget.ts`** — that an upload always outlasts a write and a write a
+  read, on every connection class, and that a 2G cell gets three times the
+  patience of wifi.
+- **`utils/paging.ts`** — that the duplicate a shifting offset window produces is
+  dropped, and that a row with no id is kept rather than hidden.
+- **`components/ui/Text.tsx`** — both halves of the typography rule: the resolver,
+  and the components actually rendering with what it returned.
+- **`constants/orderStatus.ts`** — that every status has a pill, that an unknown
+  one degrades to something readable rather than "Unknown", that the two review
+  states carry an explanation, and that `ORDER_FILTERS` sends enum values rather
+  than labels (a label matches nothing and shows the vendor an empty list).
+- **`API/apiFetch.ts`** also covers `X-Store-Id`: sent when a store is named,
+  omitted when it is not, because `GET /api/vendor/stores` must not be scoped.
+
+Two things about writing more:
+
+- **`render` is asynchronous** in @testing-library/react-native v14. Without an
+  `await` you get "`render` function has not been called", which reads like a
+  setup fault rather than a missing await.
+- **A `jest.mock` factory may only close over names beginning with `mock`** —
+  the call is hoisted above the imports.
+
+`.github/workflows/ci.yml` runs this suite, `tsc`, the backend suite and the
+console build on every push and pull request.

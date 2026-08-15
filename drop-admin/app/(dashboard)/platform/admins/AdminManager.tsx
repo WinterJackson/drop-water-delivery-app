@@ -11,6 +11,7 @@ import {
   Field,
   inputClass,
 } from "@/components/ui/primitives";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { timeAgo } from "@/lib/utils/format";
 import { inviteAdmin, revokeAdmin, updateAdmin } from "./actions";
 
@@ -322,30 +323,51 @@ function EditForm({
 
 function RevokeButton({ admin, isSelf }: { admin: AdminRow; isSelf: boolean }) {
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function submit() {
-    // A destructive, immediate action gets a confirmation naming the person —
-    // "are you sure" with no subject is what gets clicked through.
-    const confirmed = window.confirm(
-      `Remove ${admin.name ?? admin.email} from this console?\n\n` +
-        "They lose access on their next request. Everything they've already done stays in the audit log.",
-    );
-    if (!confirmed) return;
-
     setError(null);
     startTransition(async () => {
       const result = await revokeAdmin(admin.id);
-      if (!result.ok) setError(result.error);
+      if (result.ok) setAsking(false);
+      else setError(result.error);
     });
   }
 
   return (
     <div className="text-right">
+      {/* A destructive, immediate action gets a confirmation naming the person —
+          "are you sure" with no subject is what gets clicked through. */}
+      <ConfirmDialog
+        open={asking}
+        tone="danger"
+        title={`Remove ${admin.name ?? admin.email}?`}
+        body={
+          <>
+            <p>
+              They lose access to this console on their next request — there is no
+              grace period and no notification.
+            </p>
+            <p>
+              Everything they have already done stays in the audit log, attributed
+              to them.
+            </p>
+          </>
+        }
+        confirmLabel="Remove access"
+        pending={pending}
+        error={error}
+        onConfirm={submit}
+        onCancel={() => {
+          setAsking(false);
+          setError(null);
+        }}
+      />
       <Button
         size="sm"
         variant="ghost"
-        onClick={submit}
+        onClick={() => setAsking(true)}
         // The server refuses this too; disabling it just avoids offering an
         // action that always fails.
         disabled={pending || isSelf}

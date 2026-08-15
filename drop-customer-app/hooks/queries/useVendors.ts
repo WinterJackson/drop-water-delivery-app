@@ -1,3 +1,4 @@
+import type { Vendor } from '@/types/models';
 import { retryTransientOnly } from '@/API/errors';
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
@@ -10,9 +11,10 @@ import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-q
  * `/api/vendors` returns a `{data, total, …}` envelope while the proximity
  * endpoints return bare arrays, so every hook normalises with `unwrap`.
  */
-function unwrap<T = any>(payload: any): T[] {
+function unwrap<T>(payload: unknown): T[] {
     if (Array.isArray(payload)) return payload as T[];
-    if (payload && Array.isArray(payload.data)) return payload.data as T[];
+    const data = (payload as { data?: unknown } | null)?.data;
+    if (Array.isArray(data)) return data as T[];
     return [];
 }
 
@@ -22,7 +24,7 @@ export function useAllVendors() {
     const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'all'],
-        queryFn: async () => unwrap(await api.get(ROUTES.GET_VENDORS)),
+        queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
     });
 }
@@ -31,7 +33,7 @@ export function useNearByVendors() {
     const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'nearby'],
-        queryFn: async () => unwrap(await api.get(ROUTES.GET_NEARBY_VENDORS)),
+        queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_NEARBY_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
     });
@@ -41,7 +43,7 @@ export function useTopRatedVendors() {
     const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'topRated'],
-        queryFn: async () => unwrap(await api.get(ROUTES.GET_TOP_RATED_VENDORS)),
+        queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_TOP_RATED_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
     });
@@ -61,7 +63,7 @@ export function useTopBrandsVendors() {
     const api = useApiRequest();
     return useQuery({
         queryKey: ['vendors', 'topBrands'],
-        queryFn: async () => unwrap(await api.get(ROUTES.GET_TOP_BRAND_VENDORS)),
+        queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_TOP_BRAND_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
     });
 }
@@ -81,11 +83,11 @@ export const DIRECTORY_PAGE_SIZE = 20;
  */
 export function useVendorDirectory(searchQuery: string = '', filter: string = 'all') {
     const api = useApiRequest();
-    return useInfiniteQuery<any[], Error>({
+    return useInfiniteQuery<Vendor[], Error>({
         queryKey: ['vendors', 'directory', searchQuery, filter],
         initialPageParam: 0,
         queryFn: async ({ pageParam }) =>
-            unwrap(
+            unwrap<Vendor>(
                 await api.get(ROUTES.GET_VENDOR_DIRECTORY, {
                     params: {
                         limit: DIRECTORY_PAGE_SIZE,
@@ -95,13 +97,13 @@ export function useVendorDirectory(searchQuery: string = '', filter: string = 'a
                     },
                 })
             ),
-        getNextPageParam: nextOffset<any>(DIRECTORY_PAGE_SIZE),
+        getNextPageParam: nextOffset<Vendor>(DIRECTORY_PAGE_SIZE),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
     });
 }
 
 /** Every store fetched so far, nearest first, each appearing once. */
-export function directoryRows(data: InfiniteData<any[]> | undefined): any[] {
-    return flattenPages<any>(data);
+export function directoryRows(data: InfiniteData<Vendor[]> | undefined): Vendor[] {
+    return flattenPages<Vendor>(data);
 }

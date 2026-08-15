@@ -11,7 +11,7 @@ from core.redis_client import cache_get, cache_set
 router = APIRouter()
 # GET ALL VENDORS 
 @router.get("/vendors")
-async def fetch_all_vendors(session: AsyncSession = Depends(get_db), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
+async def fetch_all_vendors(session: AsyncSession = Depends(get_db), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), user = Depends(get_current_customer)):
   cache_key = f"all_vendors_{limit}_{offset}"
   cached_response = await cache_get(cache_key)
   if cached_response:
@@ -55,7 +55,7 @@ async def top_rated_vendors( db: AsyncSession = Depends(get_db), user = Depends(
 
 # GET VENDOR BY ID FOR THE VENDOR PROFILE 
 @router.post("/vendor_details_and_products", response_model= VendorWithProductsFull)
-async def get_vendor_by_id(request_body: RequestBodyVendorId, db : AsyncSession = Depends(get_db) ):
+async def get_vendor_by_id(request_body: RequestBodyVendorId, db : AsyncSession = Depends(get_db), user = Depends(get_current_customer) ):
   vendor = await get_vendor_by_id_service(session=db, id=request_body.id)
   if not vendor:
     raise HTTPException(status_code=404, detail="Vendor details Do not exist")

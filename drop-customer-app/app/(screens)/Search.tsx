@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useDebounce } from "@/hooks/useDebounce";
 import { flattenPages } from "@/utils/paging";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
-import { formatMoney } from "@/utils/money";
+import { discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
 
 const PRODUCT_CATEGORIES = [
 	{ id: 'all', label: 'All Products' },
@@ -414,7 +414,7 @@ export default function Search() {
 
 										if (item.isProduct) {
 											const product = item;
-											const displayPrice = Math.round((product.price - (product.discount || 0)) * 100) / 100;
+											const displayPrice = discountedPrice(product.price, product.discount);
 											return (
 												<PressableScale
 													activeOpacity={0.7}
@@ -441,7 +441,7 @@ export default function Search() {
 														</View>
 														<View className="items-end">
 															<Text className="font-sans-bold text-green-500">{formatMoney(displayPrice)}</Text>
-															{product.discount > 0 && (
+															{!isZeroMoney(product.discount) && (
 																<Text className="text-xs text-red-400 line-through">{formatMoney(product.price)}</Text>
 															)}
 														</View>

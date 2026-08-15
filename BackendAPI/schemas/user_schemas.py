@@ -3,9 +3,7 @@ from pydantic import field_validator
 from utils.s3_utils import public_asset_url
 from decimal import Decimal
 from utils.money import MoneyField
-from pydantic import BaseModel, EmailStr
-from datetime import time
-from typing import List, Optional, Any
+from pydantic import BaseModel
 
 class BaseUser(BaseModel):
     clerk_id: str | None = None

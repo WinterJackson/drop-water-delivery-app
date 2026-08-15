@@ -58,7 +58,7 @@ export default function ForgotPassword() {
             });
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             setSuccessfulCreation(true);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (isClerkAPIResponseError(err)) {
                 setErrors(err.errors.map((e: any) => e.longMessage).join(", "));
             } else {
@@ -89,7 +89,7 @@ export default function ForgotPassword() {
                 setErrors("Reset failed. Please check your inputs.");
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (isClerkAPIResponseError(err)) {
                 setErrors(err.errors.map((e: any) => e.longMessage).join(", "));
             } else {

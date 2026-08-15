@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import re
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from dependencies.dependencies import get_db
@@ -593,22 +594,80 @@ async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), s
             from utils.redaction import redact_phone
             logger.info(f"M-PESA Payment Verified: receipt={receipt}, amount={callback_amount}, phone={redact_phone(str(callback_phone))}")
 
-            # --- Create Payment audit record for successful transaction ---
+            # --- Idempotency, keyed on the collection itself ------------------
+            #
+            # Safaricom retries this callback until it gets a 200, and the client
+            # polls `/confirm_payment` every few seconds in parallel. Both mark
+            # the order paid through `update_orders_payment_status_by_checkout_id`,
+            # which is idempotent under a row lock — so the *side effects* were
+            # safe. Everything in this handler around that call was not.
+            #
+            # The poll usually wins, and then the status update returns early —
+            # before its own `commit()` — so the `Payment` row added here was
+            # never flushed. The payments audit table was therefore missing rows
+            # for precisely the ordinary case, and the customer got another
+            # confirmation email on every retry.
+            #
+            # `checkout_request_id` is UNIQUE, so it is the natural idempotency
+            # key: one row per collection attempt, updated rather than inserted
+            # twice, and committed here rather than riding on somebody else's
+            # transaction.
             from models.payment_model import Payment
-            payment = Payment(
-                order_id=order.id,
-                checkout_request_id=checkout_request_id,
-                mpesa_receipt=receipt,
-                phone=callback_phone,
-                amount=callback_amount,
-                status="paid",
-            )
-            db.add(payment)
+
+            existing = (
+                await db.execute(
+                    sa_select(Payment).where(Payment.checkout_request_id == checkout_request_id)
+                )
+            ).scalars().first()
+
+            if existing is not None and existing.status == "paid":
+                logger.info(
+                    "M-PESA callback for %s already recorded as paid — no-op.",
+                    checkout_request_id,
+                )
+                return {"message": "Callback received"}
+
+            if existing is not None:
+                # A `failed` row for this attempt, now superseded by a success.
+                existing.order_id = order.id
+                existing.mpesa_receipt = receipt
+                existing.phone = callback_phone
+                existing.amount = Decimal(str(callback_amount))
+                existing.status = "paid"
+                existing.failure_reason = None
+            else:
+                db.add(
+                    Payment(
+                        order_id=order.id,
+                        checkout_request_id=checkout_request_id,
+                        mpesa_receipt=receipt,
+                        phone=callback_phone,
+                        # `Decimal(str(...))`, never the raw JSON number: this is
+                        # money, and `amount` is a NUMERIC column. A float here is
+                        # the same defect the rest of the platform goes out of its
+                        # way to avoid, with nothing to grep for.
+                        amount=Decimal(str(callback_amount)),
+                        status="paid",
+                    )
+                )
+
+            # Commit the audit row on its own, so it survives regardless of
+            # whether the transition below finds the order already settled.
+            await db.commit()
+
+            # Did *this* call settle the order? The status update is a no-op when
+            # the poll got there first, and the follow-up work below — an email
+            # to the customer, purging their cart — must happen once, not once
+            # per retry.
+            settled_here = order.payment_status != "paid"
 
             await update_orders_payment_status_by_checkout_id(
                 session=db, checkout_request_id=checkout_request_id, new_status="paid"
             )
-            
+
+            if not settled_here:
+                return {"message": "Callback received"}
+
             # --- Send Order Confirmation Email ---
             try:
                 from models.user_model import User
@@ -656,7 +715,8 @@ async def mpesa_callback(request: Request, db: AsyncSession = Depends(get_db), s
                     order_id=order.id if order else None,
                     checkout_request_id=checkout_request_id,
                     phone=order.phone if order else "unknown",
-                    amount=float(order.total_amount) if order else 0,
+                    # Money, on a NUMERIC column — see the success branch above.
+                    amount=Decimal(str(order.total_amount)) if order else Decimal("0"),
                     status="failed",
                     failure_reason=result_desc,
                 )

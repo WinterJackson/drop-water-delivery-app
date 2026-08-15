@@ -315,7 +315,7 @@ export default function Orders() {
                   <Text className="font-sans-semibold">Fee: </Text>{formatMoney(item.delivery_fee)}
                 </Text>
                 <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                  {item.order_item?.length || 0} items for {item.customer?.name || "Customer"}
+                  {item.order_item?.length || 0} items for {item.user?.full_name || "Customer"}
                 </Text>
               </View>
             </View>

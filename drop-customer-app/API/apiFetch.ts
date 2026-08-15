@@ -98,12 +98,12 @@ export async function apiFetch<T = unknown>(
       },
       body: formData ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     // A caller-initiated abort is not a failure to report — rethrow it as-is so
     // a debounced caller can recognise and ignore it.
     if (signal?.aborted) throw e;
     throw new ApiError(
-      e?.name === "AbortError"
+      e instanceof Error && e.name === "AbortError"
         ? "The request timed out. Please try again."
         : "We couldn't reach the server. Check your connection and try again.",
       0

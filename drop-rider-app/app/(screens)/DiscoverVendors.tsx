@@ -14,7 +14,7 @@ import { Toast } from "@/lib/toast";
 import { useRiderStore } from "@/stores/useRiderStore";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
 import { BRAND } from "@/constants/brandColors";
-import { FlashList as OriginalFlashList } from "@shopify/flash-list";
+import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { RiderDiscoverVendorCardSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { darkMapStyle, standardMapStyle } from "@/constants/mapStyles";
@@ -22,12 +22,43 @@ import { trackEvent } from "@/utils/analytics";
 import { Popup } from "@/lib/popup";
 import { useDebounce } from "@/hooks/useDebounce";
 
-const FlashList = OriginalFlashList as any;
+/**
+ * One row of `GET /api/rider/discover-vendors`.
+ *
+ * `registration_max_km` is the limit the *server* will enforce when this rider
+ * applies, for this store's type. The screen used to compare every row against
+ * a literal `2.0`, so a wholesale depot 10 km away — which the server would have
+ * accepted at 15 km — was shown as "Too Far". A refusal invented on the handset
+ * for a rule the platform does not have.
+ */
+export interface DiscoveredVendor {
+    id: string;
+    business_name: string;
+    address: string | null;
+    profile_pic: string | null;
+    distance_km: number;
+    /** `vendor_rider_model.status`, plus the `unregistered` the listing synthesises. */
+    status: "unregistered" | "pending" | "approved" | "rejected" | "suspended";
+    lat: number | null;
+    lng: number | null;
+    vendor_type: string | null;
+    registration_max_km: number;
+}
 
-let MapView: any = null;
-let Marker: any = null;
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+import type MapViewType from 'react-native-maps';
+import type {
+    LatLng,
+    MapMarkerProps,
+    MapUrlTileProps,
+    MapViewProps,
+    Provider,
+} from 'react-native-maps';
+
+/** Driven by ref (`getCamera`, `animateToRegion`), so `ref` is part of the props. */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }>;
+let Marker: React.ComponentType<MapMarkerProps>;
+let UrlTile: React.ComponentType<MapUrlTileProps>;
+let PROVIDER_GOOGLE: Provider;
 
 if (Platform.OS !== 'web') {
     const maps = require('react-native-maps');
@@ -36,27 +67,27 @@ if (Platform.OS !== 'web') {
     UrlTile = maps.UrlTile;
     PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
 } else {
-    MapView = ({ style, children }: any) => <View style={style}>{children}</View>;
+    MapView = ({ style, children }: MapViewProps) => <View style={style}>{children}</View>;
     Marker = () => null;
     UrlTile = () => null;
     PROVIDER_GOOGLE = 'google';
 }
 
 export default function DiscoverVendors() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
   const { get, post } = useApiRequest();
   const router = useRouter();
   const { data: profile, isLoading: isProfileLoading } = useRiderProfile();
   
-  const [vendors, setVendors] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<DiscoveredVendor[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingLoc, setLoadingLoc] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isMapView, setIsMapView] = useState(false);
-  const [userLocation, setUserLocation] = useState<any>(null);
-  const mapRef = useRef<any>(null);
+  const [userLocation, setUserLocation] = useState<LatLng | null>(null);
+  const mapRef = useRef<MapViewType | null>(null);
   
   const handleZoom = async (zoomIn: boolean) => {
     if (!mapRef.current || Platform.OS === 'web') return;
@@ -90,7 +121,7 @@ export default function DiscoverVendors() {
 
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
-  const activeVendorCount = vendors.filter((v: any) => v.status === "pending" || v.status === "approved").length;
+  const activeVendorCount = vendors.filter((v) => v.status === "pending" || v.status === "approved").length;
 
   /**
    * Which search this component is currently showing.
@@ -107,7 +138,7 @@ export default function DiscoverVendors() {
     const term = search ?? "";
     inFlightFor.current = term;
     try {
-      const rows = await get<any[]>(RiderApiRoutes.DiscoverVendors(lat, lng, search).path);
+      const rows = await get<DiscoveredVendor[]>(RiderApiRoutes.DiscoverVendors(lat, lng, search).path);
       if (inFlightFor.current !== term) return;
       setVendors(rows);
     } catch (e) {
@@ -188,7 +219,7 @@ export default function DiscoverVendors() {
     });
   };
 
-  const renderVendorCard = ({ item }: { item: any }) => (
+  const renderVendorCard = ({ item }: { item: DiscoveredVendor }) => (
     <View className={`p-4 mb-4 rounded-2xl flex-row items-center ${darkTheme ? "bg-white/5" : "bg-white"}`}>
       <View className="w-14 h-14 rounded-full bg-accentbg/10 mr-4 overflow-hidden border border-accentbg/20">
         {item.profile_pic ? (
@@ -209,7 +240,7 @@ export default function DiscoverVendors() {
          <View className="flex-row mt-3">
             {item.status === "unregistered" && (
               <>
-                {parseFloat(item.distance_km) > 2.0 ? (
+                {item.distance_km > item.registration_max_km ? (
                   <View className="flex-1 py-2.5 rounded-lg bg-gray-500/10 border border-gray-500/20 items-center">
                     <Text className="text-gray-500 font-sans-semibold text-sm">Too Far ({item.distance_km} KM)</Text>
                   </View>
@@ -323,7 +354,10 @@ export default function DiscoverVendors() {
                 // 🔴 PRODUCTION GOOGLE MAPS MODE
                 //    Swap the line above for this one:
                 provider={PROVIDER_GOOGLE}
-                mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                // the prop every map screen in all three apps passed was dropped and cloud
+                // styling has never once been applied. A misspelt prop is silent here.
+                googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                 zoomControlEnabled={false}
                 showsUserLocation={true}
@@ -346,7 +380,7 @@ export default function DiscoverVendors() {
                 {/* 🟢 OSM TILE OVERLAY (Remove this block when using Google Maps) */}
                 {/* {UrlTile && <UrlTile urlTemplate={darkTheme ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png" : "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"} maximumZ={20} />} */}
                 {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-                {vendors.map((vendor: any) => (
+                {vendors.map((vendor) => (
                   <Marker
                     key={vendor.id}
                     coordinate={{ latitude: Number(vendor.lat), longitude: Number(vendor.lng) }}
@@ -385,7 +419,7 @@ export default function DiscoverVendors() {
         ) : (
           <FlashList
             data={vendors}
-            keyExtractor={(item: any) => item.id}
+            keyExtractor={(item: DiscoveredVendor) => item.id}
             renderItem={renderVendorCard}
             contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

@@ -593,3 +593,171 @@ def test_the_orders_envelope_is_not_a_fake_infinite_query():
     fields = set(PaginatedOrders.model_fields)
     assert "pages" not in fields
     assert {"items", "limit", "offset", "has_more"} <= fields
+
+
+# ── Registration resolves by ownership, not by reachability ───────────────
+# `POST /api/vendor/register` upserts `business_name`, `phone_number` and
+# `vendor_type` onto whatever store it resolves. It resolved with
+# `get_vendor_by_clerk_id`, whose filter is `owned OR staffed` — so a staff
+# token rewrote the *owner's* business: its name, its contact number, and the
+# type that decides both the commission rate and the service radius. Precisely
+# what `PUT /profile` is owner-gated to prevent, reachable by anyone handed the
+# till, and invisible to the inventory above because the route is classified
+# staff-allowed (it is how a new vendor registers at all).
+
+
+def test_registration_does_not_resolve_a_store_through_the_staff_filter():
+    """Structural, because the defect was one function call — as in payouts."""
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "services"
+        / "vendor_management_service.py"
+    ).read_text()
+    tree = ast.parse(source)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef) or node.name != "register_vendor":
+            continue
+        called = {
+            n.func.id
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        assert "get_vendor_by_clerk_id" not in called, (
+            "register_vendor must not resolve a store with the staff-inclusive "
+            "lookup — its upsert writes the business name, phone number and "
+            "vendor type, so that let a staff member redefine the owner's store"
+        )
+        body = ast.get_source_segment(source, node)
+        assert "Vendor.clerk_id == clerk_id" in body, (
+            "expected registration to resolve the caller's own store by ownership"
+        )
+        return
+
+    pytest.fail("register_vendor not found")
+
+
+def test_neither_vendor_registration_path_uses_scalar_one_or_none():
+    """A `Vendor` row is a store, not an account, and an owner may hold several.
+
+    `get_existing_vendor` backs `POST /api/auth/create_vendor` — the endpoint
+    the vendor app's onboarding actually posts to — and used
+    `scalar_one_or_none()`, which raises `MultipleResultsFound` on the second
+    store. An owner who had opened a branch got a 500 from the one screen they
+    cannot get past.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for module, function in (
+        ("services/vendor_auth_service.py", "get_existing_vendor"),
+        ("services/vendor_management_service.py", "register_vendor"),
+    ):
+        source = (root / module).read_text()
+        tree = ast.parse(source)
+        found = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef) or node.name != function:
+                continue
+            found = True
+            calls = {
+                n.func.attr
+                for n in ast.walk(node)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            }
+            assert "scalar_one_or_none" not in calls, (
+                f"{module}:{function} raises MultipleResultsFound on an owner's "
+                "second store"
+            )
+        assert found, f"{function} not found in {module}"
+
+
+# ── One predicate for "may this person act on this store?" ────────────────
+
+
+def test_every_access_query_reads_both_columns_of_a_live_grant():
+    """`revoked_at` and `is_active` both decide access, so both must be read.
+
+    `revoke()` sets them together, so today they never disagree — but only
+    `_resolve_access` spelled out both. Everything else checked `revoked_at`
+    alone, including `staff_membership`, which backs `resolve_order_role` and
+    `owns_entity` — the **websocket** path. Deactivating a member without
+    revoking them would have refused them over REST while leaving them
+    subscribed to the store's live orders.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    #: (module, function) for every query that decides whether someone may act.
+    #: Roster queries are deliberately absent: `list_staff` and `_get_member`
+    #: must still return a suspended member, or the owner cannot restore them.
+    ACCESS_QUERIES = (
+        ("dependencies/auth_dependencies.py", "get_current_vendor"),
+        ("dependencies/auth_dependencies.py", "get_vendor_owner"),
+        ("dependencies/auth_dependencies.py", "_resolve_access"),
+        ("dependencies/auth_dependencies.py", "staff_membership"),
+        ("services/vendor_staff_service.py", "is_store_member"),
+        ("services/vendor_staff_service.py", "staffed_vendor_ids"),
+        ("services/vendor_staff_service.py", "push_tokens_for_store"),
+    )
+
+    offenders = []
+    for module, function in ACCESS_QUERIES:
+        source = (root / module).read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef) or node.name != function:
+                continue
+            body = ast.get_source_segment(source, node)
+            if "live_grant()" not in body:
+                offenders.append(f"{module}:{function}")
+            break
+        else:
+            offenders.append(f"{module}:{function} (not found)")
+
+    assert offenders == [], (
+        "these decide store access and must spread `*live_grant()` rather than "
+        f"writing the predicate themselves: {sorted(offenders)}"
+    )
+
+
+def test_a_live_grant_names_both_columns():
+    """The helper itself, so the test above cannot pass over an empty predicate."""
+    from models.vendor_staff_model import VendorStaff, live_grant
+
+    rendered = " ".join(str(c) for c in live_grant())
+    assert "revoked_at IS NULL" in rendered
+    assert "is_active" in rendered
+    assert len(live_grant()) == 2
+
+
+# ── A staff invitation binds to a verified address only ───────────────────
+
+
+def test_invitation_binding_delegates_to_the_shared_identity_lookup():
+    """Matching an invitation's email grants access to somebody else's store, so
+    the address has to be one the caller demonstrably holds.
+
+    This function used to resolve it itself, and accepted an unverified address.
+    The admin invite path had an identical private copy with the same defect and
+    a much larger prize, so the rule now lives in one place —
+    `utils/clerk_identity.verified_email_for`. The behaviour of that lookup, and
+    the requirement that neither invite path re-implements it, are covered in
+    `tests/test_identity_binding.py`; this asserts only that the vendor path
+    still routes through it.
+    """
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "services"
+        / "vendor_staff_service.py"
+    ).read_text()
+    tree = ast.parse(source)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef) or node.name != "bind_invitations_for_caller":
+            continue
+        body = ast.get_source_segment(source, node) or ""
+        assert "verified_email_for" in body, (
+            "bind_invitations_for_caller must resolve the caller through the "
+            "shared, verification-checking lookup"
+        )
+        return
+
+    pytest.fail("bind_invitations_for_caller not found")

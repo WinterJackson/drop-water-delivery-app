@@ -26,12 +26,32 @@ import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { ScrollView } from "react-native-gesture-handler";
 
-let MapView: any = null;
-let Marker: any = null;
-let Circle: any = null;
-let Polyline: any = null;
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+import type MapViewType from 'react-native-maps';
+import type {
+    MapCircleProps,
+    MapMarkerProps,
+    MapPolylineProps,
+    MapUrlTileProps,
+    MapViewProps,
+    MarkerAnimated as MarkerAnimatedType,
+    Provider,
+} from 'react-native-maps';
+
+/**
+ * `react-native-maps` is `require`d because it has no web build. Its *types*
+ * import freely — `import type` is erased at compile time and emits no require —
+ * so every component below is the real one.
+ *
+ * These stay `| null`, unlike the other apps' shims: this app has no web
+ * stand-ins, only a `try`/`catch` that leaves them unset, so `{MapView ? …}` at
+ * the use site is guarding a state that genuinely occurs.
+ */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }> | null = null;
+let Marker: React.ComponentType<MapMarkerProps> | null = null;
+let Circle: React.ComponentType<MapCircleProps> | null = null;
+let Polyline: React.ComponentType<MapPolylineProps> | null = null;
+let UrlTile: React.ComponentType<MapUrlTileProps> | null = null;
+let PROVIDER_GOOGLE: Provider = undefined;
 
 if (Platform.OS !== "web") {
     try {
@@ -60,9 +80,9 @@ export default function MyMap() {
     const { data: storefront } = useStorefront();
     const { data: orders = [], isLoading: isOrdersLoading } = useVendorOrders();
 
-    const [currentLocation, setCurrentLocation] = useState<any>(null);
+    const [currentLocation, setCurrentLocation] = useState<Location.LocationObjectCoords | null>(null);
     const [deviceLocationLoading, setDeviceLocationLoading] = useState(true);
-    const mapRef = useRef<any>(null);
+    const mapRef = useRef<MapViewType | null>(null);
     const bottomSheetRef = useRef<BottomSheet>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
@@ -124,10 +144,7 @@ export default function MyMap() {
                     });
                 }
                 if (loc && !cancelled) {
-                    setCurrentLocation({
-                        latitude: loc.coords.latitude,
-                        longitude: loc.coords.longitude,
-                    });
+                    setCurrentLocation(loc.coords);
                 }
             } catch (e) {
                 if (__DEV__) console.log("Location skipped:", e);
@@ -158,14 +175,14 @@ export default function MyMap() {
 
     const activeOrders = useMemo(() => {
         let filtered = orders.filter(
-            (o: any) => ["pending", "accepted", "ready", "picked_up"].includes(o.order_status)
+            (o) => ["pending", "accepted", "ready", "picked_up"].includes(o.order_status ?? "")
         );
         if (debouncedSearchQuery) {
             const lowerQuery = debouncedSearchQuery.toLowerCase();
-            filtered = filtered.filter((o: any) => 
+            filtered = filtered.filter((o) => 
                 (o.id && o.id.toLowerCase().includes(lowerQuery)) ||
-                (o.user?.name && o.user.name.toLowerCase().includes(lowerQuery)) ||
-                (o.deliverer?.name && o.deliverer.name.toLowerCase().includes(lowerQuery))
+                (o.user?.full_name && o.user.full_name.toLowerCase().includes(lowerQuery)) ||
+                (o.deliverer?.full_name && o.deliverer.full_name.toLowerCase().includes(lowerQuery))
             );
         }
         return filtered;
@@ -202,7 +219,7 @@ export default function MyMap() {
     }, [debouncedSearchQuery, activeOrders.length]);
 
     const deliveredOrders = useMemo(() => orders.filter(
-        (o: any) => o.order_status === "delivered"
+        (o) => o.order_status === "delivered"
     ).slice(0, 20), [orders]);
 
     const STATUS_COLORS: Record<string, string> = {
@@ -239,7 +256,7 @@ export default function MyMap() {
             );
         }
 
-        activeOrders.forEach((order: any, idx: number) => {
+        activeOrders.forEach((order, idx) => {
             if (order.lat && order.lng) {
                 overlays.push(
                     // @ts-ignore
@@ -248,23 +265,21 @@ export default function MyMap() {
                         coordinate={{ latitude: Number(order.lat), longitude: Number(order.lng) }}
                         title={`Drop-off #${order.id?.substring(0, 8)}`}
                         description={`${order.order_status} · KSH ${order.total_amount}`}
-                        pinColor={STATUS_COLORS[order.order_status] || "red"}
+                        pinColor={STATUS_COLORS[order.order_status ?? ""] || "red"}
                     />
                 );
 
                 // If the rider is assigned and we have their location, draw a polyline and rider marker
+                // The live socket is the *only* source of a rider's position
+                // here. The fallback read `order.deliverer.current_lat/lng`,
+                // which `OrderVendorSnippet`'s sibling `OrderDelivererSnippet`
+                // does not carry — four fields the server has never sent — so
+                // the "DB last known location" branch was unreachable and the
+                // rider marker appeared only while a socket was delivering.
                 const riderId = order.deliverer?.id;
-                let rLat = null;
-                let rLng = null;
-
-                // Priority: Live WebSocket location > DB last known location
-                if (riderId && riderLocations[riderId]) {
-                    rLat = riderLocations[riderId].lat;
-                    rLng = riderLocations[riderId].lng;
-                } else if (order.deliverer?.current_lat && order.deliverer?.current_lng) {
-                    rLat = order.deliverer.current_lat;
-                    rLng = order.deliverer.current_lng;
-                }
+                const live = riderId ? riderLocations[riderId] : undefined;
+                const rLat = live?.lat ?? null;
+                const rLng = live?.lng ?? null;
 
                 if (rLat && rLng) {
                     // Draw Polyline: Vendor -> Rider -> Customer
@@ -278,7 +293,7 @@ export default function MyMap() {
                                     { latitude: Number(rLat), longitude: Number(rLng) },
                                     { latitude: Number(order.lat), longitude: Number(order.lng) }
                                 ]}
-                                strokeColor={STATUS_COLORS[order.order_status] || BRAND.primary}
+                                strokeColor={STATUS_COLORS[order.order_status ?? ""] || BRAND.primary}
                                 strokeWidth={2}
                                 lineDashPattern={[5, 5]}
                             />
@@ -291,7 +306,7 @@ export default function MyMap() {
                         <Marker
                             key={`rider-${riderId}-${order.id}`}
                             coordinate={{ latitude: Number(rLat), longitude: Number(rLng) }}
-                            title={`Rider: ${order.deliverer?.name || 'Dispatch'}`}
+                            title={`Rider: ${order.deliverer?.full_name || 'Dispatch'}`}
                             description={`Status: ${order.order_status}`}
                             pinColor="yellow"
                             zIndex={999}
@@ -307,7 +322,7 @@ export default function MyMap() {
             }
         });
 
-        deliveredOrders.forEach((order: any, idx: number) => {
+        deliveredOrders.forEach((order, idx) => {
             if (order.lat && order.lng) {
                 overlays.push(
                     // @ts-ignore
@@ -377,7 +392,10 @@ export default function MyMap() {
                     <MapView
                         ref={mapRef}
                         provider={PROVIDER_GOOGLE}
-                        mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                        // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                        // the prop every map screen in all three apps passed was dropped and cloud
+                        // styling has never once been applied. A misspelt prop is silent here.
+                        googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                         style={{ flex: 1 }}
                         initialRegion={{
                             latitude: NAIROBI.latitude,
@@ -521,18 +539,14 @@ export default function MyMap() {
                                 </Text>
                             </View>
                         ) : (
-                            activeOrders.map((order: any, idx: number) => {
+                            activeOrders.map((order, idx) => {
+                                // Live socket only — see the note on the map
+                                // overlay above; `deliverer.current_lat/lng`
+                                // are not on the wire.
                                 const riderId = order.deliverer?.id;
-                                let rLat = null;
-                                let rLng = null;
-
-                                if (riderId && riderLocations[riderId]) {
-                                    rLat = riderLocations[riderId].lat;
-                                    rLng = riderLocations[riderId].lng;
-                                } else if (order.deliverer?.current_lat && order.deliverer?.current_lng) {
-                                    rLat = order.deliverer.current_lat;
-                                    rLng = order.deliverer.current_lng;
-                                }
+                                const live = riderId ? riderLocations[riderId] : undefined;
+                                const rLat = live?.lat ?? null;
+                                const rLng = live?.lng ?? null;
 
                                 const hasLocation = !!(rLat && rLng);
 
@@ -554,16 +568,16 @@ export default function MyMap() {
                                             </View>
                                             <View className="flex-1 ml-4">
                                                 <Text className={`font-sans-semibold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
-                                                    {order.deliverer?.name || 'Waiting for Rider'}
+                                                    {order.deliverer?.full_name || 'Waiting for Rider'}
                                                 </Text>
                                                 <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                                                     Order #{order.id?.substring(0, 8)}
                                                 </Text>
                                             </View>
                                             <View className="items-end">
-                                                <View className={`px-2 py-1 rounded-md bg-[${STATUS_COLORS[order.order_status] || '#ccc'}20]`}>
-                                                    <Text style={{ color: STATUS_COLORS[order.order_status] || '#ccc', fontSize: 12, fontFamily: 'Karla_600SemiBold' }}>
-                                                        {order.order_status.toUpperCase()}
+                                                <View className={`px-2 py-1 rounded-md bg-[${STATUS_COLORS[order.order_status ?? ''] || '#ccc'}20]`}>
+                                                    <Text style={{ color: STATUS_COLORS[order.order_status ?? ''] || '#ccc', fontSize: 12, fontFamily: 'Karla_600SemiBold' }}>
+                                                        {(order.order_status ?? 'unknown').toUpperCase()}
                                                     </Text>
                                                 </View>
                                                 {!hasLocation && order.deliverer && (

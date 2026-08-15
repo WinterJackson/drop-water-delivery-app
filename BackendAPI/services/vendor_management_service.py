@@ -13,8 +13,7 @@ from geoalchemy2.shape import from_shape
 from shapely.geometry import Point
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification, push_allowed
-from sqlalchemy import func, and_, update
-import asyncio
+from sqlalchemy import func, and_
 from services.order_service import apply_status_transition
 from utils.paging import stable
 
@@ -82,11 +81,33 @@ async def get_all_vendors_by_clerk_id(session: AsyncSession, clerk_id: str):
 
 
 async def register_vendor(session: AsyncSession, clerk_id: str, data: dict):
+    """Create this caller's store, or update the one they already own.
+
+    Resolved by **ownership alone**, never through `get_vendor_by_clerk_id`.
+    That helper's filter is `owned OR staffed`, and the upsert below writes
+    `business_name`, `phone_number` and `vendor_type` — so with it, a staff
+    member calling this endpoint rewrote the *owner's* business: its name, its
+    contact number, and the vendor type that decides both the commission rate
+    and the service radius. Exactly what `PUT /profile` is owner-gated to
+    prevent, reachable by the token of anyone handed the till.
+
+    Ownership here also matches `POST /api/auth/create_vendor`, which is the
+    endpoint the vendor app's onboarding actually calls and which has always
+    resolved this way. Two registration paths disagreeing about who owns a store
+    is the same shape as the two withdrawal paths disagreeing about what is
+    spendable, and as there the permissive one was the one that wrote.
+    """
     from routes.auth_routes import sanitize_phone_number
     if "phone_number" in data and data["phone_number"]:
          data["phone_number"] = sanitize_phone_number(data["phone_number"])
-         
-    existing = await get_vendor_by_clerk_id(session, clerk_id)
+
+    owned = await session.execute(
+        select(Vendor)
+        .where(Vendor.clerk_id == clerk_id)
+        .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        .limit(1)
+    )
+    existing = owned.scalars().first()
     if existing:
         # Upsert for Onboarding
         if data.get("phone_number"):

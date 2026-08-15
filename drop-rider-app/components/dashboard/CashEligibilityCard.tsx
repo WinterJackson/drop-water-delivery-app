@@ -23,7 +23,7 @@ import { formatMoneyShort, moneyRatio } from "@/utils/money";
  * `Cashout.tsx` had with the withdrawal fee.
  */
 export function CashEligibilityCard() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const dark = currentTheme === "dark";
   const { data } = useCashEligibility();
 

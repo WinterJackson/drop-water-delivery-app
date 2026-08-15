@@ -12,6 +12,7 @@ import { keepPaging } from "@/utils/paging";
 import { OfferItemSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
+import { discountPercent, discountedPrice, formatMoney } from "@/utils/money";
 
 const { width } = Dimensions.get("window");
 
@@ -42,7 +43,7 @@ export default function Offers() {
     };
 
     const renderItem = ({ item }: { item: any }) => {
-        const percentageOffer = Math.ceil((item.discount / item.price) * 100);
+        const percentageOffer = discountPercent(item.price, item.discount);
         return (
             <View className={`items-center`} style={{ width: "100%", paddingHorizontal: 8, paddingVertical: 10 }}>
                 <PressableScale activeOpacity={0.7} onPress={() => router.push(`/product-details/${item.id}`)} className="w-full">
@@ -64,10 +65,10 @@ export default function Offers() {
                                 {/* price and discount */}
                                 <View className={`flex-row gap-2`}>
                                     <Text className={`font-sans-semibold ${darkTheme ? "text-white" : " text-black"}`}>
-                                        KSH {Math.round((item.price - item.discount) * 100) / 100}
+                                        {formatMoney(discountedPrice(item.price, item.discount))}
                                     </Text>
                                     <Text style={{ textDecorationLine: "line-through" }} className={`${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
-                                        {item.price}
+                                        {formatMoney(item.price)}
                                     </Text>
                                 </View>
                                 {/* est delivery time */}

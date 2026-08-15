@@ -4,7 +4,7 @@ from pydantic import field_validator
 from utils.s3_utils import generate_presigned_url, public_asset_url
 from decimal import Decimal
 from utils.money import MoneyField
-from typing import Literal, Optional, Any
+from typing import Literal
 
 class CreateDeliverer(BaseModel):
     clerk_id: str

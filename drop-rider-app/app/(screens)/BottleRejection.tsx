@@ -20,7 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function BottleRejection() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
   const { post } = useApiRequest();

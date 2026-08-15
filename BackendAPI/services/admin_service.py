@@ -516,11 +516,7 @@ async def bind_admin_for_caller(session: AsyncSession, clerk_id: str) -> AdminUs
     Looking up the caller's *own* identity leaks nothing: they already know their
     own email address.
     """
-    import asyncio
-
-    secret = os.getenv("CLERK_SECRET_KEY")
-    if not secret:
-        return None
+    from utils.clerk_identity import verified_email_for
 
     pending = await session.execute(
         select(AdminUser.id)
@@ -530,28 +526,13 @@ async def bind_admin_for_caller(session: AsyncSession, clerk_id: str) -> AdminUs
     if not pending.scalars().first():
         return None
 
-    def _email() -> str | None:
-        from clerk_backend_api import Clerk
-
-        clerk = Clerk(bearer_auth=secret)
-        user = clerk.users.get(user_id=clerk_id)
-        addresses = getattr(user, "email_addresses", None) or []
-        primary_id = getattr(user, "primary_email_address_id", None)
-        for address in addresses:
-            if getattr(address, "id", None) == primary_id:
-                return getattr(address, "email_address", None)
-        return getattr(addresses[0], "email_address", None) if addresses else None
-
-    try:
-        # The Clerk SDK is synchronous; inline it blocks the event loop for the
-        # whole round trip, stalling every other request on the worker.
-        email = await asyncio.to_thread(_email)
-    except Exception as exc:
-        # A failure here must not turn into a 500 on sign-in. The invitation
-        # stays pending and binds on the next attempt.
-        logger.warning("ADMIN_BIND_LOOKUP_FAILED clerk=%s: %s", clerk_id, exc)
-        return None
-
+    # `verified_email_for` and not a local lookup. This walked the address list
+    # itself and fell back to `addresses[0]` when nothing matched the primary
+    # id — an unordered list, and verification was never checked at all. Clerk
+    # lets anyone attach an arbitrary *unverified* address to their own account,
+    # so someone who learned that an invitation was outstanding for an address
+    # could claim it, and what they would be claiming here is the console.
+    email = await verified_email_for(clerk_id)
     if not email:
         return None
     return await bind_admin(session, clerk_id=clerk_id, email=email)

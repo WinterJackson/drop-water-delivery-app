@@ -52,7 +52,7 @@ export default function ForgotPassword() {
                 identifier: emailAddress,
             });
             setSuccessfulCreation(true);
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (isClerkAPIResponseError(err)) setErrors(err.errors);
             else setMessage("An unexpected error occurred.");
         } finally {
@@ -79,7 +79,7 @@ export default function ForgotPassword() {
             } else {
                 setMessage("Reset failed. Please check your data.");
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (isClerkAPIResponseError(err)) setErrors(err.errors);
             else setMessage("An unexpected error occurred.");
         } finally {

@@ -21,7 +21,6 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_FINANCE_ADJUST, PERM_FINANCE_READ, PERM_RIDERS_READ
 from services import admin_bottle_service, admin_service
-from utils import keyset
 
 logger = logging.getLogger(__name__)
 

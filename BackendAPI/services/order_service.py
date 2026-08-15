@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from fastapi import HTTPException
 from geoalchemy2.functions import ST_Distance, ST_DWithin
 from models.cart_model import CartItem
-from models.deliverer_model import Deliverer
+from models.deliverer_model import Deliverer, dispatchable_rider
 from models.product_model import Product
 from models.order_model import Order, OrderItem
 from models.vendor_model import Vendor
@@ -507,7 +507,7 @@ async def get_radar_deliverers(session: AsyncSession, lat: float, lng: float, ve
 
   query = select(Deliverer, Deliverer.push_token, Deliverer.id.label("user_id")).where(
       and_(
-          Deliverer.is_available, 
+          *dispatchable_rider(),
           Deliverer.employment_model == "gig_economy",  # Tier 2 is restricted to Gig-Economy
           Deliverer.vehicle_type == vehicle_enum, 
           Deliverer.h3_index_res8.in_(nearby_hexes),
@@ -559,7 +559,7 @@ async def get_closest_deliverer(session: AsyncSession, lat: float, lng: float, v
       select(Deliverer)
       .where(
           and_(
-              Deliverer.is_available,
+              *dispatchable_rider(),
               Deliverer.vehicle_type == vehicle_enum,
               Deliverer.h3_index_res8.in_(nearby_hexes),
               Deliverer.location.isnot(None),
@@ -599,7 +599,7 @@ async def get_closest_deliverer(session: AsyncSession, lat: float, lng: float, v
       select(Deliverer)
       .where(
           and_(
-              Deliverer.is_available,
+              *dispatchable_rider(),
               Deliverer.vehicle_type == vehicle_enum,
               Deliverer.location.isnot(None),
               ST_DWithin(Deliverer.location, pickup_point, max_distance_m),
@@ -684,7 +684,11 @@ async def dispatch_order_to_riders(
             tier1_conditions = [
                 VendorRiderRegistry.vendor_id == vendor_id,
                 VendorRiderRegistry.status == "approved",
-                Deliverer.is_available,
+                # Approved *by the store* is not the same as in good standing
+                # with the platform. A rider the store trusts is still one the
+                # platform may have suspended, and this is the first and
+                # strongest offer sent on every dispatch.
+                *dispatchable_rider(),
                 Deliverer.vehicle_type == vehicle_enum,
                 Deliverer.h3_index_res8.in_(nearby_hexes),
                 Deliverer.location.isnot(None),
@@ -1439,8 +1443,17 @@ async def update_orders_payment_status_by_checkout_id(
 
     await session.commit()
 
+    from services.expo_push_service import dispatch_background
+
     for dispatch_kwargs in pending_dispatches:
-        asyncio.create_task(dispatch_order_to_riders(**dispatch_kwargs))
+        # `dispatch_background`, not a bare `create_task`. The event loop keeps
+        # only a *weak* reference to a task, so one whose return value is
+        # discarded can be garbage collected part-way through — and this is the
+        # task that offers a just-paid order to riders. The failure is silent
+        # from every angle: the customer has paid, the order is `unassigned`,
+        # and no rider was ever told. It is also likeliest exactly when it costs
+        # most, because GC pressure rises with load.
+        dispatch_background(dispatch_order_to_riders(**dispatch_kwargs))
 
     return {
         "message": "Transaction was completed successfully.",

@@ -34,7 +34,7 @@ export function StoreClosedNotice({
 	} | null;
 	compact?: boolean;
 }) {
-	const { currentTheme } = useContext<any>(UIThemeContext);
+	const { currentTheme } = useContext(UIThemeContext);
 	const dark = currentTheme === "dark";
 
 	// Absent means open. A response that predates this field, or one still

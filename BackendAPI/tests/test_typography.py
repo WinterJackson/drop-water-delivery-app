@@ -36,7 +36,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 APPS = ("drop-customer-app", "drop-rider-app", "drop-vendor-app")
 ADMIN = "drop-admin"
 
-SKIP_DIRS = {"node_modules", "dist", ".expo", "android", "ios", "build", ".next"}
+#: `__tests__` is skipped for the same reason `_code_only` blanks comments: the
+#: suite that asserts `font-bold` is forbidden has to be able to write
+#: `font-bold` to assert it. `components/ui/__tests__/Text.test.tsx` checks that
+#: the wrapper still supplies a family beside a bare weight utility, which is the
+#: rule this module exists to enforce — the tests are the one place naming the
+#: banned token is the point rather than the defect. Nothing under `__tests__`
+#: ships in a build.
+SKIP_DIRS = {"node_modules", "dist", ".expo", "android", "ios", "build", ".next", "__tests__"}
 
 WRAPPER = "components/ui/Text.tsx"
 

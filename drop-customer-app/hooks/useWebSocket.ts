@@ -9,7 +9,7 @@ export interface OrderUpdate {
   action?: string;
   order_id?: string;
   status?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**
@@ -36,7 +36,7 @@ const useWebSocket = (
   const { getToken } = useAuth();
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<any | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // FIX-WS-RERENDER-01: Stabilize references to prevent dependency-loop re-renders
   const getTokenRef = useRef(getToken);
   const entityTypeRef = useRef(entityType);
@@ -75,7 +75,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
 
   // Push a fresh token onto the live socket so the server can extend the session
   // without a reconnect. Cleared whenever the socket goes away.
-  const authTimerRef = useRef<any | null>(null);
+  const authTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopAuthRefresh = useCallback(() => {
     if (authTimerRef.current) {
       clearInterval(authTimerRef.current);
@@ -131,7 +131,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
    * reconnect path take over.
    */
   const lastMessageAtRef = useRef(Date.now());
-  const livenessTimerRef = useRef<any | null>(null);
+  const livenessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopLivenessWatch = useCallback(() => {
     if (livenessTimerRef.current) {
@@ -305,7 +305,7 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
   }, [entityId]); // Only re-run when the actual entityId value changes (null → "abc-123")
 
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     }

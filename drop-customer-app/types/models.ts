@@ -111,11 +111,15 @@ export interface DetailedCart {
 }
 
 export interface Vendor {
+  // The shop, not the person who owns it. `owners_name`, `email`,
+  // `phone_number`, `preferred_payment_method` and `verification_status` were
+  // declared here and are no longer sent: the customer-facing reads return
+  // `VendorStorefront`, because that last one is the store's *payout
+  // destination* and the set together was an owner-name-plus-phone-plus-till
+  // list. Declaring a field the server does not send does not make it arrive —
+  // it makes `undefined` render as a blank line nobody can explain.
   id: string;
   business_name: string;
-  owners_name: string;
-  email: string;
-  phone_number: string | null;
   profile_pic: string | null;
   vendor_type: string | null;
   location_address: string | null;
@@ -123,9 +127,7 @@ export interface Vendor {
   lng: number | null;
   shift_start: string;
   shift_end: string;
-  verification_status: string;
   rating: number | null;
-  preferred_payment_method: string[] | null;
 
   // ── Is this store taking orders? ────────────────────────────────────────
   //
@@ -146,45 +148,169 @@ export interface Vendor {
   min_order_value?: string | null;
 }
 
+/** `schemas/product_schemas.py::VendorSnippet` — the store as a product carries it. */
+export interface ProductVendorSnippet {
+  id: string;
+  business_name: string;
+  vendor_type?: string | null;
+  location_address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  rating?: number | null;
+  profile_pic?: string | null;
+}
+
+/**
+ * `schemas/product_schemas.py::ProductFull`.
+ *
+ * This declared `image` and `category`, neither of which the API sends — the
+ * field is `image_url`, and there is no category on a product anywhere in the
+ * platform. It also omitted `discount`, `capacity`, `weight_kg` and
+ * `minimum_order_qty`, all four of which screens read, so the type described
+ * neither what arrives nor what is used.
+ *
+ * `description`, `unit` and `is_available` are optional because
+ * `POST /vendor_details_and_products` serialises the shorter `BaseProduct`;
+ * `/get_product` and `/search` return all three.
+ *
+ * There was a second `Product` in `hooks/queries/useProducts.ts` — the one most
+ * screens actually imported — and it declared **`price: number` and
+ * `discount: number`**. Money is a decimal string from the database to the
+ * screen; a type that says otherwise is an invitation to `a + b` on the two
+ * fields the platform is most careful about.
+ */
 export interface Product {
   id: string;
-  name: string;
-  price: string;
-  description: string | null;
-  image: string | null;
-  stock_quantity: number;
   vendor_id: string;
-  category: string | null;
+  name: string;
+  image_url: string;
+  capacity: number;
+  weight_kg: number;
+  minimum_order_qty: number;
+  /** Decimal string. */
+  price: string;
+  /** Decimal string. */
+  discount: string;
+  stock: number;
+  /** Server-side alias for `stock`, kept because screens read this name. */
+  stock_quantity: number;
+  description?: string | null;
+  unit?: string | null;
+  is_available?: boolean;
+  /** Only on `/get_product` and `/search` (`ProductFull`). */
+  vendor?: ProductVendorSnippet | null;
+}
+
+/** `schemas/vendor_schemas.py::VendorWithProductsFull` — a storefront and its catalogue. */
+export interface VendorWithProducts extends Vendor {
+  products: Product[];
 }
 
 export type OrderStatus = 
   | "pending" | "confirmed" | "preparing" | "ready" 
   | "picked_up" | "delivered" | "cancelled";
 
+/**
+ * `schemas/order_schema.py::OrderItemBase`.
+ *
+ * This previously declared `product_name`, `unit_price`, `total_price` and an
+ * `image` — **none of which the API has ever sent**. Every screen but one was
+ * written against the real response and read `item.product`, `item.price` and
+ * `item.quantity`; the one written against this type read `subtotal_at_order`
+ * and rendered nothing.
+ */
 export interface OrderItem {
   id: string;
+  order_id: string;
   product_id: string;
-  product_name: string;
   quantity: number;
-  unit_price: string;
-  total_price: string;
-  image: string | null;
+  /** Decimal string: the unit price at the time of the order. */
+  price: string;
+  /** Decimal string, capitalised on the wire exactly as the schema declares it. */
+  Subtotal: string;
+  product?: Product | null;
 }
 
+/**
+ * `schemas/order_schema.py::OrderVendorSnippet` — the store as an order carries
+ * it, which is **not** a `Vendor`. This type used to declare `vendor: Vendor`,
+ * promising an order carried `shift_start`, `store_state` and the rest; it
+ * carries nine fields and none of the trading-status ones.
+ */
+export interface OrderVendorSnippet {
+  id: string;
+  business_name: string;
+  profile_pic?: string | null;
+  vendor_type?: string | null;
+  location_address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  rating?: number | null;
+  phone_number?: string | null;
+}
+
+/** `schemas/order_schema.py::OrderDelivererSnippet` — likewise, not a `Rider`. */
+export interface OrderDelivererSnippet {
+  id: string;
+  full_name?: string | null;
+  phone_number?: string | null;
+  vehicle_details?: string | null;
+}
+
+/**
+ * `schemas/order_schema.py::BaseOrder`.
+ *
+ * **This is the only `Order` in the app.** There were two: this one and a
+ * second in `hooks/queries/useOrders.ts`, which is the type every screen
+ * actually received. They disagreed about eighteen fields — the hook's had the
+ * whole money breakdown and the coordinates, this one had `customer_id` and
+ * `updated_at` the hook's lacked — and a screen's behaviour depended on which
+ * import it happened to reach for. That is the same defect as a second route
+ * table, one layer up: two declarations of one wire shape, free to drift, with
+ * nothing that resolves them against each other.
+ *
+ * Every money field is a decimal string. `total_amount` is the frozen figure
+ * the customer was charged — never re-derive it from the lines.
+ */
 export interface Order {
   id: string;
+  customer_id?: string;
   order_status: string;
+  payment_method: string;
+  payment_status?: string;
+
+  // ── Money: decimal strings, all of them ──
   total_amount: string;
-  delivery_fee: string;
-  service_fee: string;
-  order_item: OrderItem[];
-  vendor: Vendor;
-  customer_id: string;
-  deliverer?: Rider | null;
+  delivery_fee?: string;
+  service_fee?: string;
+  surge_fee?: string;
+  product_subtotal?: string;
+  wallet_discount?: string;
+  welcome_discount?: string;
+  payload_surcharge?: string;
+  staircase_surcharge?: string;
+
+  delivery_address?: string | null;
+  delivery_time?: number;
+  delivery_type?: string;
+  vehicle_class?: string;
+  distance_km?: number;
+  lat?: number;
+  lng?: number;
+  lat_from?: number;
+  lng_from?: number;
+
+  bottle_source?: string;
+  customer_note?: string;
+  /** True once the customer has reviewed this order. */
   is_rated?: boolean;
-  delivery_address: string | null;
+
+  vendor?: OrderVendorSnippet | null;
+  deliverer?: OrderDelivererSnippet | null;
+  order_item?: OrderItem[];
+
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface SavedLocation {
@@ -198,6 +324,21 @@ export interface SavedLocation {
   last_used_at: string | null;
 }
 
+/**
+ * One GPS breadcrumb from `GET /api/orders/{id}/tracking-logs`
+ * (`models/order_tracking_log_model.py::OrderTrackingLog`), which is what the
+ * delivery polyline is drawn from.
+ */
+export interface OrderTrackingLog {
+  id: string;
+  order_id: string;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  speed: number | null;
+  created_at: string;
+}
+
 export interface MapRegion {
   latitude: number;
   longitude: number;
@@ -205,12 +346,29 @@ export interface MapRegion {
   longitudeDelta: number;
 }
 
+/**
+ * What the map screen puts on a marker — built locally from a `Vendor`, not
+ * received from the server.
+ *
+ * `owners_name` was declared here and set by neither of the two places that
+ * build these, which is the same defect as the `Vendor` note above one step
+ * further downstream: `MiniVendorCard` is handed one of these and drew the
+ * shopkeeper's personal name from a field that has never held one.
+ */
 export interface GeoJSONVendorProperties {
   id: string;
+  /** The store's `business_name`. */
   title: string;
-  owners_name: string;
   rating: number | null;
+  /** The store's `profile_pic`. */
   image: string | null;
+  /**
+   * The store's `location_address`. `MiniVendorCard` has always rendered this
+   * and neither of the two places that build these has ever set it, so the
+   * card a customer gets on tapping a shop on the map read "Location not set"
+   * for every shop on the platform.
+   */
+  location_address: string | null;
   cluster?: boolean;
   cluster_id?: number;
   point_count?: number;

@@ -69,6 +69,35 @@ def test_no_module_shadows_an_import_it_already_has():
     )
 
 
+def test_no_module_imports_a_name_it_never_uses():
+    """An unused import is not merely tidy-up — it is a name in scope.
+
+    Two of the thirty-one this found were live hazards rather than clutter:
+
+    * `routes/vendor_management_routes.py` imported
+      `vendor_management_service.get_vendor_by_clerk_id`, which this platform's
+      own guide says a route must **never** call — its filter is
+      `owned OR staffed` with no store id, which is precisely the ambiguity
+      `get_active_store` exists to remove. Nothing called it; it simply sat at
+      the top of the file, already imported, for the next person to reach for.
+    * `or_` was imported and unused in `auth_dependencies`, `auth_routes` and
+      `vendor_service` — the residue of the `owned OR staffed` filters that were
+      deliberately narrowed. An import left behind after a rule is tightened is
+      the shortest possible path back to the old behaviour.
+
+    The rest were four schemas importing `Any` and using it nowhere, on a
+    platform whose typing rule is that `Any` is the absence of a type. That is
+    the same defect as the apps' `any`, one import line earlier.
+    """
+    targets = [d for d in CHECKED if (BACKEND / d).is_dir()] + ["main.py", "worker.py"]
+    offenders = [line for line in _pyflakes(targets) if "imported but unused" in line]
+
+    assert not offenders, (
+        "imported and never used — delete the import rather than leaving the "
+        "name in scope:\n  " + "\n  ".join(offenders)
+    )
+
+
 def test_no_function_computes_a_value_it_never_uses():
     """An assigned-and-unused local is usually a line that was meant to be used.
 

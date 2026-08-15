@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
+import type { Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogBox, Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -22,7 +23,28 @@ LogBox.ignoreLogs([
     'SafeAreaView has been deprecated',
 ]);
 
-let Notifications: any = null;
+import type * as ExpoNotifications from 'expo-notifications';
+import type {
+    Notification,
+    NotificationResponse,
+    Subscription,
+} from 'expo-notifications';
+
+/**
+ * The module handle, typed without importing the module.
+ *
+ * `expo-notifications` is `require`d rather than imported because it is absent
+ * from Expo Go, so a static import would crash the dev client on launch. Its
+ * *types* have no such problem: `import type` is erased entirely at compile
+ * time, emits no require, and gives the real signatures for every call below —
+ * so `Notifications` is the actual module shape or `null`, and every call site
+ * has to prove it checked for `null` first.
+ *
+ * It was `any`, which meant the null check was the only thing standing between
+ * a typo in a listener name and a silent no-op on the one path that tells a
+ * user their order moved.
+ */
+let Notifications: typeof ExpoNotifications | null = null;
 if (!isExpoGo) {
     try {
         Notifications = require('expo-notifications');
@@ -85,9 +107,9 @@ async function registerForPushNotificationsAsync(): Promise<string | undefined> 
 
 export function usePushNotifications(queryPrefix: string = 'customer') {
     const [expoPushToken, setExpoPushToken] = useState('');
-    const [notification, setNotification] = useState<any>(undefined);
-    const notificationListener = useRef<any>(null);
-    const responseListener = useRef<any>(null);
+    const [notification, setNotification] = useState<Notification | undefined>(undefined);
+    const notificationListener = useRef<Subscription | null>(null);
+    const responseListener = useRef<Subscription | null>(null);
     const { isSignedIn } = useAuth();
     const api = useApiRequest();
     const router = useRouter();
@@ -106,13 +128,13 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
         // A cold-start response is replayed on every mount of this hook, so guard
         // against navigating to the same notification twice in one session.
         const handled = new Set<string>();
-        const openFromNotification = (response: any) => {
+        const openFromNotification = (response: NotificationResponse | null) => {
             const url = response?.notification?.request?.content?.data?.url;
             if (!url) return;
             const id = response?.notification?.request?.identifier ?? String(url);
             if (handled.has(id)) return;
             handled.add(id);
-            router.push(url as any);
+            router.push(url as Href);
         };
 
         registerForPushNotificationsAsync().then(async (token) => {
@@ -130,7 +152,7 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
             }
         });
 
-        notificationListener.current = Notifications.addNotificationReceivedListener((notif: any) => {
+        notificationListener.current = Notifications.addNotificationReceivedListener((notif: Notification) => {
             setNotification(notif);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             queryClient.invalidateQueries({ queryKey: [queryPrefix, 'notifications'] });
@@ -144,7 +166,7 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
             }
         });
 
-        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
+        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: NotificationResponse | null) => {
             openFromNotification(response);
         });
 
@@ -154,7 +176,7 @@ export function usePushNotifications(queryPrefix: string = 'customer') {
         // the app — the cold-start case is the common one for an order update
         // that arrives hours after the user last opened Drop.
         Notifications.getLastNotificationResponseAsync?.()
-            .then((response: any) => {
+            .then((response: NotificationResponse | null) => {
                 if (!cancelled) openFromNotification(response);
             })
             .catch(() => {});

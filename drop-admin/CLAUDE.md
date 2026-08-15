@@ -281,6 +281,20 @@ delivery option, and it is recorded against their account either way.
 - Empty states are written, not blank. The platform currently has no orders and
   no riders, so every screen renders empty on day one; a blank rectangle reads
   as broken software.
+- **No native browser dialogs.** `window.confirm` / `window.prompt` / `alert`
+  are out, and `ConfirmDialog` (`components/ui/ConfirmDialog.tsx`) replaces
+  them. Not a cosmetic rule: a system dialog ignores the theme, **blocks the tab
+  synchronously** (React, every in-flight request and `IdleTimeout` all freeze
+  behind it), is **suppressible** by the browser — returning `false`/`null`
+  without appearing, so the button reads as broken — and takes a plain string,
+  with nowhere to put the subject's name or a danger tone. `prompt` also cannot
+  validate, and two of the three sites it was used at collect a **reason written
+  to `Admin_Audit_Log` before the presigned URLs are minted**, against endpoints
+  that refuse a blank one. The dialog keeps its confirm button disabled until
+  one is typed, traps focus behind its own `aria-modal`, cancels on Escape and
+  on the backdrop, and is a bottom sheet below `sm` because the KYC queue is
+  triaged on a phone. `test_admin_console_frontend.py` fails the build on a
+  native dialog, however it is spelled.
 - Never show a raw status code. `lib/api/server.ts` normalises refusals; branch
   on `ApiError.type` (`permission_required`, `two_factor_required`), never on
   the wording of a message.

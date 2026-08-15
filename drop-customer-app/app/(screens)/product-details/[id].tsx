@@ -28,7 +28,7 @@ import { useDeliveryFee } from "@/hooks/queries/useCart";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { formatMoney, isZeroMoney } from "@/utils/money";
+import { discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
 
 const ProductDetails = () => {
 	// <---------------HOOKES--------------->
@@ -354,12 +354,17 @@ const ProductDetails = () => {
 								</View>
 								<View className="items-end">
 									<Text className="text-2xl font-sans-bold" style={{ color: BRAND.blue }}>
-										KSH {Math.round((Product?.price - Product?.discount) * 100) / 100}
+										{formatMoney(discountedPrice(Product?.price, Product?.discount))}
 									</Text>
                                     <View className="flex-row items-center mt-0.5 gap-1">
                                         {Product?.capacity > 0 && Product?.unit !== "pack" && Product?.unit !== "unit" && (
                                             <Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                                                KSH {Math.round(((Product?.price - Product?.discount) / Product?.capacity) * 10) / 10} /L
+                                                {/* A unit rate, not money: the exact net price divided
+                                                    by the bottle's litres, for comparison between sizes.
+                                                    The subtraction stays in cents; only the division —
+                                                    whose output is a label, never a charge — becomes a
+                                                    number. */}
+                                                KSH {(Number(discountedPrice(Product?.price, Product?.discount)) / Product.capacity).toFixed(1)} /L
                                             </Text>
                                         )}
                                         {Product?.unit && Product?.capacity > 0 && Product?.unit !== "pack" && Product?.unit !== "unit" && (

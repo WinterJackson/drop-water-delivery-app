@@ -16,20 +16,67 @@ import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 
-let MapView: any = null;
-let Marker: any = null;
-let MarkerAnimated: any = null;
-let GestureHandlerRootViewComponent: any = null;
-let Region: any = null; // intentional any for react-native-maps // Add Region to the declarations
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+/**
+ * `react-native-maps` is `require`d rather than imported: it has no web build,
+ * and a static import would break the bundle there. Its *types* are safe to
+ * import — `import type` is erased at compile time and emits no require — so
+ * every component below is the real one, and the web fallbacks are checked
+ * against the same props the native ones take.
+ *
+ * `Region` used to be in this list, declared `any`, assigned from
+ * `maps.Region` on native and a bare `function(){}` on web. It is a **type**,
+ * not a runtime export, so the native assignment was `undefined` and neither
+ * was ever read. `any` is what let three lines of dead code look deliberate,
+ * comment included.
+ */
+import type MapViewType from 'react-native-maps';
+import type {
+    MapMarkerProps,
+    MapViewProps,
+    MapUrlTileProps,
+    MapStyleElement,
+    MarkerAnimated as MarkerAnimatedType,
+    Provider,
+} from 'react-native-maps';
+import type { StyleProp, ViewStyle } from 'react-native';
+import type { GestureHandlerRootView as GestureHandlerRootViewType } from 'react-native-gesture-handler';
+
+/**
+ * The native components are classes and are driven through their refs
+ * (`animateToRegion`, `animateMarkerToCoordinate`), so `ref` has to be part of
+ * the declared props: a bare `ComponentType<P>` has no `ref` and every call site
+ * would fail. The web stand-ins take the same props and simply ignore the ref.
+ */
+type MapViewComponent = React.ComponentType<
+    MapViewProps & { ref?: React.Ref<MapViewType> }
+>;
+type MarkerComponent = React.ComponentType<MapMarkerProps>;
+type MarkerAnimatedComponent = React.ComponentType<
+    MapMarkerProps & { ref?: React.Ref<React.ComponentRef<typeof MarkerAnimatedType>> }
+>;
+
+/**
+ * Declared without `| null`, and without an initialiser, because **both**
+ * branches below assign every one of them. `= null` would be a lie the compiler
+ * then makes everybody pay for: `ComponentType<P> | null` is not a valid JSX
+ * element type, so every use site would need a guard against a state that
+ * cannot occur.
+ */
+let MapView: MapViewComponent;
+let Marker: MarkerComponent;
+let MarkerAnimated: MarkerAnimatedComponent;
+let GestureHandlerRootViewComponent:
+    | typeof GestureHandlerRootViewType
+    | React.ComponentType<{ children?: React.ReactNode; style?: StyleProp<ViewStyle> }>;
+let UrlTile: React.ComponentType<MapUrlTileProps>;
+/** `'google' | undefined` — the library's own union, not `string`. */
+let PROVIDER_GOOGLE: Provider;
 
 if (Platform.OS !== 'web') {
     // Import native-only modules only when not on web
-    MapView = require('react-native-maps').default;
     const maps = require('react-native-maps');
+    MapView = maps.default;
     Marker = maps.Marker;
-    Region = maps.Region;
     MarkerAnimated = maps.MarkerAnimated;
     UrlTile = maps.UrlTile;
     PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
@@ -37,13 +84,15 @@ if (Platform.OS !== 'web') {
     GestureHandlerRootViewComponent = GestureHandlerRootViewImport;
 } else {
     // Web mock implementations
-    MapView = ({ style, children }: any) => <div style={{ ...style, position: 'relative', width: '100%', height: '400px', backgroundColor: '#e0e0e0' }}>{children}</div>;
-    Marker = ({ coordinate }: any) => <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'red', width: '10px', height: '10px', borderRadius: '50%' }} />;
-    MarkerAnimated = ({ coordinate }: any) => <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'blue', width: '10px', height: '10px', borderRadius: '50%' }} />;
-    Region = function() {}; // Mock Region as empty function for web
+    // Web stand-ins. Typed against the same props as the native components, so
+    // a prop that exists on one and not the other is a build error here rather
+    // than a blank rectangle in a browser nobody tests.
+    MapView = ({ style, children }: MapViewProps) => <div style={{ ...(style as object), position: 'relative', width: '100%', height: '400px', backgroundColor: '#e0e0e0' }}>{children}</div>;
+    Marker = (_props: MapMarkerProps) => <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'red', width: '10px', height: '10px', borderRadius: '50%' }} />;
+    MarkerAnimated = (_props: MapMarkerProps) => <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'blue', width: '10px', height: '10px', borderRadius: '50%' }} />;
     UrlTile = () => null;
     PROVIDER_GOOGLE = 'google';
-    GestureHandlerRootViewComponent = ({ children }: any) => <div>{children}</div>;
+    GestureHandlerRootViewComponent = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
 }
 
 import MiniOrderCard from "@/components/common/MiniOrderCard";
@@ -52,6 +101,13 @@ import OngoingOrderCard from "@/components/common/OngoingOrderCard";
 import OrderListItem from "@/components/common/OrderListItem";
 import BackButton from "@/components/ui/BackButton";
 import { BRAND } from "@/constants/brandColors";
+import type {
+	GeoJSONFeature,
+	GeoJSONVendorProperties,
+	Order,
+	Vendor,
+} from "@/types/models";
+import type { LatLng } from "react-native-maps";
 
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useOrders, orderRows } from "@/hooks/queries/useOrders";
@@ -299,7 +355,7 @@ const retroMapStyle = [
   }
 ]
 
-const darkMapStyle = [
+const darkMapStyle: MapStyleElement[] = [
   {
     "elementType": "geometry",
     "stylers": [
@@ -486,24 +542,12 @@ const darkMapStyle = [
   }
 ]
 
-const standardMapStyle: any[] = []
-
-type Vendor = {
-	id: string;
-	owners_name: string;
-	business_name: string;
-	email: string;
-	phone_number: string;
-	profile_pic: string;
-	location_address: string;
-	lat: number;
-	lng: number;
-	shift_start: string; // e.g. "07:00:00"
-	shift_end: string; // e.g. "19:00:00"
-	verification_status: "pending" | "verified" | "rejected"; // enum-like union
-	rating: number;
-	preferred_payment_method: ("cash" | "mpesa" | "card" | "bank_transfer")[];
-};
+/**
+ * `MapView`'s `customMapStyle` — empty means "the provider's own styling", which
+ * is what the light theme wants. Typed as the library's own array element so
+ * the dark style above it is checked against the same shape.
+ */
+const standardMapStyle: MapStyleElement[] = []
 
 export default function Maps() {
 	// <------------------------HOOKS------------------------->
@@ -536,26 +580,28 @@ export default function Maps() {
 	// if (__DEV__) console.log("pathLat", pathLat)
 	// <------------------------STATES------------------------->
 	const [dataShown, setDataShown] = useState(isModeSetLocation ? "setLocation" : "orders"); // either ['setLocation', 'vendorDetails', 'orders', 'all'] : View for a vendor picked on the map, View for ongoing orders/in transit or View for edit and set location
-	const [Vendor, setVendor] = useState<any>();
+	// A marker's properties, not a `Vendor` — see `GeoJSONVendorProperties`.
+	const [Vendor, setVendor] = useState<GeoJSONVendorProperties>();
 	// if (__DEV__) console.log(Vendor)
 	const [location, setLocation] = useState<Location.LocationObject | null>(null);
 	const [ShowFloatingOrder, setShowFloatingOrder] = useState(false)
 	const [ShowFloatingVendor, setShowFloatingVendor] = useState(false)
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
-	const [markers, setMarkers] = useState<any[]>([]);
-	const [currentMapCenter, setCurrentMapCenter] = useState<any>({ latitude: pathLat, longitude: pathlng });
+	const [markers, setMarkers] = useState<GeoJSONFeature[]>([]);
+	const [currentMapCenter, setCurrentMapCenter] = useState<LatLng>({ latitude: pathLat, longitude: pathlng });
 	const [isConfirmingLocation, setIsConfirmingLocation] = useState(false);
 	const [liveAddress, setLiveAddress] = useState<string>(pathAddress || "");
 	
 	const createSavedLocation = useCreateSavedLocation();
 	const selectSavedLocation = useSelectSavedLocation();
 	const [isGeocoding, setIsGeocoding] = useState(false);
-	const geocodeTimeoutRef = useReactRef<any>(null);
+	// `setTimeout` in React Native returns a number, not a Node `Timeout`.
+	const geocodeTimeoutRef = useReactRef<ReturnType<typeof setTimeout> | null>(null);
 	const [floorLevel, setFloorLevel] = useState<string>("0");
 	const [hasElevator, setHasElevator] = useState<boolean>(false);
 
 	// WebSocket Tracking States
-	const [activeSession, setActiveSession] = useState<any>(null);
+	const [activeSession, setActiveSession] = useState<Order | null>(null);
 	const [riderCoordinates, setRiderCoordinates] = useState<{lat: number, lng: number} | null>(null);
 
     const { data: allVendors = [], isLoading: vendorsLoading } = useAllVendors();
@@ -764,37 +810,41 @@ const initialRegion: import("@/types/models").MapRegion = {
                     const vendorData = {
                         id: vendor.id,
                         title: vendor.business_name,
-                        owners_name: vendor.owners_name,
                         rating: vendor.rating,
-                        image: vendor.profile_pic
+                        image: vendor.profile_pic,
+                        location_address: vendor.location_address,
                     }
                     setVendor(vendorData)
                     vendorMapView()
                 }
             }
         }
-        const convertToClusterPoints = (vendors: any) => {
-            const vendorArray = Array.isArray(vendors) ? vendors : ((vendors as any)?.data || []);
-            return vendorArray.map((vendor: Vendor) => ({
-                type: "Feature",
-                geometry: {
-                    type: "Point",
-                    coordinates: [vendor.lng, vendor.lat], // [lng, lat]
-                },
-                properties: {
-                    id: vendor.id,
-                    title: vendor.business_name,
-                    owners_name: vendor.owners_name,
-                    rating: vendor.rating,
-                    image: vendor.profile_pic
-                },
-            }));
-        };
+        // A store whose coordinates are null is not placeable, and `lat`/`lng`
+        // are nullable on `Vendor`. Coercing them would put a marker at 0°,0° —
+        // in the Atlantic — so such a store is left off the map instead.
+        const convertToClusterPoints = (vendors: Vendor[]): GeoJSONFeature[] =>
+            vendors
+                .filter((vendor) => vendor.lat != null && vendor.lng != null)
+                .map((vendor) => ({
+                    type: "Feature",
+                    geometry: {
+                        type: "Point",
+                        // [lng, lat] — GeoJSON's order, the reverse of the map's.
+                        coordinates: [vendor.lng as number, vendor.lat as number],
+                    },
+                    properties: {
+                        id: vendor.id,
+                        title: vendor.business_name,
+                        rating: vendor.rating,
+                        image: vendor.profile_pic,
+                        location_address: vendor.location_address,
+                    },
+                }));
         setMarkers(convertToClusterPoints(allVendors));
     }, [allVendors, pathid]);
 
 	// MAP MARKERS CALLBACK
-	const renderClusterMarker = useCallback((item: import("@/types/models").GeoJSONFeature) => {
+	const renderClusterMarker = useCallback((item: GeoJSONFeature) => {
 		return (
 			<Marker
 				key={`cluster-${item.properties.cluster_id}`}
@@ -815,7 +865,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 		);
 	}, []);
 
-	const renderSingleMarker = useCallback((item: import("@/types/models").GeoJSONFeature) => {
+	const renderSingleMarker = useCallback((item: GeoJSONFeature) => {
 		return (
 			<Marker
 				key={item.properties.id}
@@ -838,8 +888,8 @@ const initialRegion: import("@/types/models").MapRegion = {
 		);
 	}, []);
 
-	const mapRef = useRef<any>(null);
-	const trackingMarkerRef = useRef<any>(null);
+	const mapRef = useRef<MapViewType | null>(null);
+	const trackingMarkerRef = useRef<React.ComponentRef<typeof MarkerAnimatedType> | null>(null);
 
 	// GET CURRENT USER LOCATION FUNCTION
 	async function getCurrentLocation() {
@@ -860,7 +910,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 	// Fetch active orders for Tracking
     useEffect(() => {
         if (!orders || orders.length === 0) return;
-        const active = orders.find((o: any) => o.order_status === "picked_up");
+        const active = orders.find((o) => o.order_status === "picked_up");
         if (active) {
             setActiveSession(active);
         }
@@ -880,7 +930,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 	 * authenticates, handles both payload shapes, falls back to REST polling, and
 	 * reconnects when connectivity returns.
 	 */
-	const trackedOrderId = activeSession?.order_id || activeSession?.id || null;
+	const trackedOrderId = activeSession?.id || null;
 	const { data: riderLocation } = useRiderTracking(
 		trackedOrderId,
 		!!trackedOrderId && ShowFloatingOrder,
@@ -964,7 +1014,10 @@ const initialRegion: import("@/types/models").MapRegion = {
 											// 🔴 PRODUCTION GOOGLE MAPS MODE 
 											// Uncomment this block for Production:
 											provider={PROVIDER_GOOGLE}
-                                            mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                                            // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                                            // the prop these three screens passed was dropped and cloud styling has
+                                            // never once been applied. A misspelt prop on a native view is silent.
+                                            googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
 											style={StyleSheet.absoluteFill}
 											onRegionChangeComplete={(region: import("@/types/models").MapRegion) => {
 												setRegion(region);
@@ -984,7 +1037,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 											{/* Uncomment this block for MVP: */}
 											{/* {UrlTile && <UrlTile urlTemplate={darkTheme ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png" : "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"} maximumZ={20} />} */}
 											{
-												markers.map((item: import("@/types/models").GeoJSONFeature) => 
+												markers.map((item: GeoJSONFeature) => 
 													item.properties.cluster
 														? renderClusterMarker(item)
 														: renderSingleMarker(item)
@@ -1317,7 +1370,11 @@ const initialRegion: import("@/types/models").MapRegion = {
 												</View>
 											</View>
 											<View className={`gap-3`}>
-												{orders && orders.filter((o: any) => o.id !== activeSession?.order_id).map((order: any, idx: number) => (
+												{/* `activeSession?.order_id` — an `Order` has no such
+												    field, so this compared every id against
+												    `undefined` and the order already shown in the
+												    floating card above was listed again below it. */}
+												{orders && orders.filter((o) => o.id !== activeSession?.id).map((order, idx) => (
 													<OrderListItem key={idx} data={order} />
 												))}
 												{(!orders || orders.length === 0) && (

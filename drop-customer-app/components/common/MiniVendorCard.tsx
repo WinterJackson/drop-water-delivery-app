@@ -7,27 +7,20 @@ import DropButton from "../ui/DropButton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
 
-type Vendor = {
-	id: string;
-	owners_name: string;
-	business_name: string;
-	email: string;
-	phone_number: string;
-	profile_pic: string;
-	location_address: string;
-	lat: number;
-	lng: number;
-	shift_start: string; // e.g. "07:00:00"
-	shift_end: string; // e.g. "19:00:00"
-	verification_status: "pending" | "verified" | "rejected"; // enum-like union
-	rating: number;
-	preferred_payment_method: ("cash" | "mpesa" | "card" | "bank_transfer")[];
-};
+import type { GeoJSONVendorProperties } from "@/types/models";
 
 const { width } = Dimensions.get("window");
 
+/**
+ * `data` is a **map marker's** properties, not a `Vendor` — the map screen
+ * builds `{id, title, rating, image}` from one before setting it. This file
+ * used to carry its own `Vendor` declaration, unused and still listing
+ * `verification_status` and `preferred_payment_method`, which the server
+ * stopped sending customers; `data: any` is what let a dead type sit beside a
+ * prop it did not describe.
+ */
 type Props = {
-	data: any;
+	data?: GeoJSONVendorProperties;
 	FullMap: boolean;
 	// partialMap: () => void
 };
@@ -51,33 +44,49 @@ const MiniVendorCard = ({ data, FullMap }: Props) => {
         {/* profilpic */}
         <View className={`w-[60px] h-[60px] rounded-full overflow-hidden relative`}>
           <Ionicons name="person" size={24} color={darkTheme?"gray":"dimgray"} />
-          <Image source={{uri: data.image}} className="w-full h-full rounded-full absolute" />
+          {data.image && (
+            <Image source={{uri: data.image}} className="w-full h-full rounded-full absolute" />
+          )}
         </View>
         {/* details */}
         <View className={`gap-1 flex-1 `}>
           <Text className={`font-sans-bold text-lg ${darkTheme?"text-white":"text-black"}`} numberOfLines={1} ellipsizeMode="tail">{data.title}</Text>
 
-          {/* <------------------NAME-------------------> */}
+          {/* <----------------WHERE IT IS--------------->
+              The owner's personal name used to sit here, labelled "Vendor:".
+              That is the shopkeeper's own name on a card shown to every
+              customer browsing, and the server no longer sends it. Where the
+              shop actually is, is both non-identifying and the thing a customer
+              is looking for. */}
           <View className="gap-1 flex-row items-center">
-            <Text className={`font-sans-bold ${darkTheme? "text-white":"text-black"}`}>Vendor: </Text>
+            <Ionicons name="location-outline" size={14} color={darkTheme ? "#cbd5e1" : "#475569"} />
             <Text className={`${darkTheme?"text-gray-300":"text-gray-700"} flex-1 font-sans-semibold`} numberOfLines={1} ellipsizeMode="tail">
-              {data?.owners_name}
+              {data?.location_address ?? "Location not set"}
             </Text>
           </View>
 
-          {/* <-----------------RATING------------------> */}
+          {/* <-----------------RATING------------------>
+              `rating` is null on a store nobody has reviewed yet, and
+              `Array(Math.round(null))` is `Array(NaN)`, which **throws**
+              "Invalid array length" — so tapping a new shop on the map crashed
+              this card. A store with no rating says so instead. */}
           <View className="flex-row items-center gap-3">
             <Text className={`font-sans-bold ${darkTheme? "text-white":"text-black"}`}>Rating:</Text>
-            <View className="flex-row gap-1">
-              {data != undefined &&
-                [...Array(Math.round(data?.rating))].map((i, index) => {
-                  return <Text key={index}>⭐</Text>;
-                })}
-            </View>
-            <View className="pl-3 flex-row gap-3 text-gray-500 items-end">
-              <Text>/</Text>
-              <Text className={`${darkTheme?"text-gray-400":"text-gray-500"}`}>{`${data?.rating}`}</Text>
-            </View>
+            {data.rating == null ? (
+              <Text className={`${darkTheme?"text-gray-400":"text-gray-500"}`}>Not rated yet</Text>
+            ) : (
+              <>
+                <View className="flex-row gap-1">
+                  {Array.from({ length: Math.round(data.rating) }).map((_, index) => (
+                    <Text key={index}>⭐</Text>
+                  ))}
+                </View>
+                <View className="pl-3 flex-row gap-3 text-gray-500 items-end">
+                  <Text>/</Text>
+                  <Text className={`${darkTheme?"text-gray-400":"text-gray-500"}`}>{`${data.rating}`}</Text>
+                </View>
+              </>
+            )}
           </View>
 
           {/* <------------FULL RATING STATS------------> */}

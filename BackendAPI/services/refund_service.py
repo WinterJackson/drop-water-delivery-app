@@ -54,7 +54,12 @@ async def process_single_refund(session: AsyncSession, order: Order) -> dict:
     # Initiate the reversal
     reversal_result = await initiate_mpesa_reversal(
         transaction_id=payment.mpesa_receipt,
-        amount=float(payment.amount),
+        # `payment.amount` is already the NUMERIC the customer was charged.
+        # Routing it through `float()` on the way out is a downgrade that buys
+        # nothing: `whole_shillings` re-derives a Decimal from it a moment later,
+        # so the only thing the cast can do is lose information about the very
+        # figure being given back.
+        amount=payment.amount,
     )
 
     if reversal_result.get("success"):

@@ -25,24 +25,42 @@ import { Text } from '@/components/ui/Text';
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
 import { formatMoney, isZeroMoney, multiplyMoney, sumMoney } from "@/utils/money";
 
-let MapView: any = null;
-let Marker: any = null;
-let AnimatedRegion: any = null;
-let MarkerAnimated: any = null;
-let Polyline: any = null;
-let PROVIDER_GOOGLE: any = null;
+/**
+ * `react-native-maps` has no web build, so it is `require`d behind a platform
+ * check. Its *types* import freely — `import type` is erased and emits no
+ * require — so the components below are the real ones and the web stand-ins are
+ * checked against the same props.
+ *
+ * `AnimatedRegion` was in this list, assigned on native, set to `null` on web
+ * and read by nothing at all.
+ */
+import type MapViewType from 'react-native-maps';
+import type {
+    MapMarkerProps,
+    MapPolylineProps,
+    MapViewProps,
+    MarkerAnimated as MarkerAnimatedType,
+    Provider,
+} from 'react-native-maps';
+
+/** Both driven by ref (`getCamera`, `animateMarkerToCoordinate`), so `ref` is part of the props. */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }>;
+let Marker: React.ComponentType<MapMarkerProps>;
+let MarkerAnimated: React.ComponentType<
+    MapMarkerProps & { ref?: React.Ref<React.ComponentRef<typeof MarkerAnimatedType>> }
+>;
+let Polyline: React.ComponentType<MapPolylineProps>;
+let PROVIDER_GOOGLE: Provider;
 if (Platform.OS !== 'web') {
     const maps = require('react-native-maps');
     MapView = maps.default;
     Marker = maps.Marker;
-    AnimatedRegion = maps.AnimatedRegion;
     MarkerAnimated = maps.MarkerAnimated;
     Polyline = maps.Polyline;
     PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
 } else {
-    MapView = ({ style, children }: any) => <View style={style}>{children}</View>;
+    MapView = ({ style, children }: MapViewProps) => <View style={style}>{children}</View>;
     Marker = () => null;
-    AnimatedRegion = null;
     MarkerAnimated = () => null;
     Polyline = () => null;
     PROVIDER_GOOGLE = 'google';
@@ -142,6 +160,23 @@ export default function OrderDetail() {
 
     const shouldTrackRider = ["picked_up", "mismatch_pending", "pending_review"].includes(order?.order_status as string);
     const { data: riderLocation } = useRiderTracking(order?.id || null, shouldTrackRider);
+
+    /**
+     * The rider's position, or null when there isn't one.
+     *
+     * `RiderLocation.lat`/`lng` are nullable — a rider row exists before the
+     * handset has reported a fix — and the map read them straight into a
+     * `coordinate`, which is a `LatLng` of two non-null numbers. `null` there is
+     * not a missing marker; it is a marker at a coordinate the native view
+     * cannot make sense of.
+     */
+    const riderCoords = useMemo(
+        () =>
+            riderLocation && riderLocation.lat != null && riderLocation.lng != null
+                ? { latitude: riderLocation.lat, longitude: riderLocation.lng }
+                : null,
+        [riderLocation],
+    );
     const { data: trackingLogs } = useOrderTrackingLogs(order?.id || null);
 
     // Cross-party contact info (only fetched during active states)
@@ -158,8 +193,8 @@ export default function OrderDetail() {
         Linking.openURL(`tel:${phone}`);
     };
 
-    const mapRef = useRef<any>(null);
-    const markerRef = useRef<any>(null);
+    const mapRef = useRef<MapViewType | null>(null);
+    const markerRef = useRef<React.ComponentRef<typeof MarkerAnimatedType> | null>(null);
 
     const { height } = Dimensions.get('window');
     const StatusBarHeight = StatusBar.currentHeight || 0;
@@ -167,9 +202,9 @@ export default function OrderDetail() {
 
     const handleZoom = (zoomIn: boolean) => {
         if (mapRef.current) {
-            mapRef.current.getCamera().then((camera: any) => {
-                camera.zoom += zoomIn ? 1 : -1;
-                mapRef.current.animateCamera(camera, { duration: 500 });
+            mapRef.current.getCamera().then((camera) => {
+                camera.zoom = (camera.zoom ?? 0) + (zoomIn ? 1 : -1);
+                mapRef.current?.animateCamera(camera, { duration: 500 });
             });
         }
     };
@@ -262,13 +297,15 @@ export default function OrderDetail() {
                     <MapView
                         ref={mapRef}
                         provider={PROVIDER_GOOGLE}
-                        mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                        // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                        // the prop these three screens passed was dropped and cloud styling has
+                        // never once been applied. A misspelt prop on a native view is silent.
+                        googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                         style={{ flex: 1 }}
                         initialRegion={
-                            shouldTrackRider && riderLocation
+                            shouldTrackRider && riderCoords
                                 ? {
-                                      latitude: riderLocation.lat,
-                                      longitude: riderLocation.lng,
+                                      ...riderCoords,
                                       latitudeDelta: 0.015,
                                       longitudeDelta: 0.015,
                                   }
@@ -288,11 +325,11 @@ export default function OrderDetail() {
                                   }
                         }
                     >
-                        {shouldTrackRider && riderLocation && (MarkerAnimated && Platform.OS !== 'web' ? (
+                        {shouldTrackRider && riderCoords && (Platform.OS !== 'web' ? (
                             <MarkerAnimated
                                 ref={markerRef}
-                                coordinate={{ latitude: riderLocation.lat, longitude: riderLocation.lng }}
-                                title={riderLocation.rider_name || "Rider"}
+                                coordinate={riderCoords}
+                                title={riderLocation?.rider_name || "Rider"}
                                 description="On the way with your order"
                             >
                                 <View className="w-10 h-10 rounded-full bg-white items-center justify-center border-2 border-blue-500" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
@@ -301,8 +338,8 @@ export default function OrderDetail() {
                             </MarkerAnimated>
                         ) : (
                             <Marker
-                                coordinate={{ latitude: riderLocation.lat, longitude: riderLocation.lng }}
-                                title={riderLocation.rider_name || "Rider"}
+                                coordinate={riderCoords}
+                                title={riderLocation?.rider_name || "Rider"}
                             >
                                 <View className="w-10 h-10 rounded-full bg-white items-center justify-center border-2 border-blue-500" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
                                     <Ionicons name="bicycle" size={24} color={BRAND.primary} />
@@ -345,7 +382,7 @@ export default function OrderDetail() {
                         {trackingLogs && trackingLogs.length > 0 && Polyline && (
                             <>
                                 <Polyline
-                                    coordinates={trackingLogs.map((log: any) => ({
+                                    coordinates={trackingLogs.map((log) => ({
                                         latitude: log.lat,
                                         longitude: log.lng,
                                     }))}
@@ -614,7 +651,7 @@ export default function OrderDetail() {
                     <Text className={`text-lg font-sans-bold mb-3 ${darkTheme ? "text-white" : "text-black"}`}>
                         Items ({order.order_item?.length || 0})
                     </Text>
-                    {order.order_item?.map((item: any) => (
+                    {order.order_item?.map((item) => (
                         <View key={item.id} className="flex-row items-center gap-3 mb-3">
                             {item.product?.image_url ? (
                                 <Image source={{ uri: item.product.image_url }} className="w-14 h-14 rounded-xl" />
@@ -648,7 +685,7 @@ export default function OrderDetail() {
                     <View className="flex-row justify-between mb-2">
                         <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
                         <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
-                            {formatMoney(!isZeroMoney(order.product_subtotal) ? order.product_subtotal : sumMoney((order.order_item ?? []).map((i: any) => multiplyMoney(i.price, i.quantity ?? 0))))}
+                            {formatMoney(!isZeroMoney(order.product_subtotal) ? order.product_subtotal : sumMoney((order.order_item ?? []).map((i) => multiplyMoney(i.price, i.quantity ?? 0))))}
                         </Text>
                     </View>
 
@@ -849,7 +886,7 @@ export default function OrderDetail() {
                         router.push({
                             pathname: "/(screens)/Support",
                             params: { orderId: order.id },
-                        } as any)
+                        })
                     }
                     className="py-4 rounded-2xl items-center mb-4 flex-row justify-center gap-2"
                     style={{ borderWidth: 1, borderColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}

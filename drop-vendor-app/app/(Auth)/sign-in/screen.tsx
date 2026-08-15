@@ -91,7 +91,7 @@ export default function SignIn() {
 				// if (__DEV__) console.error(JSON.stringify(signInAttempt, null, 2));
 				success = false
 			}
-		} catch (err: any) {
+		} catch (err: unknown) {
 			if (isClerkAPIResponseError(err)) setErrors(err.errors);
 			success = false
 		} finally {
@@ -126,15 +126,15 @@ export default function SignIn() {
 				if (__DEV__) console.warn("OAuth: No session created, MFA or additional steps may be required.");
 				success = false;
 			}
-		} catch (err: any) {
-			if (err?.errors?.[0]?.message?.includes("already signed in") || (err as Error)?.message?.includes("already signed in")) {
+		} catch (err: unknown) {
+			if ((isClerkAPIResponseError(err) && err.errors.some((e) => e.message?.includes("already signed in"))) || (err instanceof Error && err.message.includes("already signed in"))) {
 				if (__DEV__) console.log("OAuth: User already signed in. Redirecting...");
 				router.replace("/");
 				return;
 			}
 			
 			// Handle stale cache "signed out" error from Clerk
-			if (err?.errors?.[0]?.code === "signed_out" || err?.errors?.[0]?.message === "Signed out" || (err as Error)?.message?.includes("You are signed out")) {
+			if ((isClerkAPIResponseError(err) && err.errors.some((e) => e.code === "signed_out" || e.message === "Signed out")) || (err instanceof Error && err.message.includes("You are signed out"))) {
 				if (__DEV__) console.log("OAuth: Stale session detected. Clearing Clerk cache...");
 				await signOut();
 				success = false;

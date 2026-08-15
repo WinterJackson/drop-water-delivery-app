@@ -53,6 +53,26 @@ const FALLBACK_BY_STATUS: Record<number, string> = {
 };
 
 /**
+ * A thrown value as an indexable object, or `undefined`.
+ *
+ * Everything reaching these functions arrives as `unknown` — a parsed JSON body,
+ * a caught throwable — so narrowing has to happen somewhere. Doing it here once
+ * means the call sites read a named property off a known shape instead of each
+ * asserting `as any` and silently agreeing to whatever comes back.
+ */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+/** A numeric `status` off an unknown throwable, or 0 when it carries none. */
+function asStatus(error: unknown): number {
+	const status = asRecord(error)?.status;
+	return typeof status === "number" ? status : 0;
+}
+
+/**
  * Pull a human-readable message out of whatever the backend returned.
  *
  * FastAPI's `detail` is a string for `HTTPException`, an array of field errors for
@@ -66,8 +86,8 @@ export function extractDetailMessage(detail: unknown): string | null {
 	if (Array.isArray(detail)) {
 		// 422 validation errors: [{ loc, msg, type }, ...]
 		const messages = detail
-			.map((entry: any) => (typeof entry === "string" ? entry : entry?.msg))
-			.filter(Boolean);
+			.map((entry) => (typeof entry === "string" ? entry : asRecord(entry)?.msg))
+			.filter((msg): msg is string => typeof msg === "string" && msg.length > 0);
 		return messages.length ? messages.join(". ") : null;
 	}
 
@@ -84,16 +104,14 @@ export function extractDetailMessage(detail: unknown): string | null {
 
 /** Build an ApiError from a raw response body and status. */
 export function toApiError(status: number, body: unknown, fallback?: string): ApiError {
-	const detail = (body as any)?.detail ?? body;
+	const detail = asRecord(body)?.detail ?? body;
 	const message =
 		extractDetailMessage(detail) ??
 		fallback ??
 		FALLBACK_BY_STATUS[status] ??
 		"Something went wrong. Please try again.";
-	const type =
-		detail && typeof detail === "object" && typeof (detail as any).type === "string"
-			? (detail as any).type
-			: undefined;
+	const rawType = asRecord(detail)?.type;
+	const type = typeof rawType === "string" ? rawType : undefined;
 	return new ApiError(message, status, detail, type);
 }
 
@@ -110,7 +128,7 @@ export function toApiError(status: number, body: unknown, fallback?: string): Ap
  */
 export function retryTransientOnly(maxAttempts = 2) {
 	return (failureCount: number, error: unknown) => {
-		const status = error instanceof ApiError ? error.status : (error as any)?.status ?? 0;
+		const status = error instanceof ApiError ? error.status : asStatus(error);
 		if (status >= 400 && status < 500) return false;
 		return failureCount < maxAttempts;
 	};
@@ -126,3 +144,11 @@ export function errorMessage(error: unknown, fallback = "Something went wrong. P
 	const fromDetail = extractDetailMessage(error);
 	return fromDetail ?? fallback;
 }
+
+// ── Clerk ────────────────────────────────────────────────────────────────────
+// There is deliberately no Clerk error helper here. Clerk ships its own type
+// guard — `isClerkAPIResponseError` from `@clerk/clerk-expo` — which narrows a
+// thrown value to one carrying a typed `errors` array, and the auth screens
+// already import it. A hand-rolled second narrowing beside it would be one more
+// implementation of a rule the library already owns, free to drift from it on
+// the next Clerk release.

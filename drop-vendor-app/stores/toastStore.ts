@@ -15,13 +15,13 @@ const safeString = (val: unknown): string => {
     }).join('; ');
   }
   if (typeof val === 'object') {
-    const obj = val as Record<string, any>;
+    const obj = val as Record<string, unknown>;
     if ('msg' in obj) return String(obj.msg);
     if ('message' in obj) return String(obj.message);
     if ('detail' in obj) {
       // FastAPI detail can be string or array
       if (typeof obj.detail === 'string') return obj.detail;
-      if (Array.isArray(obj.detail)) return obj.detail.map((d: any) => d?.msg || String(d)).join('; ');
+      if (Array.isArray(obj.detail)) return obj.detail.map((d) => (d as { msg?: string })?.msg || String(d)).join('; ');
       return String(obj.detail);
     }
     try { return JSON.stringify(val); } catch { return '[Object]'; }
@@ -38,7 +38,7 @@ interface ToastState {
 }
 
 interface ToastActions {
-  showToast: (type: ToastType, title: any, message?: any, duration?: number) => void;
+  showToast: (type: ToastType, title: unknown, message?: unknown, duration?: number) => void;
   hideToast: () => void;
 }
 

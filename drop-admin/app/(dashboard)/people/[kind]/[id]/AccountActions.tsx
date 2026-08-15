@@ -4,6 +4,7 @@ import { Eye, Loader2, ShieldBan, ShieldCheck, Wallet } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { Button, Card, CardHeader, Field, inputClass } from "@/components/ui/primitives";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatMoney } from "@/lib/utils/format";
 import { adjustWallet, revealContact, setSuspension, type Contact } from "../actions";
 
@@ -27,6 +28,8 @@ export function AccountActions({
   walletBalance: string;
 }) {
   const [contact, setContact] = useState<Contact | null>(null);
+  const [askingWhy, setAskingWhy] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -61,17 +64,16 @@ export function AccountActions({
     });
   }
 
-  function onReveal() {
-    setError(null);
-    const why = window.prompt(
-      `Why do you need this ${kind}'s contact details?\n\nThis is recorded against your account.`,
-    );
-    if (why === null) return;
-
+  function onReveal(why: string) {
+    setRevealError(null);
     startTransition(async () => {
       const result = await revealContact(kind, id, why);
-      if (result.ok) setContact(result.data);
-      else setError(result.error);
+      if (result.ok) {
+        setContact(result.data);
+        setAskingWhy(false);
+      } else {
+        setRevealError(result.error);
+      }
     });
   }
 
@@ -91,6 +93,35 @@ export function AccountActions({
 
   return (
     <div className="space-y-4">
+      {/* The reason is not a formality: it is written to `Admin_Audit_Log`
+          before the details are returned, and the endpoint refuses an empty
+          one. `window.prompt` could not say that, could not require it, and
+          returned `null` without appearing at all in a browser that had
+          suppressed dialogs — so the button simply did nothing. */}
+      <ConfirmDialog
+        open={askingWhy}
+        title={`Reveal this ${kind}'s contact details?`}
+        body={
+          <p>
+            Their email, phone number and address are masked for everyone,
+            including you. Revealing them is an audited action.
+          </p>
+        }
+        reason={{
+          label: "Why do you need them?",
+          placeholder: "e.g. Calling about a failed delivery on order #4F2A19C0",
+          hint: "Recorded against your account, with the time and this account's id.",
+        }}
+        confirmLabel="Reveal details"
+        pending={pending}
+        error={revealError}
+        onConfirm={onReveal}
+        onCancel={() => {
+          setAskingWhy(false);
+          setRevealError(null);
+        }}
+      />
+
       <Card>
         <CardHeader
           title="Contact details"
@@ -105,7 +136,7 @@ export function AccountActions({
               {contact.ID_number ? <Row label="ID number" value={contact.ID_number} /> : null}
             </dl>
           ) : canViewPii ? (
-            <Button variant="secondary" onClick={onReveal} disabled={pending}>
+            <Button variant="secondary" onClick={() => setAskingWhy(true)} disabled={pending}>
               {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
               Reveal contact details
             </Button>

@@ -21,7 +21,7 @@ import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney, moneyRatio, s
 
 export default function Cashout() {
   const router = useRouter();
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { post } = useApiRequest();
   
@@ -146,8 +146,12 @@ export default function Cashout() {
       Alert.alert("Withdrawal requested", "You'll get an M-Pesa confirmation shortly.");
       setWithdrawAmount("");
       setIsWithdrawModalVisible(false);
-    } catch (err: any) {
-      Alert.alert("Withdrawal Failed", err.message || "An error occurred during withdrawal.");
+    } catch (err: unknown) {
+      // `errorMessage`, not `err.message`: the server's refusal is the useful
+      // sentence here — "below the minimum", "that number is not registered for
+      // M-Pesa" — and a raw `.message` on a rejected request is the transport's
+      // words, or `undefined` when what was thrown is not an Error at all.
+      Alert.alert("Withdrawal Failed", errorMessage(err, "An error occurred during withdrawal."));
     }
   };
 

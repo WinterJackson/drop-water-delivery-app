@@ -117,7 +117,7 @@ export default function PrivacySecurity() {
             confirmText: "Continue",
             onConfirm: () => {
                 Popup.hide();
-                router.push("/(Auth)/forgot-password/screen" as any);
+                router.push("/(Auth)/forgot-password/screen");
             }
         });
     };

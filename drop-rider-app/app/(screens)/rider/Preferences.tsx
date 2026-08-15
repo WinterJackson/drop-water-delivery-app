@@ -11,7 +11,7 @@ import { UIThemeContext } from "@/context/ThemeContext";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { Toast } from "@/lib/toast";
-import { useRiderProfile } from "@/hooks/queries/useRiderData";
+import { useRiderProfile, type RiderPreferences } from "@/hooks/queries/useRiderData";
 import { BRAND } from "@/constants/brandColors";
 
 export default function Preferences() {
@@ -22,13 +22,13 @@ export default function Preferences() {
     const queryClient = useQueryClient();
 
     const { put } = useApiRequest();
-    const prefs = profile?.preferences || {
-        orderUpdates: true,
-        analytics: true
+    const prefs: Required<RiderPreferences> = {
+        orderUpdates: profile?.preferences?.orderUpdates ?? true,
+        analytics: profile?.preferences?.analytics ?? true,
     };
 
     const updatePreferencesMutation = useMutation({
-        mutationFn: (newPrefs: any) =>
+        mutationFn: (newPrefs: RiderPreferences) =>
             put(RiderApiRoutes.UpdateProfile.path, { preferences: newPrefs }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["rider", "profile"] });

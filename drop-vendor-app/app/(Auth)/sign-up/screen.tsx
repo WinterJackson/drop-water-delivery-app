@@ -100,7 +100,7 @@ export default function SignUp() {
 			// Set 'pendingVerification' to true to display second form
 			// and capture OTP code
 			setVerification("pending");
-		} catch (err: any) {
+		} catch (err: unknown) {
 			// See https://clerk.com/docs/custom-flows/error-handling
 			// for more info on error handling
 			if (isClerkAPIResponseError(err)) setErrors(err.errors);
@@ -170,9 +170,9 @@ export default function SignUp() {
 				if (__DEV__) console.warn("OAuth: No session created, MFA or additional steps may be required.");
 				success = false
 			}
-		} catch (err: any) {
+		} catch (err: unknown) {
 			// Handle stale cache "signed out" error from Clerk
-			if (err?.errors?.[0]?.code === "signed_out" || err?.errors?.[0]?.message === "Signed out" || (err as Error)?.message?.includes("You are signed out")) {
+			if ((isClerkAPIResponseError(err) && err.errors.some((e) => e.code === "signed_out" || e.message === "Signed out")) || (err instanceof Error && err.message.includes("You are signed out"))) {
 				if (__DEV__) console.log("OAuth: Stale session detected. Clearing Clerk cache...");
 				await signOut();
 				success = false;
@@ -419,8 +419,8 @@ export default function SignUp() {
 										try {
 											await signUp?.prepareEmailAddressVerification({ strategy: "email_code" });
 											Toast.success("Code Resent", "A new verification code has been sent to your email.");
-										} catch (e: any) {
-											Toast.error("Error", e?.errors?.[0]?.longMessage || "Failed to resend code.");
+										} catch (e: unknown) {
+											Toast.error("Error", (isClerkAPIResponseError(e) ? e.errors[0]?.longMessage : undefined) || "Failed to resend code.");
 										}
 									}}
 								>

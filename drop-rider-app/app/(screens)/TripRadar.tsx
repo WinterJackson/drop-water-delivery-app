@@ -32,6 +32,19 @@ import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import { compareMoney, formatMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+/**
+ * A money field off the socket envelope, as the decimal string everything
+ * downstream expects. A number arriving here is coerced rather than passed on:
+ * `utils/money.ts` works in integer cents via `BigInt` and a JS number is
+ * exactly the representation it exists to keep out.
+ */
+const asMoney = (value: unknown): string =>
+  typeof value === "string" ? value : typeof value === "number" ? String(value) : "0";
+
+/** A numeric field off the socket envelope, defaulting to 0. */
+const asNumber = (value: unknown): number =>
+  typeof value === "number" ? value : typeof value === "string" ? Number(value) || 0 : 0;
+
 interface RadarOrder {
   id: string;
   order_status: string;
@@ -129,26 +142,37 @@ export default function TripRadar() {
       setRadarOrders((prev) => {
         const exists = prev.some((o) => o.id === newOrderId);
         if (exists) return prev;
+        // Money defaults to the string `"0"`, never the number `0`. Every
+        // monetary field on this platform is a decimal string all the way to the
+        // screen, and `utils/money.ts` is the only thing that touches the digits
+        // — handing it a number is the one input it is built to never receive.
+        // The socket envelope is open-ended by necessity, so each read is
+        // narrowed to the type the card renders rather than trusted.
         const newOrder: RadarOrder = {
           id: newOrderId,
           order_status: "unassigned",
-          total_amount: updateData.total_amount || 0,
-          delivery_fee: updateData.delivery_fee || updateData.fee || 0,
-          distance_km: updateData.distance_km || 0,
-          estimated_minutes: updateData.estimated_minutes || 0,
-          items_count: updateData.items_count || updateData.quantity || 0,
-          weight_kg: updateData.weight_kg || 0,
-          vendor_net: updateData.vendor_net || 0,
-          platform_total: updateData.platform_total || 0,
-          delivery_type: updateData.delivery_type || "quick_swap",
-          payment_method: updateData.payment_method || "mpesa",
-          vehicle_class: updateData.vehicle_class || "motorbike",
-          vendor: updateData.vendor,
-          delivery_location: updateData.delivery_location,
-          lat: updateData.lat,
-          lng: updateData.lng,
-          lat_from: updateData.lat_from,
-          lng_from: updateData.lng_from,
+          total_amount: asMoney(updateData.total_amount),
+          delivery_fee: asMoney(updateData.delivery_fee ?? updateData.fee),
+          distance_km: asNumber(updateData.distance_km),
+          estimated_minutes: asNumber(updateData.estimated_minutes),
+          items_count: asNumber(updateData.items_count ?? updateData.quantity),
+          weight_kg: asNumber(updateData.weight_kg),
+          vendor_net: asMoney(updateData.vendor_net),
+          platform_total: asMoney(updateData.platform_total),
+          delivery_type: updateData.delivery_type === "keep_my_bottle" ? "keep_my_bottle" : "quick_swap",
+          payment_method: updateData.payment_method === "cash" ? "cash" : "mpesa",
+          vehicle_class: typeof updateData.vehicle_class === "string" ? updateData.vehicle_class : "motorbike",
+          vendor: updateData.vendor?.id && updateData.vendor.business_name
+            ? {
+                id: updateData.vendor.id,
+                business_name: updateData.vendor.business_name,
+                location_address: updateData.vendor.location_address,
+              }
+            : undefined,
+          lat: asNumber(updateData.lat),
+          lng: asNumber(updateData.lng),
+          lat_from: asNumber(updateData.lat_from),
+          lng_from: asNumber(updateData.lng_from),
           created_at: new Date().toISOString(),
         };
         return [newOrder, ...prev];
@@ -445,7 +469,10 @@ export default function TripRadar() {
           <MapView
             provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
             // @ts-ignore
-            mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+            // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+            // the prop every map screen in all three apps passed was dropped and cloud
+            // styling has never once been applied. A misspelt prop is silent here.
+            googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
             style={{ flex: 1 }}
             initialRegion={initialRegion}
             showsUserLocation={false}

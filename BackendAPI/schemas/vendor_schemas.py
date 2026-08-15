@@ -6,7 +6,7 @@ from schemas.product_schemas import ProductThin, BaseProduct
 from models.vendor_model import VendorBusinessType
 from pydantic import field_validator
 from utils.s3_utils import public_asset_url
-from typing import List, Literal, Any
+from typing import List
 
 class CreateVendor(BaseModel):
     clerk_id: str
@@ -77,48 +77,45 @@ class BaseVendor(StorefrontState):
   model_config = {"from_attributes": True, "use_enum_values": True}
 
 
-class VendorOut(StorefrontState):
-  id : UUID
-  owners_name: str
-  business_name: str
-  email: EmailStr
-  phone_number: str | None
-  profile_pic: str | None
-  location_address: str | None
-  lat: float | None
-  lng: float | None
-  shift_start: time
-  shift_end: time
-  verification_status: str
-  rating: float | None
-  preferred_payment_method: List[str] | None = None
-  
-  @field_validator('profile_pic', mode='after')
-  @classmethod
-  def secure_urls(cls, v: str | None) -> str | None:
-      if v and not v.startswith('http') and not v.startswith('/api/uploads/'):
-          # `public_asset_url`, not `generate_presigned_url`. This is a
-          # photograph, not a document: presigning it produced a different URL
-          # in every response, which changes the cache key in every response,
-          # which means every client re-downloads every image on every refresh.
-          # See `utils/s3_utils.public_asset_url`.
-          return public_asset_url(v)
-      return v
-  
-  model_config = {"from_attributes": True, "use_enum_values": True}
-
 class VendorWithProductsThin(BaseVendor):
   products : List[ProductThin]
   
   model_config = {"from_attributes": True}
 
-class VendorWithProductsFull(VendorOut):
+class VendorStorefront(BaseVendor):
+  """A store as a *customer* sees it — the shop, not the person who owns it.
+
+  This replaces `VendorOut`, which was serving customer-facing reads. That
+  carried `owners_name`, `email`, `phone_number` and `preferred_payment_method` — and
+  that last one is the vendor's **payout destination** despite the name: their
+  M-Pesa till, paybill or bank account. `POST /api/vendor_details_and_products`
+  returned all four with no authentication dependency at all, and `GET
+  /api/vendors` handed out every store id unauthenticated, so the two together
+  were an owner-name-plus-phone-plus-till list for the whole vendor base,
+  available to anyone who could reach the API. Name, number and till is
+  precisely the kit for a convincing "Drop support" call.
+
+  A customer needs the shop: what it is called, where it is, when it opens,
+  what it sells and how it is rated. None of the four is rendered anywhere in
+  the customer app — checked field by field before this was narrowed.
+
+  `VendorOut` is deleted rather than left unused, because an existing schema
+  that already has the fields is what the next customer-facing read would
+  reach for.
+
+  `verification_status` is also absent: it is an internal moderation state, and
+  the storefront already tells a customer whether the shop is trading.
+  """
+  location_address: str | None = None
   shift_start: time
   shift_end: time
-  profile_pic: str | None
+
+  model_config = {"from_attributes": True, "use_enum_values": True}
+
+class VendorWithProductsFull(VendorStorefront):
   products : List[BaseProduct]
-  
-  model_config = {"from_attributes": True}
+
+  model_config = {"from_attributes": True, "use_enum_values": True}
 
 class RequestBodyCoordinates(BaseModel):
   lat: float

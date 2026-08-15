@@ -45,15 +45,23 @@ class TestAuthServices:
 
     @pytest.mark.asyncio
     async def test_get_existing_vendor(self):
-        """Test getting vendor by clerk_id."""
+        """The caller's own store, resolved so a second one cannot break it.
+
+        This used to assert `scalar_one_or_none()`, which raises
+        `MultipleResultsFound` the moment an owner opens a branch — and this
+        function backs `POST /api/auth/create_vendor`, the endpoint the vendor
+        app's onboarding posts to, so that was a 500 from the one screen a
+        vendor cannot get past. `.scalars().first()` over an ordered, limited
+        query is what a multi-store owner needs.
+        """
         from services.vendor_auth_service import get_existing_vendor
-        
+
         db = AsyncMock()
         mock_result = MagicMock()
         mock_vendor = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_vendor
+        mock_result.scalars.return_value.first.return_value = mock_vendor
         db.execute.return_value = mock_result
-        
+
         result = await get_existing_vendor("clerk_456", db)
         assert result == mock_vendor
         db.execute.assert_called_once()

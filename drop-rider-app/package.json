@@ -10,7 +10,10 @@
     "lint": "expo lint",
     "preflight": "node scripts/preflight.js",
     "preflight:strict": "node scripts/preflight.js --strict",
-    "eas-build-pre-install": "node scripts/preflight.js --strict"
+    "eas-build-pre-install": "node scripts/preflight.js --strict",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@clerk/clerk-expo": "^2.11.6",
@@ -76,12 +79,34 @@
     "@clerk/types": "^4.101.20",
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^14.0.0",
+    "@types/jest": "^29.5.14",
     "@types/node": "^25.5.2",
     "@types/react": "~19.1.10",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
-    "react-test-renderer": "^19.2.7",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.17",
+    "react-test-renderer": "^19.1.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "jest": {
+    "preset": "jest-expo",
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.expo/",
+      "/dist/"
+    ],
+    "collectCoverageFrom": [
+      "utils/**/*.{ts,tsx}",
+      "API/**/*.{ts,tsx}",
+      "hooks/**/*.{ts,tsx}",
+      "components/**/*.{ts,tsx}",
+      "constants/**/*.{ts,tsx}",
+      "!**/node_modules/**"
+    ]
+  }
 }

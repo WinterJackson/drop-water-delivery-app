@@ -4,32 +4,12 @@ import { flattenPages } from '@/utils/paging';
 import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export interface Product {
-    id: string;
-    vendor_id: string;
-    name: string;
-    description: string | null;
-    price: number;
-    discount: number;
-    image_url: string;
-    capacity: number;
-    weight_kg: number;
-    minimum_order_qty: number;
-    unit: string | null;
-    stock: number;
-    stock_quantity: number; // computed alias of stock from backend
-    is_available: boolean;
-    category?: string | null;
-    vendor?: {
-        id: string;
-        business_name: string;
-        location_address?: string;
-        lat?: number;
-        lng?: number;
-        rating?: number;
-        profile_pic?: string;
-    };
-}
+//
+// Declared in `types/models.ts` and re-exported so existing imports keep
+// working. The copy that lived here typed `price` and `discount` as `number` —
+// see the note on `Product` in that file.
+export type { Product } from '@/types/models';
+import type { Product, VendorWithProducts } from '@/types/models';
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 export function useProduct(productId: string) {
@@ -41,11 +21,16 @@ export function useProduct(productId: string) {
     });
 }
 
+/**
+ * The storefront and its catalogue in one call — and the only customer-facing
+ * read that carries the store's live trading state (`is_accepting_orders`,
+ * `store_state`, `store_reason`). An order's embedded vendor snippet does not.
+ */
 export function useVendorDetails(vendorId: string) {
     const api = useApiRequest();
-    return useQuery<any, Error>({
+    return useQuery<VendorWithProducts, Error>({
         queryKey: ['vendor', vendorId],
-        queryFn: () => api.post(ROUTES.GET_VENDOR_DETAILS, { id: vendorId }),
+        queryFn: () => api.post<VendorWithProducts>(ROUTES.GET_VENDOR_DETAILS, { id: vendorId }),
         enabled: !!vendorId,
     });
 }
@@ -106,9 +91,9 @@ export function useCategories() {
 
 export function usePaginatedProducts(page: number) {
     const api = useApiRequest();
-    return useQuery({
+    return useQuery<Product[], Error>({
         queryKey: ['products', 'paginated', page],
-        queryFn: () => api.post(ROUTES.GET_PAGINATED_PRODUCTS, { page }),
+        queryFn: () => api.post<Product[]>(ROUTES.GET_PAGINATED_PRODUCTS, { page }),
     });
 }
 

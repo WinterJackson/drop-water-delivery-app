@@ -153,7 +153,10 @@ export default function VendorDirectory() {
                     // Uncomment this block for Production:
                     provider={PROVIDER_GOOGLE}
                     // @ts-ignore
-                    mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                    // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                    // the prop these three screens passed was dropped and cloud styling has
+                    // never once been applied. A misspelt prop on a native view is silent.
+                    googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                     style={{ flex: 1 }}
                     initialRegion={{
                         latitude: User?.lat || -1.2921,

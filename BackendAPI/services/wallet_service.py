@@ -9,7 +9,7 @@ from models.user_model import User
 from models.vendor_model import Vendor
 from models.deliverer_model import Deliverer
 from services.payment_service import initiate_stk_push, initiate_b2c_payout
-from utils.money import money_str
+from utils.money import MoneyIn, money_str
 from utils.paging import stable
 
 logger = logging.getLogger(__name__)
@@ -237,7 +237,7 @@ async def apply_wallet_delta(
     )
 
 
-async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str, store_id: str | None = None):
+async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: str, amount: MoneyIn, phone: str, store_id: str | None = None):
     import re
 
     amount_dec = Decimal(str(amount))
@@ -397,7 +397,7 @@ async def handle_mpesa_topup_callback(session: AsyncSession, payload: dict):
     await session.commit()
     return {"status": "failed"}
 
-async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_type: str, amount: float, phone: str, store_id: str | None = None):
+async def initiate_wallet_withdrawal(session: AsyncSession, user_id: str, user_type: str, amount: MoneyIn, phone: str, store_id: str | None = None):
     import re
 
     amount = Decimal(str(amount))

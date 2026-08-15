@@ -3,6 +3,8 @@ import { retryTransientOnly } from "@/API/errors";
 import { useApiRequest } from "@/API/useApiClient";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { VendorOrder, VendorOrderStatus } from "@/types/models";
+
 /**
  * One page of orders as the backend actually describes it.
  *
@@ -13,7 +15,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
  * rather than answered by the server.
  */
 export interface VendorOrdersPage {
-    items: any[];
+    items: VendorOrder[];
     limit: number;
     offset: number;
     has_more: boolean;
@@ -75,7 +77,7 @@ export function useVendorOrder(orderId: string | null) {
 
     return useQuery({
         queryKey: ["vendorOrder", orderId],
-        queryFn: () => get<any>(VendorApiRoutes.GetOrder(orderId!).path),
+        queryFn: () => get<VendorOrder>(VendorApiRoutes.GetOrder(orderId!).path),
         enabled: !!orderId,
         retry: retryTransientOnly(),
     });
@@ -119,25 +121,29 @@ export function useUpdateOrderStatus() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ orderId, status }: { orderId: string; status: string }) => {
+        mutationFn: ({ orderId, status }: { orderId: string; status: VendorOrderStatus }) => {
             const route = VendorApiRoutes.UpdateOrderStatus(orderId);
             return put(route.path, { status });
         },
         onMutate: async ({ orderId, status }) => {
             await queryClient.cancelQueries({ queryKey: ["vendorOrders"] });
-            const previousOrders = queryClient.getQueryData(["vendorOrders"]);
+            const previousOrders = queryClient.getQueryData<VendorOrder[]>(["vendorOrders"]);
 
             // Optimistically update
-            queryClient.setQueryData(["vendorOrders"], (old: any) => {
+            queryClient.setQueryData<VendorOrder[]>(["vendorOrders"], (old) => {
                 if (!Array.isArray(old)) return old;
-                return old.map((order: any) =>
+                return old.map((order) =>
                     order.id === orderId ? { ...order, order_status: status } : order
                 );
             });
 
             return { previousOrders };
         },
-        onError: (err, variables, context: any) => {
+        // Typed rather than `any`: `context` is whatever `onMutate` returned, and
+        // React Query infers exactly that. Annotating it `any` threw the
+        // inference away and let a rename of `previousOrders` compile — the
+        // rollback would then silently restore nothing on a failed accept.
+        onError: (_err, _variables, context) => {
             if (context?.previousOrders) {
                 queryClient.setQueryData(["vendorOrders"], context.previousOrders);
             }

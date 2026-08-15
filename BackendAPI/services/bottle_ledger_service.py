@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.bottle_ledger_model import BottleLedgerEntry, BottleLedgerEntryType
 from models.vendor_rider_model import VendorRiderRegistry
-from typing import Iterable, Sequence
+from typing import Iterable
 from utils.paging import stable
 
 logger = logging.getLogger(__name__)

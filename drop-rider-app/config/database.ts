@@ -4,7 +4,42 @@
  * when the native module isn't available (e.g., Expo Go).
  */
 
-let _db: any = null;
+import type { SQLiteDatabase } from 'expo-sqlite';
+
+import type { RiderOrder } from '@/hooks/queries/useRiderData';
+
+/**
+ * One row of `PRAGMA table_info(...)`.
+ *
+ * SQLite's shape, not ours, and fixed by the engine — so it can be declared
+ * rather than asserted. The migrations below decide whether to rewrite a table
+ * by reading `name` and `type` off these rows, and with `any[]` a typo in either
+ * column name silently meant "no migration needed": the money columns would have
+ * stayed `REAL` on the copy the rider reads while offline, which is the one copy
+ * that cannot be checked against the server.
+ */
+interface TableColumn {
+    cid: number;
+    name: string;
+    type: string;
+    notnull: number;
+    dflt_value: string | null;
+    pk: number;
+}
+
+/** A row of the legacy `offline_actions` table, read during migration. */
+interface LegacyActionRow {
+    id?: string;
+    row_id?: string;
+    type?: string;
+    payload?: string;
+    created_at?: string;
+    attempts?: number;
+    last_error?: string | null;
+    needs_attention?: number;
+}
+
+let _db: SQLiteDatabase | null = null;
 let dbFailed = false;
 
 const getSQLite = async () => {
@@ -81,9 +116,9 @@ export const initDB = async () => {
         // `offline_actions` is deliberately untouched by this: it holds work the
         // rider has done and not yet synced, which is not reconstructible from
         // anywhere.
-        const orderCols = (await db.getAllAsync(`PRAGMA table_info(orders)`)) as any[];
+        const orderCols = await db.getAllAsync<TableColumn>(`PRAGMA table_info(orders)`);
         const moneyIsFloat = orderCols.some(
-            (c: any) => (c.name === 'total_amount' || c.name === 'delivery_fee') && String(c.type).toUpperCase() === 'REAL'
+            (c: TableColumn) => (c.name === 'total_amount' || c.name === 'delivery_fee') && String(c.type).toUpperCase() === 'REAL'
         );
         if (moneyIsFloat) {
             await db.execAsync(`DROP TABLE IF EXISTS orders;`);
@@ -115,13 +150,13 @@ export const initDB = async () => {
         // queueOfflineAction() call on those devices throws "no such column: row_id",
         // silently swallowed by its catch block — offline queueing goes dark with zero
         // user-facing signal. Detect the old schema and migrate forward instead.
-        const existingCols = await db.getAllAsync(`PRAGMA table_info(offline_actions)`) as any[];
-        const hasRowId = existingCols.some((c: any) => c.name === 'row_id');
+        const existingCols = await db.getAllAsync<TableColumn>(`PRAGMA table_info(offline_actions)`);
+        const hasRowId = existingCols.some((c: TableColumn) => c.name === 'row_id');
 
         if (existingCols.length > 0 && !hasRowId) {
-            let legacyRows: any[] = [];
+            let legacyRows: LegacyActionRow[] = [];
             try {
-                legacyRows = await db.getAllAsync(`SELECT * FROM offline_actions`) as any[];
+                legacyRows = await db.getAllAsync<LegacyActionRow>(`SELECT * FROM offline_actions`);
             } catch {
                 legacyRows = [];
             }
@@ -145,11 +180,16 @@ export const initDB = async () => {
                 try {
                     for (const row of legacyRows) {
                         await migrateStmt.executeAsync({
+                            // Coerced rather than passed through: every column
+                            // on `LegacyActionRow` is optional, and `undefined`
+                            // is not a value SQLite can bind — it picks the
+                            // variadic overload and fails at runtime, mid
+                            // migration, on the rider's queued work.
                             $row_id: `${row.id}:migrated:${row.created_at || Date.now()}`,
-                            $id: row.id,
-                            $type: row.type,
-                            $payload: row.payload,
-                            $created_at: row.created_at,
+                            $id: row.id ?? null,
+                            $type: row.type ?? null,
+                            $payload: row.payload ?? null,
+                            $created_at: row.created_at ?? null,
                         });
                     }
                 } finally {
@@ -175,8 +215,8 @@ export const initDB = async () => {
         // rather than a table rebuild: these rows are a rider's unsynced
         // deliveries, and dropping the table to add a column would destroy the
         // exact data the queue exists to protect.
-        const cols = await db.getAllAsync(`PRAGMA table_info(offline_actions)`) as any[];
-        const names = new Set(cols.map((c: any) => c.name));
+        const cols = await db.getAllAsync<TableColumn>(`PRAGMA table_info(offline_actions)`);
+        const names = new Set(cols.map((c: TableColumn) => c.name));
         for (const [column, ddl] of [
             ['attempts', 'ALTER TABLE offline_actions ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'],
             ['last_error', 'ALTER TABLE offline_actions ADD COLUMN last_error TEXT'],
@@ -199,7 +239,7 @@ export const initDB = async () => {
     }
 }
 
-export const saveOrdersLocal = async (orders: any[]) => {
+export const saveOrdersLocal = async (orders: RiderOrder[]) => {
     const db = await getDB();
     if (!db) return;
 
@@ -213,25 +253,29 @@ export const saveOrdersLocal = async (orders: any[]) => {
 
         for (let o of orders) {
             await statement.executeAsync({
+                // `?? null` throughout: an optional field arriving as
+                // `undefined` is not bindable, and expo-sqlite resolves the call
+                // to its variadic overload rather than reporting it — so the row
+                // fails to write at all. Silently, on the offline cache.
                 $id: o.id,
-                $vendor_id: o.vendor_id,
-                $customer_id: o.customer_id,
-                $delivery_address: o.delivery_address,
-                $phone: o.phone,
-                $lat_from: o.lat_from,
-                $lng_from: o.lng_from,
-                $lat: o.lat,
-                $lng: o.lng,
+                $vendor_id: o.vendor_id ?? null,
+                $customer_id: o.customer_id ?? null,
+                $delivery_address: o.delivery_address ?? null,
+                $phone: o.phone ?? null,
+                $lat_from: o.lat_from ?? null,
+                $lng_from: o.lng_from ?? null,
+                $lat: o.lat ?? null,
+                $lng: o.lng ?? null,
                 // Bound as text, never as a number. The server sends a decimal
                 // string and it is stored unchanged; coercing here rather than
                 // relying on SQLite's column affinity means a value that somehow
                 // arrives as a number is at least recorded as what it was, instead
                 // of becoming `"120"` where the server said `"120.00"`.
                 $total_amount: o.total_amount == null ? null : String(o.total_amount),
-                $order_status: o.order_status,
-                $payment_status: o.payment_status,
+                $order_status: o.order_status ?? null,
+                $payment_status: o.payment_status ?? null,
                 $delivery_fee: o.delivery_fee == null ? null : String(o.delivery_fee),
-                $updated_at: o.updated_at
+                $updated_at: o.updated_at ?? null,
             });
         }
         await statement.finalizeAsync();

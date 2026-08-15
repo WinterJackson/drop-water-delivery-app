@@ -5,7 +5,7 @@ from geoalchemy2.functions import ST_DWithin
 from models.product_model import Product
 from models.vendor_model import Vendor
 from schemas.product_schemas import ProductFull
-from schemas.vendor_schemas import VendorOut
+from schemas.vendor_schemas import VendorStorefront
 from services.dispatch_policy import DispatchPolicy
 from services.vendor_service import discoverable_vendor
 from services.product_service import live_product
@@ -105,7 +105,7 @@ async def search_service(session: AsyncSession, query: str | None, limit: int = 
     products = result.unique().scalars().all()
     return products
 
-async def search_vendors_service(session: AsyncSession, query: str | None, limit: int = 20, offset: int = 0, user_lat: float | None = None, user_lng: float | None = None) -> list[VendorOut]:
+async def search_vendors_service(session: AsyncSession, query: str | None, limit: int = 20, offset: int = 0, user_lat: float | None = None, user_lng: float | None = None) -> list[VendorStorefront]:
     stmt = select(Vendor).where(discoverable_vendor())
     order_by_clauses = []
 

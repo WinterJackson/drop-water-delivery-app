@@ -9,7 +9,7 @@ from utils.s3_utils import upload_file_to_s3
 
 import logging
 import imghdr
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
 logger = logging.getLogger(__name__)
 

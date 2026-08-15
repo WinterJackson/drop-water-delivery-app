@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
+import type { Href } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogBox, Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -22,7 +23,28 @@ LogBox.ignoreLogs([
     'SafeAreaView has been deprecated',
 ]);
 
-let Notifications: any = null;
+import type * as ExpoNotifications from 'expo-notifications';
+import type {
+    Notification,
+    NotificationResponse,
+    Subscription,
+} from 'expo-notifications';
+
+/**
+ * The module handle, typed without importing the module.
+ *
+ * `expo-notifications` is `require`d rather than imported because it is absent
+ * from Expo Go, so a static import would crash the dev client on launch. Its
+ * *types* have no such problem: `import type` is erased entirely at compile
+ * time, emits no require, and gives the real signatures for every call below —
+ * so `Notifications` is the actual module shape or `null`, and every call site
+ * has to prove it checked for `null` first.
+ *
+ * It was `any`, which meant the null check was the only thing standing between
+ * a typo in a listener name and a silent no-op on the one path that tells a
+ * user their order moved.
+ */
+let Notifications: typeof ExpoNotifications | null = null;
 if (!isExpoGo) {
     try {
         Notifications = require('expo-notifications');
@@ -85,9 +107,9 @@ async function registerForPushNotificationsAsync(): Promise<string | undefined> 
 
 export function usePushNotifications(queryPrefix: string = 'vendor') {
     const [expoPushToken, setExpoPushToken] = useState('');
-    const [notification, setNotification] = useState<any>(undefined);
-    const notificationListener = useRef<any>(null);
-    const responseListener = useRef<any>(null);
+    const [notification, setNotification] = useState<Notification | undefined>(undefined);
+    const notificationListener = useRef<Subscription | null>(null);
+    const responseListener = useRef<Subscription | null>(null);
     const { getToken, isSignedIn } = useAuth();
     const router = useRouter();
     const queryClient = useQueryClient();
@@ -114,17 +136,17 @@ export function usePushNotifications(queryPrefix: string = 'vendor') {
             }
         });
 
-        notificationListener.current = Notifications.addNotificationReceivedListener((notif: any) => {
+        notificationListener.current = Notifications.addNotificationReceivedListener((notif: Notification) => {
             setNotification(notif);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             queryClient.invalidateQueries({ queryKey: [queryPrefix, 'notifications'] });
             queryClient.invalidateQueries({ queryKey: [queryPrefix, 'notifications', 'unread-count'] });
         });
 
-        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
-            const data = (response as any).notification.request.content.data;
-            if (data?.url) {
-                router.push(data.url as any);
+        responseListener.current = Notifications.addNotificationResponseReceivedListener((response: NotificationResponse | null) => {
+            const data = response?.notification.request.content.data;
+            if (typeof data?.url === 'string') {
+                router.push(data.url as Href);
             }
         });
 

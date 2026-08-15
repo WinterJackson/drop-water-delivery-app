@@ -20,12 +20,25 @@ import { Image } from "expo-image";
 import * as SecureStore from "expo-secure-store";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 
-let MapView: any = null;
-let Marker: any = null;
-let Circle: any = null;
-let Polygon: any = null;
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+import type { RiderProfile } from '@/hooks/queries/useRiderData';
+import type { DiscoveredVendor } from '@/app/(screens)/DiscoverVendors';
+import type MapViewType from 'react-native-maps';
+import type {
+    MapCircleProps,
+    MapMarkerProps,
+    MapPolygonProps,
+    MapUrlTileProps,
+    MapViewProps,
+    Provider,
+} from 'react-native-maps';
+
+/** Driven by ref (`getCamera`, `animateCamera`), so `ref` is part of the props. */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }>;
+let Marker: React.ComponentType<MapMarkerProps>;
+let Circle: React.ComponentType<MapCircleProps>;
+let Polygon: React.ComponentType<MapPolygonProps>;
+let UrlTile: React.ComponentType<MapUrlTileProps>;
+let PROVIDER_GOOGLE: Provider;
 
 if (Platform.OS !== 'web') {
   const maps = require('react-native-maps');
@@ -36,7 +49,7 @@ if (Platform.OS !== 'web') {
   UrlTile = maps.UrlTile;
   PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
 } else {
-  MapView = ({ style, children }: any) => <View style={style}>{children}</View>;
+  MapView = ({ style, children }: MapViewProps) => <View style={style}>{children}</View>;
   Marker = () => null;
   Circle = () => null;
   Polygon = () => null;
@@ -83,13 +96,13 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
 function deg2rad(deg: number) { return deg * (Math.PI / 180) }
 
 export default function OperationBase() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { get, put } = useApiRequest();
   const router = useRouter();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<MapViewType | null>(null);
   const { width, height } = Dimensions.get("window");
 
   const [loading, setLoading] = useState(true);
@@ -124,7 +137,7 @@ export default function OperationBase() {
    * "never set a base" path.
    */
   const loadProfile = async () => {
-    const data = await get<any>(RiderApiRoutes.GetProfile.path);
+    const data = await get<RiderProfile>(RiderApiRoutes.GetProfile.path);
     setZoneChanges(data.zone_changes_this_month || 0);
     setRiderId(data.id);
     // The radius dispatch actually searches, from the server. This screen used
@@ -205,7 +218,7 @@ export default function OperationBase() {
       // Plotting nearby vendors is decoration on this screen; failing to fetch
       // them must not blank the map the rider is choosing their base on.
       try {
-        return await get<any[]>(
+        return await get<DiscoveredVendor[]>(
           RiderApiRoutes.DiscoverVendors(location.latitude, location.longitude).path
         );
       } catch {
@@ -263,14 +276,14 @@ export default function OperationBase() {
 
   const handleZoom = (zoomIn: boolean) => {
     if (!mapRef.current || !location) return;
-    mapRef.current.getCamera().then((cam: any) => {
+    mapRef.current.getCamera().then((cam) => {
       if (!cam) return;
       if (Platform.OS === 'ios') {
-        cam.altitude = zoomIn ? cam.altitude / 2 : cam.altitude * 2;
+        cam.altitude = zoomIn ? (cam.altitude ?? 0) / 2 : (cam.altitude ?? 0) * 2;
       } else {
-        cam.zoom = zoomIn ? cam.zoom + 1 : cam.zoom - 1;
+        cam.zoom = (cam.zoom ?? 0) + (zoomIn ? 1 : -1);
       }
-      mapRef.current.animateCamera(cam, { duration: 300 });
+      mapRef.current?.animateCamera(cam, { duration: 300 });
     });
   };
 
@@ -314,7 +327,10 @@ export default function OperationBase() {
             // 🔴 PRODUCTION GOOGLE MAPS MODE
             //    Swap the line above for this one:
             provider={PROVIDER_GOOGLE}
-            mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+            // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+            // the prop every map screen in all three apps passed was dropped and cloud
+            // styling has never once been applied. A misspelt prop is silent here.
+            googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             initialRegion={{
               latitude: location.latitude,
@@ -358,7 +374,7 @@ export default function OperationBase() {
             */}
 
             {/* Vendor Marker Plots */}
-            {vendors?.map((v: any) => {
+            {vendors?.map((v) => {
               if (typeof v.lat !== 'number' || typeof v.lng !== 'number' || isNaN(v.lat) || isNaN(v.lng)) return null;
               return Marker ? (
                 <Marker

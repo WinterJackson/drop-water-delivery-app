@@ -39,7 +39,7 @@ const RatingStars = ({ rating, setRating, darkTheme }: { rating: number, setRati
 };
 
 const RateOrder = () => {
-    const { currentTheme } = useContext<any>(UIThemeContext);
+    const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const { orderId, vendorId, riderId } = useLocalSearchParams();
     const router = useRouter();

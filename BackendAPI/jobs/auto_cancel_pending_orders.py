@@ -11,9 +11,8 @@ from services.notification_service import create_notification
 from services.order_service import apply_status_transition, revert_order_side_effects
 from services import platform_config_service
 from routes.websocket_routes import manager
-from sqlalchemy import select, and_, update
-from models.order_model import Order, OrderItem
-from models.product_model import Product
+from sqlalchemy import select, and_
+from models.order_model import Order
 
 logger = logging.getLogger(__name__)
 

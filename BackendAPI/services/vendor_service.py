@@ -241,8 +241,7 @@ async def get_top_brands_service(session : AsyncSession, lat : float, lng : floa
   return await _annotated(session, result.unique().scalars().all())
 
 from typing import Optional
-import os
-from sqlalchemy import func , and_, or_
+from sqlalchemy import func, and_
 
 async def get_vendor_directory(
     session: AsyncSession, 

@@ -176,6 +176,126 @@ def test_every_modal_overlay_uses_the_shared_focus_trap():
     )
 
 
+#: `window.confirm` / `.prompt` / `.alert`, however they are reached. The
+#: `window.` prefix is optional in a browser, so a bare `confirm(` counts too —
+#: and `globalThis.prompt(` is the same call by a third spelling.
+_NATIVE_DIALOG = re.compile(
+    r"(?:\b(?:window|globalThis|self)\s*\.\s*)?\b(?:confirm|prompt|alert)\s*\(",
+)
+
+#: Names that merely *contain* one of those words. `confirmLabel`, `confirmText`
+#: and a local `confirm()` handler are all live in this codebase, and the regex
+#: above deliberately does not try to distinguish them by shape.
+_NOT_A_DIALOG = re.compile(r"[A-Za-z0-9_$.]\s*$")
+
+
+def test_no_native_browser_dialogs():
+    """A grey Chrome box is not this console's UI, and it is not merely ugly.
+
+    Three screens used them — removing an administrator, revealing a customer's
+    contact details, revealing a rider's identity documents — and every one of
+    the five problems below applies to at least one:
+
+    * They ignore the theme entirely. Light system chrome lands over a dark
+      console at the moment an operator is deciding whether to trust the screen.
+    * `prompt` cannot validate. Two of the three collected a **reason that is
+      written to `Admin_Audit_Log`**, against endpoints that refuse an empty
+      one — so the operator found out from a red error afterwards.
+    * They block the tab synchronously. React, every in-flight request and
+      `IdleTimeout` are all frozen behind one; the console cannot warn about,
+      or act on, an idle session while a dialog is up.
+    * They are suppressible. "Prevent this page from creating additional
+      dialogs" makes `confirm` return `false` and `prompt` return `null`
+      **without showing anything**, so the button reads as broken.
+    * They take a string. There is nowhere to put the subject's name, the
+      consequence, or a danger tone on the button that does the damage.
+
+    `components/ui/ConfirmDialog.tsx` is the replacement, and it is themed,
+    focus-trapped and audited-reason-aware.
+    """
+    offenders = []
+    for path in _sources("**/*.tsx", "**/*.ts"):
+        code = _code_only(path)
+        # Strings too: the prose in these files names the calls it replaced.
+        code = re.sub(r"""(['"`])(?:\\.|(?!\1).)*\1""", '""', code, flags=re.S)
+        for match in _NATIVE_DIALOG.finditer(code):
+            # `foo.confirm(` where `foo` is not a global, or `onConfirm(` — the
+            # character before the match tells them apart.
+            if _NOT_A_DIALOG.search(code[: match.start()]):
+                continue
+            offenders.append(f"{path.relative_to(ADMIN).as_posix()}: {match.group(0)}")
+
+    assert offenders == [], (
+        "native browser dialogs in the console — use `ConfirmDialog`:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_confirm_dialog_is_a_real_modal():
+    """It replaces a *blocking* browser dialog, so it has to behave like one.
+
+    A themed box that Tab walks straight out of is a worse confirmation than the
+    grey one it replaced: the page behind it is dimmed, looks inert, and is
+    fully operable by keyboard.
+    """
+    source = (ADMIN / "components" / "ui" / "ConfirmDialog.tsx").read_text()
+    assert 'role="alertdialog"' in source
+    assert 'aria-modal="true"' in source
+    assert "useFocusTrap" in source
+    # Escape and the backdrop both cancel, as a browser dialog's Escape does.
+    assert "onEscape" in source
+
+
+def test_the_confirm_dialog_locks_the_page_behind_it():
+    """The palette and the mobile drawer both take this lock, and below `sm`
+    this is a bottom sheet the thumb is already resting on — a page that scrolls
+    underneath one is how a confirmation gets dismissed by a scroll gesture."""
+    source = (ADMIN / "components" / "ui" / "ConfirmDialog.tsx").read_text()
+    assert 'document.body.style.overflow = "hidden"' in source
+    # And restores what was there, rather than assuming "".
+    assert "document.body.style.overflow = previous" in source
+
+
+def test_the_confirm_dialog_focuses_cancel_not_the_destructive_button():
+    """Two rules at once.
+
+    An `alertdialog` that never receives focus may not be announced at all — and
+    with no reason field there is nothing autofocusable in it. But the button
+    that receives that focus must not be the one that does the damage: a
+    confirmation one Return away from an accidental open is not a confirmation.
+    """
+    source = (ADMIN / "components" / "ui" / "ConfirmDialog.tsx").read_text()
+    assert "cancelRef" in source
+    assert "cancelRef.current?.focus()" in source
+    assert re.search(r"<Button\s+ref=\{cancelRef\}", source), (
+        "the focused-on-open button must be Cancel"
+    )
+
+
+def test_an_audited_reason_cannot_be_submitted_empty():
+    """`revealContact` and `revealDocuments` are audited *before* the URLs are
+    minted, and the backend refuses a blank reason. The dialog must not let one
+    be sent — `window.prompt` returned `""` happily, which is how an operator
+    learned the rule from a 400."""
+    source = (ADMIN / "components" / "ui" / "ConfirmDialog.tsx").read_text()
+    assert "trim()" in source, "the reason must be trimmed before it is judged"
+    assert re.search(r"blocked\s*=", source), "there must be a disabled-until-typed rule"
+    assert "disabled={pending || blocked}" in source
+
+
+def test_every_reveal_states_that_it_is_recorded():
+    """The reason field is the only thing standing between an operator and
+    somebody's national ID, so the dialog says where it goes. A prompt that does
+    not mention the audit log reads as a formality to type "asdf" into."""
+    for relative in (
+        "app/(dashboard)/operations/kyc/ReviewCard.tsx",
+        "app/(dashboard)/people/[kind]/[id]/AccountActions.tsx",
+    ):
+        source = (ADMIN / relative).read_text()
+        assert "Recorded against your account" in source, relative
+        assert "reason={{" in source, f"{relative} reveals without asking why"
+
+
 def test_the_palette_announces_its_results():
     """A listbox that swaps contents silently is invisible to a screen reader."""
     source = (ADMIN / "components" / "shell" / "CommandPalette.tsx").read_text()

@@ -19,7 +19,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 const FlashList = OriginalFlashList as any;
 
 export default function MyVendors() {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
   const { get, del } = useApiRequest();

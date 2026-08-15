@@ -94,9 +94,9 @@ export default function Index() {
 
 	// ── Route to correct destination ──
 	if (isSignedIn) {
-		if (readyToRoute === "onboarding") return <Redirect href={"/(Auth)/Onboarding" as any} />;
-		return <Redirect href={"/(screens)" as any} />;
+		if (readyToRoute === "onboarding") return <Redirect href="/(Auth)/Onboarding" />;
+		return <Redirect href="/(screens)" />;
 	} else {
-		return <Redirect href={"/(Auth)" as any} />;
+		return <Redirect href="/(Auth)" />;
 	}
 }

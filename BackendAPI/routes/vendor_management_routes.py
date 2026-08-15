@@ -14,7 +14,6 @@ from dependencies.auth_dependencies import (
 from models.vendor_model import Vendor
 from services.vendor_management_service import (
     register_vendor,
-    get_vendor_by_clerk_id,
     get_all_vendors_by_clerk_id,
     update_vendor_profile,
     create_product,

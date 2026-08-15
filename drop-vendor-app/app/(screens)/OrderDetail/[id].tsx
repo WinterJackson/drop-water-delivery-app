@@ -1,3 +1,4 @@
+import type { VendorOrderStatus } from "@/types/models";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useOrderReview, useUpdateOrderStatus, useVendorOrder } from "@/hooks/queries/useVendorOrders";
@@ -112,7 +113,7 @@ export default function OrderDetail() {
     }
   };
 
-  const updateStatus = async (status: string) => {
+  const updateStatus = async (status: VendorOrderStatus) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     try {
       await updateStatusMutation({ orderId: id as string, status });
@@ -281,7 +282,7 @@ export default function OrderDetail() {
               </View>
               <View>
                 <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Name</Text>
-                <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.user?.username || order.user?.first_name || "Guest"}</Text>
+                <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.user?.full_name || "Guest"}</Text>
               </View>
             </View>
 
@@ -297,14 +298,14 @@ export default function OrderDetail() {
                </View>
             )}
 
-            {order.delivery_location && (
+            {order.delivery_address && (
               <View className="flex-row items-center">
                  <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${darkTheme ? "bg-slate-800" : "bg-white"}`}>
                     <Ionicons name="location" size={18} color={BRAND.primary} />
                  </View>
                  <View className="flex-1">
                    <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Delivery Address</Text>
-                   <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.delivery_location.street || "Not specified"}</Text>
+                   <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.delivery_address}</Text>
                  </View>
                </View>
             )}
@@ -482,7 +483,7 @@ export default function OrderDetail() {
           </View>
 
           {/* Rider Info if assigned */}
-          {order.rider && (
+          {order.deliverer && (
             <View className={`p-5 rounded-[24px] mb-10 border shadow-sm ${darkTheme ? "bg-sky-500/10 border-sky-500/20" : "bg-sky-500/5 border-sky-500/10"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
               <View className="flex-row items-center mb-4">
                  <Ionicons name="bicycle" size={24} color={BRAND.primary} style={{ marginRight: 8 }} />
@@ -494,7 +495,7 @@ export default function OrderDetail() {
                  </View>
                  <View>
                    <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Name</Text>
-                   <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.rider.username || "Assigned Rider"}</Text>
+                   <Text className={`text-base font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.deliverer.full_name || "Assigned Rider"}</Text>
                  </View>
                </View>
                <View className="flex-row items-center">
@@ -503,7 +504,7 @@ export default function OrderDetail() {
                  </View>
                  <View>
                    <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>Vehicle</Text>
-                   <Text className={`text-base font-sans-bold uppercase ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.rider.vehicle_type || "N/A"}</Text>
+                   <Text className={`text-base font-sans-bold uppercase ${darkTheme ? "text-white" : "text-slate-900"}`}>{order.deliverer.vehicle_details || "N/A"}</Text>
                  </View>
                </View>
             </View>
@@ -607,7 +608,7 @@ export default function OrderDetail() {
 
           {canManageOrders && order.order_status === "accepted" && (
             <View className="flex-row gap-3">
-               {!order.rider && (
+               {!order.deliverer && (
                 <PressableScale
                   onPress={() => assignRiderSheetRef.current?.present()}
                   className={`flex-1 py-4 rounded-[16px] items-center shadow-sm border ${darkTheme ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}

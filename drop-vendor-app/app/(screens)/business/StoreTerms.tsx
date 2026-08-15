@@ -37,7 +37,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
  * since changed.
  */
 export default function StoreTerms() {
-    const { currentTheme } = useContext<any>(UIThemeContext);
+    const { currentTheme } = useContext(UIThemeContext);
     const dark = currentTheme === "dark";
     const router = useRouter();
 

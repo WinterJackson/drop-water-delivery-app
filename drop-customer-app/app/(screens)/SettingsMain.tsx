@@ -331,7 +331,7 @@ export default function SettingsMain() {
                     <SettingItem {...settingItemProps}
                         title="Help & Support"
                         iconName="help-buoy-outline"
-                        onPress={() => router.push("/(screens)/Support" as any)}
+                        onPress={() => router.push("/(screens)/Support")}
                     />
                 </View>
 

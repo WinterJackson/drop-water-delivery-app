@@ -6,6 +6,8 @@ import hmac
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
+from utils.money import MoneyIn
+
 import httpx
 from dotenv import load_dotenv
 from services.order_service import update_orders_payment_status_by_checkout_id
@@ -333,7 +335,7 @@ async def check_payment(checkout_request_id: str, session: AsyncSession):
 # Requires: MPESA_B2C_SHORTCODE, MPESA_B2C_INITIATOR, MPESA_B2C_PASSWORD,
 #           MPESA_B2C_RESULT_URL, MPESA_B2C_TIMEOUT_URL
 
-async def initiate_b2c_payout(phone: str, amount: float, payout_id: str) -> dict:
+async def initiate_b2c_payout(phone: str, amount: MoneyIn, payout_id: str) -> dict:
     """
     Initiate M-Pesa B2C payment to disburse funds to a vendor/rider.
     
@@ -405,7 +407,7 @@ async def initiate_b2c_payout(phone: str, amount: float, payout_id: str) -> dict
 
 async def initiate_mpesa_reversal(
     transaction_id: str,
-    amount: float,
+    amount: MoneyIn,
     receiver_party: str | None = None,
 ) -> dict:
     """

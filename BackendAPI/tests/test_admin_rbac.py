@@ -573,3 +573,53 @@ def test_the_reconciliation_screen_offers_no_replay():
             assert "replay" not in node.name, f"{name}:{node.name} is a replay path"
 
     assert checked >= 4, f"expected the reconciliation handlers, found {checked}"
+
+
+def test_every_mutating_admin_route_leaves_an_audit_trail():
+    """"Who did this" must have an answer for every action, not most of them.
+
+    `Admin_Audit_Log` exists because the environment variable it replaced made
+    nothing attributable — two admins sharing one capability set left no trace.
+    A gap in the coverage is the same problem in miniature: ticket assignment
+    was the one mutating route that recorded nothing, so a complaint could
+    change hands between an audited reply and an audited resolution with
+    nothing in between to show it had.
+
+    Read-only POSTs are exempt by name. `/config/preview` takes a body because
+    it prices a sample order under proposed values; it persists nothing, and
+    auditing a calculation would be noise in the log people actually read.
+    """
+    READ_ONLY_POSTS = {("POST", "/config/preview")}
+
+    unaudited = []
+    for path in ADMIN_ROUTE_MODULES + sorted((BACKEND / "routes").glob("admin_*_routes.py")):
+        source = path.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            routes = [
+                d for d in node.decorator_list
+                if isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name)
+                and d.func.value.id == "router"
+                and d.args
+                and isinstance(d.args[0], ast.Constant)
+            ]
+            if not routes:
+                continue
+            method = routes[0].func.attr.upper()
+            if method not in ("POST", "PUT", "PATCH", "DELETE"):
+                continue
+            route = (method, routes[0].args[0].value)
+            if route in READ_ONLY_POSTS:
+                continue
+            body = ast.get_source_segment(source, node) or ""
+            if "record_audit" not in body:
+                unaudited.append(f"{path.name}: {method} {route[1]}")
+
+    assert sorted(set(unaudited)) == [], (
+        "these change something and record nobody as having done it: "
+        f"{sorted(set(unaudited))}"
+    )

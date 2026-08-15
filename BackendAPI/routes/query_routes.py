@@ -27,7 +27,7 @@ from utils.verify_user_token import get_current_user
 from services.query_service import search_service, search_vendors_service
 from services.user_service import get_user_coordinates
 from schemas.product_schemas import ProductFull
-from schemas.vendor_schemas import VendorOut
+from schemas.vendor_schemas import VendorStorefront
 
 router = APIRouter()
 
@@ -70,7 +70,7 @@ async def search(
   products = await search_service(session=db, query=query, category=category, mode=mode, limit=limit, offset=offset, user_lat=lat, user_lng=lng)
   return products
 
-@router.get("/search/vendors", response_model=list[VendorOut])
+@router.get("/search/vendors", response_model=list[VendorStorefront])
 async def search_vendors(
   query: str | None = Query(None, min_length=2, max_length=100),
   limit: int = Query(20, ge=1, le=100),

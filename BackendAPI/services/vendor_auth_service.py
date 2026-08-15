@@ -5,9 +5,27 @@ from models.vendor_model import Vendor
 from schemas.vendor_schemas import CreateVendor
 
 async def get_existing_vendor(clerk_id: str, db: AsyncSession):
-    query = select(Vendor).where(Vendor.clerk_id == clerk_id)
+    """This caller's own store — the oldest one, deterministically.
+
+    Never `scalar_one_or_none()`: a `Vendor` row is a store, not an account, and
+    one Clerk identity may own several. That call raises `MultipleResultsFound`
+    on the second store, and this function backs `POST /api/auth/create_vendor`
+    — the endpoint the vendor app's onboarding posts to — so an owner who had
+    opened a branch got a 500 from the one screen they cannot get past.
+
+    Ordered rather than a bare `.first()` so the store resolved is the same one
+    on every request, whatever plan Postgres picks. `created_at` is NULL on rows
+    predating that column and Postgres sorts NULLs last for ASC, so the id
+    tiebreak keeps the answer stable either way.
+    """
+    query = (
+        select(Vendor)
+        .where(Vendor.clerk_id == clerk_id)
+        .order_by(Vendor.created_at.asc(), Vendor.id.asc())
+        .limit(1)
+    )
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 async def create_vendor(db: AsyncSession, data: CreateVendor):
     new_vendor = Vendor(

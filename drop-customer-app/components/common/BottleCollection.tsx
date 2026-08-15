@@ -118,7 +118,7 @@ export function BottleCollectionCard({
   notWithdrawable,
   openRequest,
 }: Props) {
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const dark = currentTheme === "dark";
 
   const book = useBookBottleCollection();

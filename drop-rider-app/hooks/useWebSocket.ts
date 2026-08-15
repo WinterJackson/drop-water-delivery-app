@@ -4,11 +4,59 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { useAuth } from '@clerk/clerk-expo';
 
-export interface OrderUpdate {
+/**
+ * A dispatch offer, as `order_service.dispatch_order_to_riders` sends it.
+ *
+ * Both tiers emit the same body — tier 1 as `NEW_DELIVERY_OFFER` to the store's
+ * own registry riders, tier 2 as `TRIP_RADAR_BROADCAST` to the surrounding
+ * ring — so one type covers both. Declared rather than left to the index
+ * signature because `TripRadar` builds a whole `RadarOrder` out of it: with
+ * `[key: string]: any`, a renamed key on the server produced a card reading
+ * "KSH 0, 0 km, 0 items" and nothing anywhere said why.
+ *
+ * `fee` and `quantity` are the wire names. The screen also reads
+ * `delivery_fee` and `items_count`, which the server does not send under those
+ * names, so they stay optional and the `||` fallbacks in the screen are what
+ * actually run.
+ */
+export interface DeliveryOffer {
+  order_id?: string;
+  /** The delivery fee, as a decimal string. */
+  fee?: string;
+  tier?: number;
+  weight_kg?: number;
+  quantity?: number;
+  delivery_type?: string;
+  payment_method?: string;
+  /** Decimal strings. */
+  vendor_net?: string;
+  platform_total?: string;
+  distance_km?: number;
+  lat_from?: number;
+  lng_from?: number;
+  lat?: number;
+  lng?: number;
+  vehicle_class?: string;
+  estimated_minutes?: number;
+  vendor?: {
+    id?: string;
+    business_name?: string;
+    location_address?: string;
+    lat?: number;
+    lng?: number;
+  };
+}
+
+export interface OrderUpdate extends DeliveryOffer {
   action?: string;
   order_id?: string;
   status?: string;
-  [key: string]: any;
+  /**
+   * Still open: this envelope carries every socket event the rider receives,
+   * not only dispatch offers. `unknown` rather than `any` so a consumer reading
+   * an undeclared key has to narrow it first.
+   */
+  [key: string]: unknown;
 }
 
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -44,7 +92,7 @@ const useWebSocket = (
   const { getToken } = useAuth();
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<any | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // FIX-WS-RERENDER-01: Stabilize references to prevent dependency-loop re-renders
   const getTokenRef = useRef(getToken);
@@ -73,7 +121,7 @@ const useWebSocket = (
 
   // Push a fresh token onto the live socket so the server can extend the session
   // without a reconnect. Cleared whenever the socket goes away.
-  const authTimerRef = useRef<any | null>(null);
+  const authTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopAuthRefresh = useCallback(() => {
     if (authTimerRef.current) {
       clearInterval(authTimerRef.current);
@@ -115,7 +163,7 @@ const useWebSocket = (
    * reconnect path take over.
    */
   const lastMessageAtRef = useRef(Date.now());
-  const livenessTimerRef = useRef<any | null>(null);
+  const livenessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopLivenessWatch = useCallback(() => {
     if (livenessTimerRef.current) {
@@ -286,7 +334,7 @@ const useWebSocket = (
   }, [entityId]); // Only re-run when the actual entityId value changes
 
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     }

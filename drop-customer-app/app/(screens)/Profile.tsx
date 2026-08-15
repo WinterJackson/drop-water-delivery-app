@@ -386,7 +386,7 @@ const Profile = () => {
 						<PressableScale
 							activeOpacity={0.7}
 							onPress={() => {
-								router.push('/(screens)/PaymentHistory' as any);
+								router.push('/(screens)/PaymentHistory');
 							}}
 						>
 							<View
@@ -413,7 +413,7 @@ const Profile = () => {
 						<PressableScale
 							activeOpacity={0.7}
 							onPress={() => {
-								router.push('/(screens)/BottleWallet' as any);
+								router.push('/(screens)/BottleWallet');
 							}}
 						>
 							<View

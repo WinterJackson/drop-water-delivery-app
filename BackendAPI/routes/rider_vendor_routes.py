@@ -16,6 +16,22 @@ from services.dispatch_policy import DispatchPolicy
 
 router = APIRouter()
 
+
+def _registration_max_km(vendor_type: str | None) -> float:
+    """How far a rider may register from a store of this type.
+
+    Deliberately *not* a configurable row — see `DispatchPolicy` — but it is
+    still a business figure, so it belongs in one place. Both the discovery
+    listing and the application endpoint read it here, so the limit the app
+    shows and the limit the server enforces cannot disagree.
+    """
+    return (
+        DispatchPolicy.WHOLESALE_RIDER_REGISTRATION_MAX_RADIUS_KM
+        if vendor_type == "wholesale_b2b"
+        else DispatchPolicy.RETAIL_RIDER_REGISTRATION_MAX_RADIUS_KM
+    )
+
+
 class ApplyRequest(BaseModel):
     vendor_id: str
 
@@ -79,7 +95,15 @@ async def discover_nearby_vendors(
             "distance_km": round((distance or 0) / 1000.0, 2),
             "status": "unregistered",
             "lat": v_point.y if v_point else None,
-            "lng": v_point.x if v_point else None
+            "lng": v_point.x if v_point else None,
+            "vendor_type": vendor.vendor_type,
+            # The limit `apply_to_vendor` below will actually enforce, for this
+            # store's type. The app compared every row against a literal 2.0 and
+            # so offered "Too Far" on a wholesale depot 10 km away that the
+            # server would have accepted — a refusal invented on the handset,
+            # for a rule the platform does not have. A figure the server
+            # enforces is a figure the server states.
+            "registration_max_km": _registration_max_km(vendor.vendor_type),
         })
 
     return vendors
@@ -183,7 +207,7 @@ async def apply_to_vendor(request: ApplyRequest, session: AsyncSession = Depends
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
         
-    # Check registration distance limits (2.0km)
+    # Check registration distance limits — 2 km retail, 15 km wholesale.
     if deliverer.operation_lat and deliverer.operation_lng and vendor.location:
         vendor_point = to_shape(vendor.location)
         
@@ -195,7 +219,7 @@ async def apply_to_vendor(request: ApplyRequest, session: AsyncSession = Depends
         a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
         distance_km = 2 * math.asin(math.sqrt(a)) * 6371
         
-        max_distance = DispatchPolicy.WHOLESALE_RIDER_REGISTRATION_MAX_RADIUS_KM if vendor.vendor_type == "wholesale_b2b" else DispatchPolicy.RETAIL_RIDER_REGISTRATION_MAX_RADIUS_KM
+        max_distance = _registration_max_km(vendor.vendor_type)
         
         if distance_km > max_distance:
             raise HTTPException(status_code=400, detail=f"Vendor is too far. Registration is limited to {max_distance}km for this vendor type.")

@@ -133,3 +133,26 @@ class VendorStaff(Base):
     def revoke(self) -> None:
         self.is_active = False
         self.revoked_at = datetime.now(timezone.utc)
+
+
+def live_grant():
+    """The predicate for a grant that is *currently in force*.
+
+    Two columns say whether someone may act on a store, and every query that
+    decides access must read both. `revoke()` sets them together, so today they
+    never disagree — but only `_resolve_access` spelled out both, while the
+    other seven access queries checked `revoked_at` alone. The moment anything
+    deactivates a member without revoking them (suspending a grant while an
+    incident is investigated is the obvious one), the REST gate would refuse
+    them and `staff_membership` — which backs `resolve_order_role` and
+    `owns_entity`, i.e. the **websocket** path — would keep letting them stream
+    the store's live orders.
+
+    A predicate written out eight times is a predicate that will eventually be
+    written seven ways. Spread into a query as `.where(*live_grant())`.
+
+    Roster queries deliberately do **not** use this: `list_staff` and
+    `_get_member` must still return a suspended member, or the owner cannot see
+    them to restore them.
+    """
+    return (VendorStaff.revoked_at.is_(None), VendorStaff.is_active.is_(True))

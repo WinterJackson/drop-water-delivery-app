@@ -6,9 +6,8 @@ from datetime import datetime
 from pydantic import field_validator
 from utils.s3_utils import generate_presigned_url
 from utils.money import MoneyField, OptionalMoneyField
-from schemas.vendor_schemas import BaseVendor
-from schemas.product_schemas import ProductFull, OrderProductDetail
-from typing import List, Optional, Any
+from schemas.product_schemas import OrderProductDetail
+from typing import List, Optional
 
 
 class OrderItemBase(BaseModel):

@@ -20,7 +20,6 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_ANALYTICS_READ, PERM_RIDERS_READ
 from services import admin_fleet_service, admin_notification_service
-from utils import keyset
 
 logger = logging.getLogger(__name__)
 

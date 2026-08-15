@@ -108,7 +108,7 @@ const Support = () => {
 
     const openTicket = (ticket: SupportTicketSummary) => {
         Haptics.selectionAsync();
-        router.push({ pathname: "/(screens)/SupportTicket", params: { id: ticket.id } } as any);
+        router.push({ pathname: "/(screens)/SupportTicket", params: { id: ticket.id } });
     };
 
     const formatWhen = (iso: string | null) => {

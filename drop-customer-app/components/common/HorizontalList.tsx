@@ -23,6 +23,7 @@ import { Popup } from "@/lib/popup";
 import { Toast } from "@/lib/toast";
 import { errorMessage } from "@/API/errors";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { discountPercent, discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
 
 type Props = {
 	title: string;
@@ -171,12 +172,12 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									}`}
 								style={darkTheme ? { width: w * 0.38, borderRadius: 24 } : { width: w * 0.38, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 							>
-								{type === "product" && item.discount > 0 && (
+								{type === "product" && !isZeroMoney(item.discount) && (
 									<View
 										className={`absolute w-[65px]  bg-red-500 z-20 top-0 right-0 items-center justify-center rotate-45 translate-x-5 translate-y-2`}
 									>
 										<Text className={`text-white font-sans-semibold`}>
-											{item.price ? `${Math.ceil((item.discount / item.price) * 100)}%` : "Sale"}
+											{item.price ? `${discountPercent(item.price, item.discount)}%` : "Sale"}
 										</Text>
 									</View>
 								)}
@@ -224,9 +225,9 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 										// <---------------------<PRODUCT PRICE>--------------------->
 										<View className={`flex-row gap-2 items-center mt-0.5`}>
 											<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-												KSH {Math.round((item.price - item.discount) * 100) / 100}
+												{formatMoney(discountedPrice(item.price, item.discount))}
 											</Text>
-											{item.discount > 0 && (
+											{!isZeroMoney(item.discount) && (
 												<Text
 													className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}
 													style={{

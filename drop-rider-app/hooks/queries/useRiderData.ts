@@ -7,14 +7,71 @@ import { flattenPages, nextOffset } from '../../utils/paging';
 import { saveOrdersLocal, getOrdersLocal } from '../../config/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * The customer, as `schemas/user_schemas.py::CustomerPublicProfile`.
+ *
+ * The field on the wire is **`user`**, not `customer` — `GET /rider/orders`
+ * answers with `OrderWithDetails`, which adds exactly this. `RiderOrder`
+ * declared a `customer` the server has never sent, and two screens read it: the
+ * orders list rendered "3 items for Customer" for every order on the platform,
+ * and the active-delivery search matched no customer name ever typed into it.
+ */
+export interface RiderOrderCustomer {
+    id: string;
+    full_name?: string | null;
+    phone_number?: string | null;
+    location_address?: string | null;
+    floor_level?: number | null;
+    has_elevator?: boolean | null;
+    profile_pic?: string | null;
+}
+
+/** `schemas/order_schema.py::OrderVendorSnippet`. */
+export interface RiderOrderVendor {
+    id: string;
+    business_name: string;
+    profile_pic?: string | null;
+    vendor_type?: string | null;
+    location_address?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    rating?: number | null;
+    phone_number?: string | null;
+}
+
+/** `schemas/order_schema.py::OrderItemBase`. */
+export interface RiderOrderItem {
+    id: string;
+    order_id?: string;
+    product_id?: string;
+    quantity: number;
+    /** Decimal string. */
+    price?: string;
+    /** Decimal string, capitalised on the wire exactly as the schema declares it. */
+    Subtotal?: string;
+    product?: { id: string; name: string; image_url?: string; capacity?: number } | null;
+}
+
 export interface RiderOrder {
     id: string;
     order_status: string;
     total_amount?: string;
     delivery_address: string;
-    customer?: { full_name: string; phone_number: string };
-    vendor?: { business_name: string; location_address: string; lat?: number; lng?: number };
-    order_item?: { id: string; quantity: number; product?: { name: string } }[];
+    user?: RiderOrderCustomer | null;
+    vendor?: RiderOrderVendor | null;
+    order_item?: RiderOrderItem[];
+    /**
+     * `quick_swap` | `exchange` | `refill_mine` | `new_bottle`. It decides how
+     * many empties the rider is expected to collect, and it was not declared
+     * here — so `activeOrder?.delivery_type === 'quick_swap'` was comparing
+     * `undefined`, and the empties counter opened at **0 on every swap order**,
+     * i.e. the count the rider is asked to confirm started at the wrong number
+     * on exactly the orders where a count is the point.
+     */
+    delivery_type?: string | null;
+    /** `cash` | `mpesa`. Drives the "Collect Cash" banner on the delivery sheet. */
+    payment_method?: string | null;
     rider_net?: string;
     rider_commission?: string;
     payload_surcharge?: string;
@@ -24,6 +81,20 @@ export interface RiderOrder {
     distance_km?: number;
     delivery_fee?: string;
     created_at?: string;
+
+    // Persisted to the offline SQLite cache by `saveOrdersLocal`, and therefore
+    // the copy the rider reads with no signal. All six come from `BaseOrder` on
+    // the server and were simply never declared here — so the writes typechecked
+    // as `any[]` and nothing said whether the columns behind them were real.
+    vendor_id?: string;
+    customer_id?: string;
+    updated_at?: string | null;
+    phone?: string | null;
+    lat_from?: number | null;
+    lng_from?: number | null;
+    lat?: number | null;
+    lng?: number | null;
+    payment_status?: string | null;
 }
 
 export interface RiderEarnings {
@@ -52,6 +123,26 @@ export interface RiderEarnings {
     total_payload_bonus?: number;
 }
 
+/**
+ * A payout destination on `Deliverer.payment_methods` (a JSONB list).
+ *
+ * Not a schema on the server — the column is free-form JSON — so this is the
+ * shape the app itself writes and reads, and it is the only description of it
+ * that exists. `any[]` here meant the one thing the rider's money is sent to
+ * had no declared shape anywhere in the platform.
+ */
+export interface RiderPayoutMethod {
+    type: "mpesa";
+    phone: string;
+    isDefault?: boolean;
+}
+
+/** `Deliverer.preferences` (JSONB). Absent means both on. */
+export interface RiderPreferences {
+    orderUpdates?: boolean;
+    analytics?: boolean;
+}
+
 export interface RiderProfile {
     id: string;
     full_name: string;
@@ -69,8 +160,14 @@ export interface RiderProfile {
     last_zone_change?: string;
     operation_lat?: number;
     operation_lng?: number;
-    payment_methods?: any[];
-    preferences?: any;
+    /**
+     * How far from their base this rider is offered work, in km — the figure
+     * `rider_search_bounds` actually searches with. Served rather than drawn
+     * from a literal, so the circle on `OperationBase` matches dispatch.
+     */
+    operation_radius_km?: number;
+    payment_methods?: RiderPayoutMethod[];
+    preferences?: RiderPreferences;
     employer_vendor_id?: string;
     kyc_status?: string;
     wallet_balance?: string;

@@ -3,6 +3,7 @@ import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toast } from '@/lib/toast';
 import { errorMessage } from '@/API/errors';
+import type { Order } from '@/types/models';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface VendorFavoriteItem {
@@ -50,8 +51,8 @@ export function useAddVendorFavorite() {
         mutationFn: (vendorId: string) => api.post(ROUTES.ADD_VENDOR_FAVORITE, { vendor_id: vendorId }),
         onMutate: async (vendorId) => {
             await queryClient.cancelQueries({ queryKey: ['vendor', 'favorites'] });
-            const previous = queryClient.getQueryData(['vendor', 'favorites']);
-            queryClient.setQueryData(['vendor', 'favorites'], (old: any) => {
+            const previous = queryClient.getQueryData<VendorFavoriteItem[]>(['vendor', 'favorites']);
+            queryClient.setQueryData<VendorFavoriteItem[]>(['vendor', 'favorites'], (old) => {
                 const arr = old ? [...old] : [];
                 arr.push({ id: `temp-${vendorId}`, vendor_id: vendorId });
                 return arr;
@@ -83,10 +84,10 @@ export function useRemoveVendorFavorite() {
         mutationFn: (vendorId: string) => api.post(ROUTES.REMOVE_VENDOR_FAVORITE, { vendor_id: vendorId }),
         onMutate: async (vendorId) => {
             await queryClient.cancelQueries({ queryKey: ['vendor', 'favorites'] });
-            const previous = queryClient.getQueryData(['vendor', 'favorites']);
-            queryClient.setQueryData(['vendor', 'favorites'], (old: any) => {
+            const previous = queryClient.getQueryData<VendorFavoriteItem[]>(['vendor', 'favorites']);
+            queryClient.setQueryData<VendorFavoriteItem[]>(['vendor', 'favorites'], (old) => {
                 if (!old) return old;
-                return old.filter((fav: any) => fav.vendor_id !== vendorId);
+                return old.filter((fav) => fav.vendor_id !== vendorId);
             });
             queryClient.setQueryData(['vendor', 'favorites', 'check', vendorId], { is_favorite: false });
             return { previous };
@@ -118,10 +119,10 @@ export function useCheckVendorFavorite(vendorId: string) {
 /** Fetch the last order from a specific vendor (for quick reorder) */
 export function useLastOrderFromVendor(vendorId: string) {
     const api = useApiRequest();
-    return useQuery<any, Error>({
+    return useQuery<Order | null, Error>({
         queryKey: ['vendor', 'lastOrder', vendorId],
         queryFn: async () => {
-            const json = await api.get<{ order: any }>(ROUTES.LAST_ORDER_FROM_VENDOR(vendorId));
+            const json = await api.get<{ order: Order | null }>(ROUTES.LAST_ORDER_FROM_VENDOR(vendorId));
             return json?.order ?? null;
         },
         enabled: !!vendorId,

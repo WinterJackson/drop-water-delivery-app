@@ -1,0 +1,124 @@
+# Continuous integration for the Drop platform.
+#
+# This repository's guides say, in many places, that a rule "fails the build".
+# Until this file existed there was no build to fail: the 300-odd guard tests
+# that parse the apps' source, and the three `tsc` checks, only ran when somebody
+# remembered to type the command. That is the same class of assumption the
+# platform refuses everywhere else — it is why `record_acquisition` is a build
+# failure rather than a note in a runbook.
+#
+# Four jobs, run in parallel because they share nothing. Each one is a command a
+# developer can run locally and get the identical answer.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight run of the same branch.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: BackendAPI/requirements.txt
+
+      - name: Install dependencies
+        working-directory: BackendAPI
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: BackendAPI
+        # `test_multi_store_integration.py` is excluded here as it is locally:
+        # it drives the app against a live Postgres with PostGIS, which this job
+        # does not provide. Everything else runs against mocks and needs nothing.
+        env:
+          PYTHONPATH: .
+        run: pytest -q --ignore=tests/test_multi_store_integration.py
+
+  apps:
+    name: ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One app failing should not hide the state of the other two.
+      fail-fast: false
+      matrix:
+        app: [drop-customer-app, drop-rider-app, drop-vendor-app]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ${{ matrix.app }}/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.app }}
+        # `--frozen-lockfile` so a lockfile that has drifted from package.json
+        # fails here rather than resolving to something nobody has run.
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: ${{ matrix.app }}
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        working-directory: ${{ matrix.app }}
+        # `npx jest` rather than `pnpm test`, which re-checks dependency status
+        # before running the script and can decide to reinstall. The deps are
+        # installed by the step above; this runs exactly the binary they provide.
+        run: npx jest --ci
+
+  console:
+    name: Admin console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: drop-admin/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: drop-admin
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: drop-admin
+        # Its own tsconfig, so generated `.next/dev` types cannot fail a check
+        # that `next build` itself filters.
+        run: pnpm typecheck
+
+      - name: Build
+        working-directory: drop-admin
+        # A build is the only thing that proves the route table resolves and the
+        # Next config is valid — a typecheck alone would not have caught
+        # `middleware.ts` needing to become `proxy.ts`.
+        env:
+          EXPO_PUBLIC_BACKEND_BASE_URL: https://example.invalid
+        run: pnpm build

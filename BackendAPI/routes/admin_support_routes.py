@@ -22,7 +22,6 @@ from models.admin_model import (
     PERM_SUPPORT_RESPOND,
 )
 from services import admin_service, broadcast_service, email_service, support_service
-from utils import keyset
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +249,21 @@ async def assign_ticket(
     await support_service.assign(
         db, ticket_id=ticket_id, admin_id=access.admin.id, admin_email=access.email
     )
+
+    # Taking a ticket is a state change on somebody's complaint, and it was the
+    # one mutating admin route that left no trace. Every other action in this
+    # console answers "who did this" from `Admin_Audit_Log`; a reply and a
+    # resolution were attributable while the step between them was not, so a
+    # ticket could change hands with nothing to show it had.
+    admin_service.record_audit(
+        db,
+        access=access,
+        action="support.assign",
+        target_type="support_ticket",
+        target_id=ticket_id,
+        after={"assigned_to": access.email},
+    )
+
     await db.commit()
     return {"ok": True, "assigned_to": access.email}
 

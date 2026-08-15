@@ -10,6 +10,7 @@ import {
   Field,
   inputClass,
 } from "@/components/ui/primitives";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { timeAgo } from "@/lib/utils/format";
 import { revealDocuments, reviewRider, type RiderDocuments } from "./actions";
 
@@ -35,6 +36,8 @@ export function ReviewCard({ rider, canReview, canViewPii }: {
   canViewPii: boolean;
 }) {
   const [documents, setDocuments] = useState<RiderDocuments | null>(null);
+  const [askingWhy, setAskingWhy] = useState(false);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,17 +46,16 @@ export function ReviewCard({ rider, canReview, canViewPii }: {
 
   const overdue = (rider.waiting_hours ?? 0) >= SLA_HOURS;
 
-  function onReveal() {
-    setError(null);
-    const why = window.prompt(
-      "Why do you need to see this rider's identity documents?\n\nThis is recorded against your account.",
-    );
-    if (why === null) return;
-
+  function onReveal(why: string) {
+    setRevealError(null);
     startTransition(async () => {
       const result = await revealDocuments(rider.id, why);
-      if (result.ok) setDocuments(result.data);
-      else setError(result.error);
+      if (result.ok) {
+        setDocuments(result.data);
+        setAskingWhy(false);
+      } else {
+        setRevealError(result.error);
+      }
     });
   }
 
@@ -88,6 +90,35 @@ export function ReviewCard({ rider, canReview, canViewPii }: {
 
   return (
     <Card className="overflow-hidden">
+      {/* Audited *before* the presigned URLs are minted, and the endpoint
+          refuses an empty reason — neither of which `window.prompt` could say
+          or enforce. It also returns `null` without appearing at all in a
+          browser that has suppressed dialogs, which read here as a "View
+          identity documents" button that did nothing. */}
+      <ConfirmDialog
+        open={askingWhy}
+        title="View this rider's identity documents?"
+        body={
+          <p>
+            This mints 5-minute links to {rider.full_name ?? "this rider"}&apos;s
+            national ID and driving licence. Opening them is an audited action.
+          </p>
+        }
+        reason={{
+          label: "Why do you need to see them?",
+          placeholder: "e.g. Verifying the name on the licence against the application",
+          hint: "Recorded against your account, with the time and this rider's id.",
+        }}
+        confirmLabel="View documents"
+        pending={pending}
+        error={revealError}
+        onConfirm={onReveal}
+        onCancel={() => {
+          setAskingWhy(false);
+          setRevealError(null);
+        }}
+      />
+
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-default px-5 py-4">
         <div className="min-w-0">
           <h3 className="truncate font-medium">{rider.full_name ?? "Unnamed rider"}</h3>
@@ -133,7 +164,7 @@ export function ReviewCard({ rider, canReview, canViewPii }: {
             </p>
           </div>
         ) : canViewPii ? (
-          <Button variant="secondary" onClick={onReveal} disabled={pending}>
+          <Button variant="secondary" onClick={() => setAskingWhy(true)} disabled={pending}>
             {pending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (

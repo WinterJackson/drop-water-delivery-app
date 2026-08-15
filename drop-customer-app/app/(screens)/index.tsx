@@ -37,9 +37,12 @@ import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND, TOAST } from "@/constants/brandColors";
 
 import { useWindowDimensions } from "react-native";
-import { formatMoneyShort, isZeroMoney } from "@/utils/money";
+import { discountPercent, discountedPrice, formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
+import type { Product } from "@/types/models";
+import type { OrderUpdate } from "@/hooks/useWebSocket";
+import type { Router } from "expo-router";
 
-const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { item: any; darkTheme: boolean; width: number; router: any }) => {
+const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { item: Product; darkTheme: boolean; width: number; router: Router }) => {
 	return (
 		<TouchableWithoutFeedback>
 			<View
@@ -65,10 +68,10 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 						}}
 					>
 						{/* Offer Badge */}
-						{item?.discount > 0 && (
+						{!isZeroMoney(item?.discount) && (
 							<View className="absolute w-[60px] bg-red-500 z-20 right-0 items-center justify-center rotate-45 translate-x-4 translate-y-2">
 								<Text className="text-white font-sans-semibold">
-									{Math.ceil((item?.discount / item?.price) * 100)}%
+									{discountPercent(item?.price, item?.discount)}%
 								</Text>
 							</View>
 						)}
@@ -91,14 +94,14 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 								{/* price and discount */}
 								<View className="flex-row gap-2 items-center">
 									<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-										KSH {Math.round((item?.price - item?.discount) * 100) / 100}
+										{formatMoney(discountedPrice(item?.price, item?.discount))}
 									</Text>
-									{item?.discount > 0 && (
+									{!isZeroMoney(item?.discount) && (
 										<Text
 											style={{ textDecorationLine: "line-through" }}
 											className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}
 										>
-											{item?.price}
+											{formatMoney(item?.price)}
 										</Text>
 									)}
 								</View>
@@ -140,7 +143,7 @@ export default function Home() {
 
 	const { data: activeOrder, refetch: rActive } = useActiveOrder();
 
-	const handleOrderUpdate = useCallback((payload: any) => {
+	const handleOrderUpdate = useCallback((payload: OrderUpdate) => {
 		if (payload.action === "ORDER_STATUS_UPDATE" || payload.action === "ORDER_ASSIGNED") {
 			rActive();
 		}
@@ -162,8 +165,8 @@ export default function Home() {
 
 	// Random products (pagination)
 	const [page, setPage] = useState(1);
-	const { data: currentPageProducts = [], isFetching: isFetchingMore, refetch: refetchProducts } = usePaginatedProducts(page) as { data: any[]; isFetching: boolean; refetch: () => void };
-	const [paginatedProducts, setPaginatedProducts] = useState<any[]>([]);
+	const { data: currentPageProducts = [], isFetching: isFetchingMore, refetch: refetchProducts } = usePaginatedProducts(page);
+	const [paginatedProducts, setPaginatedProducts] = useState<Product[]>([]);
 	const [hasMore, setHasMore] = useState(true);
 
 	useEffect(() => {
@@ -172,7 +175,7 @@ export default function Home() {
 				if (page === 1) return currentPageProducts;
 				
 				const uniqueIds = new Set(prev.map(p => p.id));
-				const newProducts = currentPageProducts.filter((cp: any) => {
+				const newProducts = currentPageProducts.filter((cp) => {
 					if (uniqueIds.has(cp.id)) return false;
 					uniqueIds.add(cp.id);
 					return true;
@@ -205,7 +208,7 @@ export default function Home() {
 	}, [r1, r2, r6, r7, rActive, refetchProducts]);
 
 	// <---------------VARIABLES---------------->
-	const renderProductItem: ListRenderItem<any> = useCallback(
+	const renderProductItem: ListRenderItem<Product> = useCallback(
 		({ item }) => <FlatlistRendorItem item={item} darkTheme={darkTheme} width={width} router={router} />,
 		[darkTheme, width, router]
 	);
@@ -243,7 +246,7 @@ export default function Home() {
 						<PressableScale
 							activeOpacity={0.7}
 							onPress={() => {
-								router.push("/(screens)/LocationSearch" as any);
+								router.push("/(screens)/LocationSearch");
 							}}
 						>
 							<View
@@ -330,7 +333,7 @@ export default function Home() {
 						// @ts-ignore
 						estimatedItemSize={250}
 						renderItem={renderProductItem}
-						keyExtractor={(item: any) => item.id.toString()}
+						keyExtractor={(item) => item.id.toString()}
 						numColumns={2}
 						contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}
 						onEndReached={fetchRandomProducts}
@@ -409,7 +412,7 @@ export default function Home() {
 							isFetchingMore && hasMore ? (
 								<View className={`gap-3`}>
 									<View className={`w-full flex-row flex-wrap`}>
-										{[...Array(2)]?.map((item: any, index: any) => {
+										{Array.from({ length: 2 }).map((_, index) => {
 											return (
 												<View
 													key={index}
@@ -485,7 +488,7 @@ export default function Home() {
 								</PressableScale>
 
 								<PressableScale
-									onPress={() => router.push("/(screens)/LocationSearch" as any)}
+									onPress={() => router.push("/(screens)/LocationSearch")}
 									className="py-3 rounded-xl items-center"
 								>
 									<Text className={`font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Enter address manually</Text>

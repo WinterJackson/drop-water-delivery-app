@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import React, { useEffect, useContext } from 'react';
 import { View, Platform, useWindowDimensions } from 'react-native';
 import { Text } from '@/components/ui/Text';
@@ -25,8 +26,11 @@ const safeString = (val: unknown): string => {
   if (typeof val === 'string') return val;
   if (typeof val === 'object') {
     // Handle FastAPI validation errors: {type, loc, msg, input}
-    if ('msg' in (val as any)) return String((val as any).msg);
-    if ('message' in (val as any)) return String((val as any).message);
+    // Narrowed once rather than asserted twice per branch: `in` is a type
+    // guard on a `Record`, so both reads below are checked rather than trusted.
+    const obj = val as Record<string, unknown>;
+    if ('msg' in obj) return String(obj.msg);
+    if ('message' in obj) return String(obj.message);
     try { return JSON.stringify(val); } catch { return String(val); }
   }
   return String(val);
@@ -152,7 +156,7 @@ export default function ModernToast() {
           }}
         >
           {/* Icon */}
-          <Ionicons name={config?.icon as any} size={24} color={config?.color || TOAST.info} />
+          <Ionicons name={config?.icon as ComponentProps<typeof Ionicons>['name']} size={24} color={config?.color || TOAST.info} />
 
           {/* Text Content */}
           <View style={{ marginLeft: 12, flex: 1, justifyContent: 'center' }}>

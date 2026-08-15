@@ -62,7 +62,7 @@ import PressableScale from "@/components/ui/PressableScale";
 import SecureUpload from "@/Helpers/imageUpload";
 import { useRejectDelivery } from "@/hooks/mutations/useRejectDelivery";
 import { useRiderStore } from "@/stores/useRiderStore";
-import { useRiderOrders } from "@/hooks/queries/useRiderData";
+import { useRiderOrders, type RiderOrder } from "@/hooks/queries/useRiderData";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { Popup } from "@/lib/popup";
@@ -76,11 +76,28 @@ import {
     stopRiderLocationTracking,
 } from "@/services/locationTracking";
 
-let MapView: any = null;
-let Marker: any = null;
-let Polyline: any = null;
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+/**
+ * `react-native-maps` is `require`d behind a platform check because it has no
+ * web build. Its *types* import freely — `import type` is erased and emits no
+ * require — so the components below are the real ones, and the web stand-in is
+ * checked against the same props.
+ */
+import type MapViewType from 'react-native-maps';
+import type {
+    LatLng,
+    MapMarkerProps,
+    MapPolylineProps,
+    MapUrlTileProps,
+    MapViewProps,
+    Provider,
+} from 'react-native-maps';
+
+/** Driven by ref (`animateCamera`), so `ref` is part of the declared props. */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }>;
+let Marker: React.ComponentType<MapMarkerProps>;
+let Polyline: React.ComponentType<MapPolylineProps>;
+let UrlTile: React.ComponentType<MapUrlTileProps>;
+let PROVIDER_GOOGLE: Provider;
 
 if (Platform.OS !== 'web') {
     const maps = require('react-native-maps');
@@ -90,7 +107,7 @@ if (Platform.OS !== 'web') {
     UrlTile = maps.UrlTile;
     PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
 } else {
-    MapView = ({ style, children }: any) => <View style={style}>{children}</View>;
+    MapView = ({ style, children }: MapViewProps) => <View style={style}>{children}</View>;
     Marker = () => null;
     Polyline = () => null;
     UrlTile = () => null;
@@ -115,15 +132,15 @@ export default function ActiveDelivery() {
   // Use React Query for single source of truth
   const { data: orders = [], isLoading } = useRiderOrders();
 
-  const [activeOrder, setActiveOrder] = useState<any>(null);
+  const [activeOrder, setActiveOrder] = useState<RiderOrder | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [routeCoords, setRouteCoords] = useState<any[]>([]);
+  const [currentLocation, setCurrentLocation] = useState<Location.LocationObjectCoords | null>(null);
+  const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
   // Origin + destination of the last route we asked for, so we can tell a
   // meaningful move from GPS jitter.
   const lastRouteFetch = useRef<{ lat: number; lng: number; destLat: number; destLng: number } | null>(null);
-  const locationSubscription = useRef<any>(null);
-  const mapRef = useRef<any>(null);
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const mapRef = useRef<MapViewType | null>(null);
   const riderId = useRiderStore((s) => s.riderId);
   const { mutateAsync: rejectDelivery, isPending: isRejecting } = useRejectDelivery();
   const [emptiesReceived, setEmptiesReceived] = useState<number>(0);
@@ -147,19 +164,19 @@ export default function ActiveDelivery() {
 
   // Derive empties expected from delivery_type and order items
   const computedEmptiesExpected = activeOrder?.delivery_type === 'quick_swap'
-    ? (activeOrder?.order_item?.reduce((sum: number, i: any) => sum + (i.quantity || 0), 0) || 0)
+    ? (activeOrder?.order_item?.reduce((sum, i) => sum + (i.quantity || 0), 0) || 0)
     : 0;
 
   // Sync activeOrder with fetched orders array and allow search
   const activeOrdersList = useMemo(() => {
-    let list = orders.filter((o: any) => 
+    let list = orders.filter((o) => 
         ["pending", "picked_up", "accepted", "ready", "mismatch_pending", "pending_review"].includes(o.order_status)
     );
     if (searchQuery) {
         const lowerQ = searchQuery.toLowerCase();
-        list = list.filter((o: any) => 
+        list = list.filter((o) => 
             (o.id && o.id.toLowerCase().includes(lowerQ)) ||
-            (o.user?.name && o.user.name.toLowerCase().includes(lowerQ)) ||
+            (o.user?.full_name && o.user.full_name.toLowerCase().includes(lowerQ)) ||
             (o.vendor?.business_name && o.vendor.business_name.toLowerCase().includes(lowerQ))
         );
     }
@@ -168,7 +185,7 @@ export default function ActiveDelivery() {
 
   useEffect(() => {
     if (activeOrdersList.length > 0) {
-       const stillExists = activeOrdersList.find((o: any) => o.id === activeOrder?.id);
+       const stillExists = activeOrdersList.find((o) => o.id === activeOrder?.id);
        if (stillExists) {
            if (stillExists.order_status !== activeOrder?.order_status) {
                setActiveOrder(stillExists);
@@ -196,10 +213,9 @@ export default function ActiveDelivery() {
     
     // Update active order if it matches the updated order
     if (activeOrder && updateData.order_id === activeOrder.id) {
-      setActiveOrder((prevOrder: any) => ({
-        ...prevOrder,
-        order_status: updateData.status
-      }));
+      setActiveOrder((prevOrder) =>
+        prevOrder ? { ...prevOrder, order_status: updateData.status ?? prevOrder.order_status } : prevOrder,
+      );
       
       // If delivered, clear the active order
       if (updateData.status === "delivered") {
@@ -316,7 +332,7 @@ export default function ActiveDelivery() {
    * (pickup → dropoff on status change), or the rider has moved far enough that
    * the polyline's start no longer matches where they are.
    */
-  const shouldRefetchRoute = (loc: any, destLat: number, destLng: number) => {
+  const shouldRefetchRoute = (loc: LatLng, destLat: number, destLng: number) => {
     const last = lastRouteFetch.current;
     if (!last) return true;
     if (last.destLat !== destLat || last.destLng !== destLng) return true;
@@ -647,7 +663,7 @@ export default function ActiveDelivery() {
         );
     }
     // Render all active orders on the map for search and visualization
-    activeOrdersList.forEach((order: any) => {
+    activeOrdersList.forEach((order) => {
         const isSelected = activeOrder?.id === order.id;
         
         // Pickup marker (vendor)
@@ -733,7 +749,10 @@ export default function ActiveDelivery() {
               // 🔴 PRODUCTION GOOGLE MAPS MODE 
               // Uncomment this block for Production:
               provider={PROVIDER_GOOGLE}
-              mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+              // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+              // the prop every map screen in all three apps passed was dropped and cloud
+              // styling has never once been applied. A misspelt prop is silent here.
+              googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
               style={{ flex: 1 }}
               initialRegion={currentLocation ? {
                 latitude: currentLocation.latitude,
@@ -985,7 +1004,7 @@ export default function ActiveDelivery() {
                     </PressableScale>
 
                     <PressableScale 
-                      onPress={() => router.push({ pathname: "/(screens)/BottleRejection" as any, params: { orderId: activeOrder.id } })}
+                      onPress={() => router.push({ pathname: "/(screens)/BottleRejection", params: { orderId: activeOrder.id } })}
                       className="py-3 mt-2 rounded-xl items-center border flex-row justify-center gap-2"
                       style={{ borderColor: TOAST.error + '4D', backgroundColor: darkTheme ? TOAST.error + '1A' : TOAST.error + '0D' }}
                     >

@@ -17,7 +17,6 @@ from dependencies.admin_dependencies import AdminAccess, require_admin
 from dependencies.dependencies import get_db
 from models.admin_model import PERM_DISPUTES_READ, PERM_DISPUTES_RESOLVE
 from services import admin_review_service, admin_service
-from utils import keyset
 
 logger = logging.getLogger(__name__)
 

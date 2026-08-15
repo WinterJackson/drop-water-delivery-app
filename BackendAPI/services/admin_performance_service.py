@@ -32,7 +32,7 @@ from utils import keyset
 
 from models.order_model import Order
 from models.vendor_model import Vendor
-from models.deliverer_model import Deliverer, KYCStatus
+from models.deliverer_model import Deliverer
 
 #: Below this, a rate is noise. One delivery and one cancellation is 100%.
 MIN_ORDERS_FOR_RANKING = 5

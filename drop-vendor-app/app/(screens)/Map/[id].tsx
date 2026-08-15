@@ -23,11 +23,33 @@ import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { useOrderTracking } from "@/hooks/useOrderTracking";
 
 // Safe Map Imports
-let MapView: any = null;
-let Marker: any = null;
-let MarkerAnimated: any = null;
-let UrlTile: any = null;
-let PROVIDER_GOOGLE: string | null = null;
+import type MapViewType from 'react-native-maps';
+import type {
+    MapCircleProps,
+    MapMarkerProps,
+    MapPolylineProps,
+    MapUrlTileProps,
+    MapViewProps,
+    MarkerAnimated as MarkerAnimatedType,
+    Provider,
+} from 'react-native-maps';
+
+/**
+ * `react-native-maps` is `require`d because it has no web build. Its *types*
+ * import freely — `import type` is erased at compile time and emits no require —
+ * so every component below is the real one.
+ *
+ * These stay `| null`, unlike the other apps' shims: this app has no web
+ * stand-ins, only a `try`/`catch` that leaves them unset, so `{MapView ? …}` at
+ * the use site is guarding a state that genuinely occurs.
+ */
+let MapView: React.ComponentType<MapViewProps & { ref?: React.Ref<MapViewType> }> | null = null;
+let Marker: React.ComponentType<MapMarkerProps> | null = null;
+let MarkerAnimated: React.ComponentType<
+    MapMarkerProps & { ref?: React.Ref<React.ComponentRef<typeof MarkerAnimatedType>> }
+> | null = null;
+let UrlTile: React.ComponentType<MapUrlTileProps> | null = null;
+let PROVIDER_GOOGLE: Provider = undefined;
 
 if (Platform.OS !== "web") {
     try {
@@ -51,11 +73,11 @@ export default function LiveMap() {
     const { data: vendorProfile } = useVendorProfile();
     const { data: orders = [] } = useVendorOrders();
     
-    const activeOrder = orders.find((o: any) => o.id === id);
+    const activeOrder = orders.find((o) => o.id === id);
 
     const [riderCoordinates, setRiderCoordinates] = useState<{lat: number, lng: number} | null>(null);
-    const mapRef = useReactRef<any>(null);
-    const trackingMarkerRef = useReactRef<any>(null);
+    const mapRef = useReactRef<MapViewType | null>(null);
+    const trackingMarkerRef = useReactRef<React.ComponentRef<typeof MarkerAnimatedType> | null>(null);
 
     /**
      * Live rider position, from the one hook that knows how to open this socket.
@@ -68,7 +90,7 @@ export default function LiveMap() {
      */
     const { location: riderLocation, isLive } = useOrderTracking(
         activeOrder?.id,
-        !!activeOrder && ["accepted", "picked_up"].includes(activeOrder.order_status),
+        !!activeOrder?.order_status && ["accepted", "picked_up"].includes(activeOrder.order_status),
     );
 
     useEffect(() => {
@@ -126,7 +148,10 @@ export default function LiveMap() {
                     <MapView
                         ref={mapRef}
                         provider={PROVIDER_GOOGLE}
-                        mapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                        // `googleMapId`, not `mapId` — react-native-maps names it the former, so
+                        // the prop every map screen in all three apps passed was dropped and cloud
+                        // styling has never once been applied. A misspelt prop is silent here.
+                        googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                         style={StyleSheet.absoluteFill}
                         initialRegion={initialRegion}
                         showsUserLocation={true}
@@ -135,7 +160,7 @@ export default function LiveMap() {
                     >
 
                         {/* Customer Location */}
-                        {activeOrder.lat && activeOrder.lng && (
+                        {Marker && activeOrder.lat && activeOrder.lng && (
                             <Marker
                                 coordinate={{ latitude: Number(activeOrder.lat), longitude: Number(activeOrder.lng) }}
                                 title="Delivery Location"
@@ -148,7 +173,7 @@ export default function LiveMap() {
                         )}
 
                         {/* Vendor Location */}
-                        {vendorProfile?.lat && vendorProfile?.lng && (
+                        {Marker && vendorProfile?.lat && vendorProfile?.lng && (
                             <Marker
                                 coordinate={{ latitude: Number(vendorProfile.lat), longitude: Number(vendorProfile.lng) }}
                                 title="My Store"
@@ -161,7 +186,7 @@ export default function LiveMap() {
                         )}
 
                         {/* Live Rider Location */}
-                        {riderCoordinates && (
+                        {MarkerAnimated && riderCoordinates && (
                             <MarkerAnimated 
                                 ref={trackingMarkerRef}
                                 coordinate={{ latitude: Number(riderCoordinates.lat), longitude: Number(riderCoordinates.lng) }}
@@ -230,7 +255,7 @@ export default function LiveMap() {
                                         : "Waiting for rider location..."}
                             </Text>
                             <Text className={`text-xs mt-0.5 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-                                {activeOrder.order_status.replace("_", " ")}
+                                {activeOrder.order_status?.replace("_", " ") ?? "unknown"}
                             </Text>
                         </View>
                     </View>

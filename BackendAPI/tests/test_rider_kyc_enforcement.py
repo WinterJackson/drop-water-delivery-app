@@ -31,9 +31,16 @@ from models.deliverer_model import KYCStatus
 ROUTES = pathlib.Path(__file__).resolve().parent.parent / "routes" / "deliverer_routes.py"
 
 
-def _rider_with(status):
+def _rider_with(status, suspended=False):
     rider = MagicMock()
     rider.kyc_status = status
+    # `get_verified_rider` now answers two questions, and this file is about the
+    # second one. Stated explicitly because a bare `MagicMock` attribute is
+    # truthy: left unset, every rider here would read as suspended and these
+    # tests would pass for the wrong reason — on a refusal, which is the shape
+    # most of them assert. Suspension itself is covered in
+    # `test_standing_enforcement.py`.
+    rider.is_suspended = suspended
     db = AsyncMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = rider

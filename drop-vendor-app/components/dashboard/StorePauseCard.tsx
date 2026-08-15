@@ -34,7 +34,7 @@ import { Toast } from "@/lib/toast";
  * server that caps at two is a button that always fails.
  */
 export default function StorePauseCard() {
-    const { currentTheme } = useContext<any>(UIThemeContext);
+    const { currentTheme } = useContext(UIThemeContext);
     const dark = currentTheme === "dark";
     const canManageOrders = useCan(PERMISSIONS.manageOrders);
 

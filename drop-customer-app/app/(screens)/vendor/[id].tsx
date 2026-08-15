@@ -15,7 +15,7 @@ import Context from "@/context/context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useVendorDetails } from "@/hooks/queries/useProducts";
 import { useUserDetails } from "@/hooks/queries/useUser";
-import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
+import { useAddToCart, isVendorConflict, vendorConflictInfo, useDeliveryFee } from "@/hooks/queries/useCart";
 import { errorMessage } from "@/API/errors";
 import { useVendorFavorites, useAddVendorFavorite, useRemoveVendorFavorite } from "@/hooks/queries/useVendorFavorites";
 import { useAuth } from "@clerk/clerk-expo";
@@ -28,7 +28,7 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
-import { formatMoney, formatMoneyShort } from "@/utils/money";
+import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
 
 type Props = {};
 
@@ -50,6 +50,24 @@ const VendorDetails = (props: Props) => {
 	const { data: VendorDetails, isLoading } = useVendorDetails(vendorId);
 	const VendorDetailsLoaded = !isLoading;
 
+	/**
+	 * The delivery estimate and fee for **this** customer's address, from the
+	 * server that prices the order.
+	 *
+	 * The header used to read `VendorDetails.delivery_time` and
+	 * `.delivery_fee` — a store carries neither, so both branches were dead and
+	 * every customer read the same "Est. Delivery available • Delivery fee
+	 * varies". A vendor does not set either figure (the rider is paid out of the
+	 * delivery fee), and the distance is the customer's, not the store's.
+	 */
+	const { data: deliveryPreview } = useDeliveryFee(
+		VendorDetails?.lat ?? undefined,
+		VendorDetails?.lng ?? undefined,
+		User?.lat ?? undefined,
+		User?.lng ?? undefined,
+		VendorDetails?.vendor_type ?? 'retail_refill',
+	);
+
 	// Vendor favourite state synced globally with optimistic UI cache
 	const { data: favorites = [] } = useVendorFavorites();
 	const isVendorFavorite = favorites.some((f: any) => f.vendor_id === vendorId);
@@ -62,14 +80,14 @@ const VendorDetails = (props: Props) => {
 
 	const Offers = React.useMemo(() => {
 		if (VendorDetails?.products && Array.isArray(VendorDetails.products)) {
-			return VendorDetails.products.filter((product: any) => product.discount > 0);
+			return VendorDetails.products.filter((product) => !isZeroMoney(product.discount));
 		}
 		return [];
 	}, [VendorDetails]);
 
 	const Products = React.useMemo(() => {
 		if (VendorDetails?.products && Array.isArray(VendorDetails.products)) {
-			return VendorDetails.products.filter((product: any) => product.discount === 0);
+			return VendorDetails.products.filter((product) => isZeroMoney(product.discount));
 		}
 		return [];
 	}, [VendorDetails]);
@@ -175,7 +193,7 @@ const VendorDetails = (props: Props) => {
 					<View className="w-full relative" style={{ height: screenHeight * 0.35 }}>
 						<ImageBackground
 							className="w-full h-full"
-							source={{ uri: VendorDetails?.profile_pic }}
+							source={{ uri: VendorDetails?.profile_pic ?? undefined }}
 							resizeMode="cover"
 						>
 							<LinearGradient
@@ -236,7 +254,7 @@ const VendorDetails = (props: Props) => {
 									<View className="flex-row items-center gap-3">
 										<Ionicons name="bicycle" size={20} color={BRAND.primary} />
 										<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-											{VendorDetails?.delivery_time ? `Est. ${VendorDetails.delivery_time} min` : "Est. Delivery available"} • {VendorDetails?.delivery_fee ? `Fee: KSH ${VendorDetails.delivery_fee}` : "Delivery fee varies"}
+											{deliveryPreview?.estimated_minutes ? `Est. ${deliveryPreview.estimated_minutes} min` : "Est. Delivery available"} • {deliveryPreview?.delivery_fee ? `Fee: ${formatMoney(deliveryPreview.delivery_fee)}` : "Delivery fee varies"}
 										</Text>
 									</View>
 									{/* This store's own minimum order.

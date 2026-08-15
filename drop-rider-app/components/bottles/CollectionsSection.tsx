@@ -43,7 +43,7 @@ type Props = {
 };
 
 export function CollectionsSection({ vendors, fallbackVendors = [] }: Props) {
-    const { currentTheme } = useContext<any>(UIThemeContext);
+    const { currentTheme } = useContext(UIThemeContext);
     const dark = currentTheme === "dark";
 
     const { data, isLoading } = useBottleCollections();

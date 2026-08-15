@@ -39,7 +39,7 @@ interface WalletData {
 
 export default function BottleWallet() {
   const router = useRouter();
-  const { currentTheme } = useContext<any>(UIThemeContext);
+  const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   // Wallet figures come from the shared user query rather than a bespoke fetch,
   // so a top-up or an order that spends credit updates this screen automatically.
@@ -398,7 +398,7 @@ export default function BottleWallet() {
             
             {transactions.length > 5 && (
               <PressableScale 
-                onPress={() => router.push("/(screens)/Transactions" as any)}
+                onPress={() => router.push("/(screens)/Transactions")}
                 className={`w-full py-4 rounded-2xl items-center mt-2 border ${darkTheme ? "bg-slate-800 border-transparent" : "bg-white border-slate-200"}`}
               >
                 <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>View All Transactions</Text>
