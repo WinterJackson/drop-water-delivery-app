@@ -53,9 +53,28 @@ def test_an_unset_secret_is_permitted_in_development():
         assert payment_service.reject_mpesa_callback(_request(), None, "test") is None
 
 
+#: A fully production posture: real M-Pesa, secret configured.
+#:
+#: `MPESA_BASE_URL` is pinned deliberately. `is_safaricom_ip` skips the
+#: allow-list when it is the sandbox host — the list holds *production*
+#: addresses, so applying it to sandbox callbacks would refuse every one after
+#: a correct secret had already matched. Without this key these tests inherit
+#: whatever `.env` happens to say, and the developer default is sandbox: the
+#: foreign-IP test then fails, and worse, the two tests that assert a callback
+#: is *accepted* keep passing for the wrong reason — the IP was never checked
+#: at all. Pinning it is what keeps them about the allow-list.
+#:
+#: The sandbox side of that behaviour is asserted in `test_daraja_contract.py`.
+_PRODUCTION = {
+    "ENV": "production",
+    "MPESA_CALLBACK_SECRET": "right",
+    "MPESA_BASE_URL": "https://api.safaricom.co.ke",
+}
+
+
 def test_a_wrong_secret_is_rejected():
     with patch.dict(
-        os.environ, {"ENV": "production", "MPESA_CALLBACK_SECRET": "right"}, clear=False
+        os.environ, _PRODUCTION, clear=False
     ):
         rejected = payment_service.reject_mpesa_callback(_request(), "wrong", "test")
         assert rejected is not None
@@ -65,7 +84,7 @@ def test_a_wrong_secret_is_rejected():
 def test_a_missing_secret_is_rejected_when_one_is_configured():
     """Safaricom calling the pre-rollout URL must not be waved through."""
     with patch.dict(
-        os.environ, {"ENV": "production", "MPESA_CALLBACK_SECRET": "right"}, clear=False
+        os.environ, _PRODUCTION, clear=False
     ):
         rejected = payment_service.reject_mpesa_callback(_request(), None, "test")
         assert rejected is not None
@@ -74,7 +93,7 @@ def test_a_missing_secret_is_rejected_when_one_is_configured():
 
 def test_the_correct_secret_from_a_safaricom_ip_passes():
     with patch.dict(
-        os.environ, {"ENV": "production", "MPESA_CALLBACK_SECRET": "right"}, clear=False
+        os.environ, _PRODUCTION, clear=False
     ):
         assert payment_service.reject_mpesa_callback(_request(), "right", "test") is None
 
@@ -82,7 +101,7 @@ def test_the_correct_secret_from_a_safaricom_ip_passes():
 def test_a_correct_secret_from_a_foreign_ip_is_still_rejected():
     """Defence in depth: the secret can leak through access logs in query form."""
     with patch.dict(
-        os.environ, {"ENV": "production", "MPESA_CALLBACK_SECRET": "right"}, clear=False
+        os.environ, _PRODUCTION, clear=False
     ):
         rejected = payment_service.reject_mpesa_callback(
             _request(ip="203.0.113.9"), "right", "test"
@@ -94,7 +113,7 @@ def test_a_correct_secret_from_a_foreign_ip_is_still_rejected():
 def test_the_forwarded_header_wins_over_the_socket_peer():
     """Render terminates TLS at its edge; the socket peer is the proxy."""
     with patch.dict(
-        os.environ, {"ENV": "production", "MPESA_CALLBACK_SECRET": "right"}, clear=False
+        os.environ, _PRODUCTION, clear=False
     ):
         req = _request(ip="10.0.0.1", forwarded="196.201.214.200, 10.0.0.1")
         assert payment_service.reject_mpesa_callback(req, "right", "test") is None

@@ -17,7 +17,7 @@ from services.dispatch_policy import DispatchPolicy
 from utils.money import money_str
 from schemas.common_schemas import RequestBodyIdAndQuantity, RequestBodyId
 from schemas.cart_schemas import CartDetailed
-from services.payment_service import initiate_stk_push, check_payment
+from services.payment_service import initiate_stk_push, check_payment, order_callback_url
 from services.order_service import OrderStatusEnum, create_order, fetch_orders_by_id, update_orders_payment_status_by_checkout_id, cancel_customer_order
 from uuid import UUID
 
@@ -360,7 +360,15 @@ async def payment_request(request: Request, order: OrderRequest, db: AsyncSessio
             }
 
         # ── M-PESA STK Push ────────────────────────────────────────────────
-        response = await initiate_stk_push(phone=order.phone, amount=quote.stk_amount)
+        response = await initiate_stk_push(
+            phone=order.phone,
+            amount=quote.stk_amount,
+            # An order is settled by the order callback. Named explicitly: this
+            # used to be a module-level default that the wallet top-up path
+            # inherited, and inheriting it sent every top-up's confirmation to
+            # this endpoint, which resolves the id against `Orders`.
+            callback_url=order_callback_url(),
+        )
         checkout_request_id = response.get("CheckoutRequestID")
         if not checkout_request_id:
             # Safaricom refused the request outright — nothing was charged.

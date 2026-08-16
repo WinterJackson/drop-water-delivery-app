@@ -235,6 +235,69 @@ Two things a Clerk id cannot tell you, both discovered on the outbound path:
   rounding one, and `initiate_wallet_withdrawal` re-derives the fee from the
   rounded disbursement so `debited == disbursed + retained` exactly.
 
+### The B2C request body
+
+Two fields, both wrong in ways Daraja never reports:
+
+- **`Occassion`, with two s's.** That is Safaricom's spelling in their v3
+  request body and parameter table. Daraja drops an unrecognised key silently,
+  so the correct English spelling meant `payout_id` had never reached a single
+  disbursement — the field that reconciles an M-Pesa statement line against a
+  payout row. `B2C_OCCASION_KEY` names it so it is not "fixed" back. The
+  Reversal API documents the single-s form; they are inconsistent, and each
+  call site follows its own documentation.
+- **`OriginatorConversationID`** is required and is the double-disbursement
+  guard. It was absent, so the gateway could not deduplicate a retry — on the
+  outbound path, where a duplicate pays a rider twice. It is `payout_id`, and
+  it must be stable across retries of the same disbursement or it does nothing.
+
+`tests/test_daraja_contract.py` asserts the serialised request, not the source.
+
+### Which Daraja, not which ENV
+
+`is_safaricom_ip` reads `MPESA_BASE_URL`. `SAFARICOM_IP_RANGES` holds
+*production* addresses, so applying it to sandbox callbacks rejects all of them
+— after the shared secret has already matched, invisibly from both ends. Gating
+on the base URL is what lets a pre-launch deployment run `ENV=production`, with
+every fail-closed gate active, while still integrated against sandbox.
+
+It stays defence in depth: `ProxyHeadersMiddleware(trusted_hosts=["*"])` means
+the apparent client IP comes from a header anyone can set, so the secret is the
+guard and this is a second opinion.
+
+### Where a push comes back to
+
+An STK push names its own `CallBackURL` **in the request body**. There is no
+registration step and nothing in the Daraja portal decides it, which makes the
+URL a per-caller choice — and it was a module-level
+`os.getenv("MPESA_CALLBACK_URL")` that both callers inherited.
+
+The two are settled by different handlers, because a `CheckoutRequestID`
+resolves against `Orders` for a checkout and against `WalletTransactions` for a
+top-up. So every wallet top-up's confirmation went to `/api/cart/mpesa/callback`,
+which found no order and returned **400** — a retry instruction to Safaricom,
+not an acknowledgement. The customer paid, the row stayed `pending` for ever,
+and `handle_mpesa_topup_callback` had never been called by anybody.
+
+- `initiate_stk_push(..., *, callback_url)` is **keyword-only and required**. A
+  default is precisely what re-adopts one caller's endpoint for the next.
+- Resolve with `order_callback_url()` / `topup_callback_url()`. They return
+  `""` when unconfigured and the push is refused: collecting money with nowhere
+  for the confirmation to land is the defect, and declining is better.
+- `topup_callback_url()` derives from the order URL by swapping the path and
+  **keeping the query**, which is what carries `?secret=`. A second required
+  variable would have meant the fix did nothing until somebody set it.
+- `query_stk_status` is the one implementation of "how did this push end?",
+  shared by the client's poll and the reconciliation. A query answers with a
+  result code and **no receipt and no amount**.
+- `jobs/reconcile_pending_topups.py` recovers the residue. It settles only what
+  Safaricom positively resolves — a query that cannot answer is not a reason to
+  credit a wallet *or* to write a payment off — and escalates to Sentry past
+  `topup_reconcile_max_age_hours` rather than writing off a payment nobody can
+  confirm.
+
+`tests/test_stk_callback_routing.py` is the specification.
+
 `get_access_token` caches the Daraja token until shortly before it expires and
 raises `MpesaError` rather than returning `None`. It minted a fresh token per
 call — two round trips per payment — and a throttled mint returned `None`, which

@@ -54,6 +54,36 @@ async def upload_file_to_s3(file: UploadFile, prefix: str = "kyc") -> str:
             # Return the secure key instead of a public URL
             return file_name
             
+        elif os.getenv("ENV", "development").lower() != "development":
+            # Fail closed. This branch used to be taken on *any* deployment
+            # missing a credential, because it tested the credential and not
+            # the environment — so in production a rider's national ID was
+            # written to the container's own disk, unencrypted, and the
+            # function returned a *truthy* path. That path sailed past the KYC
+            # route's own `if not front_url` guard, the submission reported
+            # success, `kyc_status` went to `pending`, and the file was
+            # unreachable immediately: `/api/uploads/…` is not a mounted route,
+            # and the disk is wiped on the next deploy in any case.
+            #
+            # Nobody could then be approved — the reviewer's `<img>` 404s — so
+            # every rider sat in `VerificationWall` indefinitely, with no error
+            # anywhere to say why. A 503 here is strictly better: the rider is
+            # told to try again, nothing is half-recorded, and the operator
+            # finds out from the first submission rather than the first
+            # complaint.
+            #
+            # Money, KYC and cash gates fail closed on this platform. Storage
+            # for identity documents is the same kind of gate.
+            logger.error(
+                "Refusing an upload to prefix '%s': AWS credentials are not "
+                "configured and ENV is not development. Set AWS_ACCESS_KEY_ID, "
+                "AWS_SECRET_ACCESS_KEY and S3_BUCKET_NAME.",
+                prefix,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="File storage is not configured. Please try again later.",
+            )
         else:
             # DEVELOPMENT FALLBACK: Local file storage
             os.makedirs(f"uploads/{prefix}", exist_ok=True)

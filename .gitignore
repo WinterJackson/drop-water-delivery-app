@@ -43,6 +43,12 @@ drop-rider-app/ios/
 **/.env.local
 **/.env.production
 
+# The development fallback in `utils/s3_utils.upload_file_to_s3` writes here
+# when AWS is not configured. On a developer's machine that is real KYC
+# material — national IDs, delivery proof — so it must never be committable.
+# Outside development the same path now refuses rather than writing.
+BackendAPI/uploads/
+
 # ── Build Artifacts ──
 *.apk
 *.aab

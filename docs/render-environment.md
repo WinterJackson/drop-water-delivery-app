@@ -71,22 +71,54 @@ Safaricom. The live endpoints, verified against the router prefixes in `main.py`
 https://vepo-backend.onrender.com/api/cart/mpesa/callback?secret=<MPESA_CALLBACK_SECRET>
 ```
 
-#### Rollout order matters
+#### There is no portal registration — these URLs are environment variables
 
-The guard now **fails closed**: unset in production, every callback returns 503;
-set but not supplied, 403. That is the point — it previously wrote
+Worth stating plainly, because it is the opposite of how C2B works and the
+mistake is expensive. Nothing here calls Daraja's `RegisterURL`. Every callback
+address is sent **per request, inside the payload**, from a variable on this
+service:
+
+| Daraja field | Variable | Set in |
+|---|---|---|
+| `CallBackURL` (order STK) | `MPESA_CALLBACK_URL` | `payment_service.order_callback_url` |
+| `CallBackURL` (top-up STK) | `MPESA_TOPUP_CALLBACK_URL`, else derived | `payment_service.topup_callback_url` |
+| `ResultURL` / `QueueTimeOutURL` (B2C) | `MPESA_B2C_RESULT_URL` / `..._TIMEOUT_URL` | `initiate_b2c_payout` |
+| `ResultURL` / `QueueTimeOutURL` (reversal) | `MPESA_REVERSAL_*`, falling back to the B2C pair | `initiate_mpesa_reversal` |
+
+So the secret goes **into those URL variables**, saved together with
+`MPESA_CALLBACK_SECRET` in one Render save and therefore one restart. There is
+no external system to get ahead of.
+
+`MPESA_TOPUP_CALLBACK_URL` is optional: unset, it is derived from
+`MPESA_CALLBACK_URL` by swapping the path and keeping the query string, so the
+secret survives. Set it explicitly only if the two endpoints ever need to differ
+by more than their path.
+
+#### Rollout order still matters, for a smaller reason
+
+The guard **fails closed**: unset in production, every callback returns 503; set
+but not supplied, 403. That is the point — it previously wrote
 `if SECRET and supplied != SECRET`, so a missing variable silently disabled the
-check on endpoints that mark orders paid. But it means the sequence is not
-optional:
+check on endpoints that mark orders paid.
 
-1. Register the `?secret=…` URLs with Safaricom **first**, while the server still
-   has no secret configured. Nothing changes: the extra query parameter is
-   ignored, and the callbacks keep working.
-2. Then set `MPESA_CALLBACK_SECRET` on Render.
+The window is transactions **already in flight** at the restart. Those were
+pushed with the old URL, carry no `?secret=`, and will call back to a server
+that now demands one: 403, Safaricom retries, then gives up. STK callbacks
+arrive within about a minute and B2C results take longer, so do this at a quiet
+hour. `reconcile-pending-topups` recovers any top-up caught by it;
+`/confirm_payment` polling covers orders.
 
-Doing it the other way round leaves a window where Safaricom is still calling the
-bare URL against a server that now demands the secret — every callback 403s and
-payments stop reconciling until the portal catches up.
+Verify from outside — the two failure modes differ, which is what makes this
+testable:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://vepo-backend.onrender.com/api/cart/mpesa/callback
+```
+
+`503` means the secret is not configured and callbacks are being refused. `403`
+means the guard is live — and is the expected answer even with the right secret,
+because the caller's IP is checked too and yours is not Safaricom's.
 
 ### `SMS_WEBHOOK_SECRET`
 

@@ -113,6 +113,16 @@ def test_the_schedule_covers_every_job_that_used_to_be_an_arq_cron():
         # count that keeps coming back means a delivery path is not calling
         # `record_acquisition`, which is a code defect nothing else would surface.
         "reconcile-customer-cohorts",
+        # Settles wallet top-ups whose Safaricom callback never arrived. Every
+        # top-up was pushed with the *order* callback URL, so its confirmation
+        # went to an endpoint that resolves the id against `Orders`, found
+        # nothing and returned 400 — a retry instruction, not an
+        # acknowledgement — while the money had already left the customer's
+        # phone. Every fifteen minutes rather than nightly: this is somebody's
+        # balance, and a top-up is made because they want to spend it now.
+        # Like the cohort sweep, the count is the signal — one that keeps
+        # coming back means callbacks are not arriving at all.
+        "reconcile-pending-topups",
     }
     assert set(cron_routes._job_table()) == expected
 

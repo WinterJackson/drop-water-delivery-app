@@ -169,6 +169,7 @@ def _job_table() -> dict:
         "release-unclaimed-cash": worker.release_unclaimed_cash_task,
         "resume-paused-stores": worker.resume_paused_stores_task,
         "reconcile-customer-cohorts": worker.reconcile_customer_cohorts_task,
+        "reconcile-pending-topups": worker.reconcile_pending_topups_task,
     }
 
 

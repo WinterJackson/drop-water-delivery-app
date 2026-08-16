@@ -296,6 +296,17 @@ SPECS: tuple[SettingSpec, ...] = (
                 "stock returned and a paid order flagged for refund. Must be below "
                 "the stale threshold, which only surfaces a warning.",
                 "int", 15, 5, 1440, "minutes"),
+    # How long the top-up reconciliation keeps asking Safaricom about a wallet
+    # top-up whose callback never arrived. Daraja stops resolving old
+    # CheckoutRequestIDs, so past this the sweep escalates to a human instead of
+    # querying an id that will never come back — the row is left `pending`,
+    # because writing it off would assert something nobody knows.
+    SettingSpec("topup_reconcile_max_age_hours", "workflow", "Top-up reconciliation window",
+                "How long to keep asking M-Pesa about a wallet top-up whose "
+                "confirmation never arrived. Past this the top-up is reported for "
+                "somebody to check against the M-Pesa statement, because Safaricom "
+                "no longer answers queries for it.",
+                "int", 48, 1, 336, "hours"),
     # The *reward* for Platinum has been editable since the settings table
     # existed (`gig_platinum_rider_commission_rate`); the *requirement* was a
     # literal `>= 20` inside the nightly job, and the rider app stated it as a

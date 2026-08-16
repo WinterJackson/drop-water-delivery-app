@@ -166,6 +166,29 @@ async def reconcile_customer_cohorts_task(ctx):
     return str(result)
 
 
+async def reconcile_pending_topups_task(ctx):
+    """Settle wallet top-ups whose Safaricom callback never arrived.
+
+    Every top-up was pushed with the *order* callback URL, so its confirmation
+    was delivered to an endpoint that resolves the id against `Orders`, found
+    nothing, and returned 400 — a retry instruction, not an acknowledgement.
+    The money left the customer's phone and the transaction stayed `pending`
+    with nothing anywhere to notice.
+
+    The callback URL is now named per caller, which stops it recurring. This
+    recovers the money already taken, and afterwards catches the ordinary case
+    of Safaricom exhausting its retries against a restart.
+
+    Like the cohort reconciliation, the count it returns is the signal: a
+    number that keeps coming back means callbacks are not arriving, which is a
+    defect in the deployment rather than in a customer's payment.
+    """
+    from jobs.reconcile_pending_topups import run_reconcile_pending_topups
+
+    result = await run_reconcile_pending_topups()
+    return str(result)[:400]
+
+
 async def deposit_maintenance_task(ctx):
     """The deposit book's nightly upkeep, including the reconciliation.
 
@@ -232,6 +255,7 @@ class WorkerSettings:
         release_unclaimed_cash_task,
         resume_paused_stores_task,
         reconcile_customer_cohorts_task,
+        reconcile_pending_topups_task,
         dispatch_trip_radar_task,
     ]
     redis_settings = redis_settings
@@ -272,5 +296,6 @@ if os.getenv("ARQ_INTERNAL_CRON", "0").lower() in ("1", "true", "yes"):
         cron(release_unclaimed_cash_task, minute=set(range(0, 60, 10))),
         cron(resume_paused_stores_task, minute=set(range(0, 60, 5))),
         cron(evaluate_platinum_riders_task, hour=0, minute=0),
+        cron(reconcile_pending_topups_task, minute=set(range(0, 60, 15))),
     ]
     logger.warning("ARQ internal cron enabled — cron-job.org schedules must be paused.")

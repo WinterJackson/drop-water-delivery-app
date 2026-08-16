@@ -8,7 +8,12 @@ from models.wallet_transaction_model import WalletTransaction, UserType, Transac
 from models.user_model import User
 from models.vendor_model import Vendor
 from models.deliverer_model import Deliverer
-from services.payment_service import initiate_stk_push, initiate_b2c_payout
+from services.payment_service import (
+    initiate_stk_push,
+    initiate_b2c_payout,
+    topup_callback_url,
+    STK_FAILURE_REASONS,
+)
 from utils.money import MoneyIn, money_str
 from utils.paging import stable
 
@@ -263,8 +268,20 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
         session, user_id, user_type, store_id=store_id
     )
 
-    # Trigger M-Pesa STK Push
-    response = await initiate_stk_push(phone=phone, amount=int(amount_dec))
+    # Trigger M-Pesa STK Push.
+    #
+    # `callback_url` is named, and it is **not** the order endpoint. This call
+    # inherited `MPESA_CALLBACK_URL` from inside `initiate_stk_push`, so every
+    # top-up's confirmation was delivered to `/api/cart/mpesa/callback`, which
+    # looks the `CheckoutRequestID` up in `Orders` and finds nothing for a
+    # top-up. The customer paid, the row below stayed `pending` forever, and
+    # `handle_mpesa_topup_callback` — correct, tested, live — was never called
+    # by anyone, because nothing had told Safaricom where it was.
+    response = await initiate_stk_push(
+        phone=phone,
+        amount=int(amount_dec),
+        callback_url=topup_callback_url(),
+    )
     if "error" in response or response.get("ResponseCode") != "0":
         logger.error(f"STK Push Failed: {response}")
         raise HTTPException(status_code=400, detail="Failed to initiate STK push. Please try again.")
@@ -286,6 +303,101 @@ async def initiate_wallet_topup(session: AsyncSession, user_id: str, user_type: 
     await session.commit()
     
     return {"message": "STK Push initiated", "checkout_request_id": checkout_request_id}
+
+async def _credit_topup(
+    session: AsyncSession,
+    transaction: WalletTransaction,
+    *,
+    amount: Decimal,
+    receipt: str | None,
+    note: str | None = None,
+):
+    """Move a settled top-up onto its wallet. Returns `None` on success.
+
+    A non-`None` return is the refusal dict the caller should hand back — the
+    two settlement paths (Safaricom's callback and the reconciliation sweep)
+    report identically because they are the same code.
+
+    The balance row is resolved with `_locked_wallet_owner`, never by clerk id:
+    one identity may own several stores with a `wallet_balance` each, and a
+    settlement arriving minutes after the request has no other way to know
+    which one it belongs to.
+    """
+    reference = transaction.reference_id
+
+    model = {
+        UserType.vendor: Vendor,
+        UserType.rider: Deliverer,
+        UserType.customer: User,
+    }.get(transaction.user_type)
+
+    if model is None:
+        logger.error("Top-up %s has unknown user_type %s", reference, transaction.user_type)
+        return {"status": "rejected", "reason": "unknown_user_type"}
+
+    owner = await _locked_wallet_owner(session, model, transaction)
+    if owner is None:
+        logger.error("Top-up %s references a missing account.", reference)
+        transaction.status = TransactionStatus.failed
+        transaction.failure_reason = "Account not found"
+        await session.commit()
+        return {"status": "rejected", "reason": "account_not_found"}
+
+    owner.wallet_balance = Decimal(str(owner.wallet_balance or 0)) + amount
+    transaction.amount = amount
+    transaction.status = TransactionStatus.completed
+    transaction.mpesa_receipt_number = receipt
+    if note:
+        transaction.description = note
+
+    await session.commit()
+    logger.info("Wallet top-up %s completed: %s credited.", reference, amount)
+    return None
+
+
+async def settle_pending_topup_from_query(
+    session: AsyncSession, transaction: WalletTransaction, outcome: dict
+):
+    """Settle one stranded top-up from an STK *query* rather than a callback.
+
+    Used by `jobs/reconcile_pending_topups.py` for the residue: top-ups whose
+    callback never arrived. That was every top-up before the callback URL was
+    corrected, and afterwards it is the ordinary case of Safaricom exhausting
+    its retries against a restart or a network partition.
+
+    A query answers with a result code and nothing else — **no receipt and no
+    amount**. So the credit is the amount we asked for, which is the amount an
+    STK push collects (the payer cannot edit it), and the receipt is left null
+    with the reconciliation recorded in `description`. A synthetic receipt
+    number would be a fabricated Safaricom reference sitting in an indexed
+    column that support reconciles against real statements.
+
+    `outcome["state"] == "pending"` must never reach here: it means *we could
+    not find out*, and the row is left alone for the next run.
+    """
+    reference = transaction.reference_id
+
+    if transaction.status != TransactionStatus.pending:
+        return {"status": "already_settled"}
+
+    if outcome["state"] == "success":
+        return await _credit_topup(
+            session,
+            transaction,
+            amount=Decimal(str(transaction.amount)),
+            receipt=None,
+            note="M-Pesa STK Push Top Up (settled by reconciliation)",
+        ) or {"status": "success"}
+
+    transaction.status = TransactionStatus.failed
+    transaction.failure_reason = STK_FAILURE_REASONS.get(
+        outcome.get("result_code"),
+        f"Payment failed: {outcome.get('result_desc', 'Unknown error')}",
+    )
+    await session.commit()
+    logger.info("Top-up %s reconciled as failed: %s", reference, transaction.failure_reason)
+    return {"status": "failed"}
+
 
 async def handle_mpesa_topup_callback(session: AsyncSession, payload: dict):
     """Settle a wallet top-up from a Safaricom STK callback.
@@ -363,32 +475,11 @@ async def handle_mpesa_topup_callback(session: AsyncSession, payload: dict):
             await session.commit()
             return {"status": "rejected", "reason": "missing_receipt"}
 
-        # Credit the wallet of whichever entity started the top-up.
-        model = {
-            UserType.vendor: Vendor,
-            UserType.rider: Deliverer,
-            UserType.customer: User,
-        }.get(transaction.user_type)
-
-        if model is None:
-            logger.error("Top-up %s has unknown user_type %s", checkout_request_id, transaction.user_type)
-            return {"status": "rejected", "reason": "unknown_user_type"}
-
-        owner = await _locked_wallet_owner(session, model, transaction)
-        if owner is None:
-            logger.error("Top-up %s references a missing account.", checkout_request_id)
-            transaction.status = TransactionStatus.failed
-            transaction.failure_reason = "Account not found"
-            await session.commit()
-            return {"status": "rejected", "reason": "account_not_found"}
-
-        owner.wallet_balance = Decimal(str(owner.wallet_balance or 0)) + received
-        transaction.amount = received
-        transaction.status = TransactionStatus.completed
-        transaction.mpesa_receipt_number = mpesa_receipt
-
-        await session.commit()
-        logger.info("Wallet top-up %s completed: %s credited.", checkout_request_id, received)
+        credited = await _credit_topup(
+            session, transaction, amount=received, receipt=mpesa_receipt
+        )
+        if credited is not None:
+            return credited
         return {"status": "success"}
 
     # Failure path

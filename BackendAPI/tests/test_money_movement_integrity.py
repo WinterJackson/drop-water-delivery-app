@@ -167,9 +167,15 @@ def test_no_module_assigns_a_wallet_balance_outside_the_two_that_may():
     Assigning `wallet_balance` anywhere else is how money came back after a
     failed payout with nothing in the history to explain it.
 
-    `wallet_service.apply_wallet_delta` is the implementation. The top-up
-    callback is the other exception: it credits the amount Safaricom actually
-    collected, which it has just verified against the amount requested.
+    `wallet_service.apply_wallet_delta` is the implementation. Crediting a
+    settled top-up is the other exception, and it is `_credit_topup` — one
+    function, called by both settlement paths.
+
+    It moved there from inside `handle_mpesa_topup_callback` when the top-up
+    reconciliation was added. A second settlement path was going to have to
+    credit a wallet too, and the alternative was a second entry on this list —
+    i.e. two implementations of "put this top-up on its balance", which is how
+    every defect this file guards against began.
 
     What counts as a defect is *arithmetic* on the balance — `+=`, or an assigned
     expression. `create_order` assigns the value it read under its own row lock
@@ -178,7 +184,7 @@ def test_no_module_assigns_a_wallet_balance_outside_the_two_that_may():
     """
     allowed = {
         ("services/wallet_service.py", "apply_wallet_delta"),
-        ("services/wallet_service.py", "handle_mpesa_topup_callback"),
+        ("services/wallet_service.py", "_credit_topup"),
     }
     offenders: list[str] = []
 
@@ -324,7 +330,11 @@ async def test_a_failed_token_does_not_propagate_out_of_the_initiators():
     original = ps.get_access_token
     ps.get_access_token = _boom
     try:
-        stk = await ps.initiate_stk_push(phone="254712345678", amount=100)
+        stk = await ps.initiate_stk_push(
+            phone="254712345678",
+            amount=100,
+            callback_url="https://example.test/api/cart/mpesa/callback?secret=x",
+        )
         b2c = await ps.initiate_b2c_payout(phone="254712345678", amount=100, payout_id="x" * 8)
         rev = await ps.initiate_mpesa_reversal(transaction_id="ABC", amount=100)
     finally:
