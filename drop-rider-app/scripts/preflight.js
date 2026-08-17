@@ -204,9 +204,14 @@ try {
 
 if (!(process.env.EXPO_PUBLIC_SMS_GATEWAY_NUMBER || "").trim()) {
   notes.push(
-    "EXPO_PUBLIC_SMS_GATEWAY_NUMBER is not set — the \"No Data? SMS to Complete\"\n" +
-      "    button will compose a message to the +254700000000 placeholder, so the\n" +
-      "    offline delivery fallback does not work."
+    "EXPO_PUBLIC_SMS_GATEWAY_NUMBER is not set — this build ships without the\n" +
+      "    \"No Data? SMS to Complete\" button, so a rider with no signal cannot\n" +
+      "    complete a delivery until they regain data.\n" +
+      "    A note rather than a problem: the control is honestly absent. It used to\n" +
+      "    fall back to a placeholder number nobody owns, which sent the rider's\n" +
+      "    message into the void while showing them it had sent — see\n" +
+      "    utils/smsFallback.ts. Turning it on needs this variable AND\n" +
+      "    SMS_WEBHOOK_SECRET on the backend; either half alone is invisible."
   );
 }
 
