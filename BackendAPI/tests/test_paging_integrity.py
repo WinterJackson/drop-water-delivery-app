@@ -447,16 +447,90 @@ def test_product_and_vendor_search_are_bounded_by_the_service_radius():
     )
 
 
+def _compiled_radius_predicate() -> str:
+    """`_within_service_radius` as the SQL Postgres will actually receive.
+
+    No database is needed to compile a predicate, which matters here: nothing
+    else in this suite reaches one, and asserting on source text is how the
+    version of this test below the fold came to pass while the endpoint
+    returned 500.
+    """
+    from sqlalchemy import func
+    from sqlalchemy.dialects import postgresql
+    from geoalchemy2 import Geography
+
+    from services.query_service import _within_service_radius
+
+    point = func.ST_SetSRID(func.ST_MakePoint(36.65, -1.36), 4326).cast(Geography)
+    return str(
+        _within_service_radius(point).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+
 def test_the_radius_predicate_still_matches_an_unclassified_store():
     """`vendor_type != 'wholesale_b2b'` is NULL for a NULL column, not true.
 
-    Without the coalesce, a store nobody has classified falls out of *both*
-    branches of the OR and disappears from search entirely.
-    """
-    source = (BACKEND / "services" / "query_service.py").read_text()
-    predicate = source.split("def _within_service_radius", 1)[1].split("\n\n\n", 1)[0]
+    A store nobody has classified must not fall out of *both* branches of the
+    OR and disappear from search.
 
-    assert "func.coalesce(Vendor.vendor_type" in predicate
+    **This test used to assert `func.coalesce(Vendor.vendor_type` was present,
+    and that was the bug.** It pinned one implementation of the rule rather
+    than the rule, and the implementation it pinned is one Postgres refuses:
+    `COALESCE(vendor_business_type, varchar)` raises `DatatypeMismatchError`,
+    so both search endpoints answered 500 for every customer whose location was
+    known. A test naming a mechanism cannot tell a correct fix from a
+    regression — it failed on the fix exactly as loudly as it would have on a
+    real one. See `tests/test_sql_type_safety.py`.
+
+    So the assertion is now on the compiled SQL, which is what the database
+    sees, and on the property rather than the spelling: the NULL is named, and
+    each vendor type is measured against its own radius.
+    """
+    sql = _compiled_radius_predicate()
+
+    assert "vendor_type IS NULL" in sql, (
+        "the NULL must be named. `!=` is NULL for a NULL column, not true, so "
+        "an unclassified store falls out of both branches and vanishes from "
+        f"search:\n{sql}"
+    )
+    assert "coalesce" not in sql.lower(), (
+        "Postgres refuses COALESCE(enum, varchar) rather than choosing a "
+        f"result type:\n{sql}"
+    )
+    # Each type against its own radius, both read from the configured rows.
+    assert sql.count("ST_DWithin") == 2, sql
+    assert "15000.0" in sql and "2500.0" in sql, (
+        "wholesale 15 km and retail 2.5 km, through DispatchPolicy's "
+        f"accessors:\n{sql}"
+    )
+
+
+def test_three_valued_logic_is_why_the_null_has_to_be_named():
+    """The SQL semantics the predicate above depends on, pinned once.
+
+    Run against sqlite because the point is ternary logic, not PostGIS: `!=`
+    against a NULL yields NULL, which `WHERE` discards exactly as if it were
+    false. This is the whole reason a store with no `vendor_type` needed
+    special handling in the first place.
+    """
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE v (kind TEXT)")
+    db.executemany("INSERT INTO v VALUES (?)", [("wholesale_b2b",), ("retail_refill",), (None,)])
+
+    naive = db.execute("SELECT count(*) FROM v WHERE kind != 'wholesale_b2b'").fetchone()[0]
+    assert naive == 1, "the unclassified store is silently dropped by `!=` alone"
+
+    named = db.execute(
+        "SELECT count(*) FROM v WHERE kind != 'wholesale_b2b' OR kind IS NULL"
+    ).fetchone()[0]
+    assert named == 2, "naming the NULL is what makes the two branches exhaustive"
+
+    wholesale = db.execute("SELECT count(*) FROM v WHERE kind = 'wholesale_b2b'").fetchone()[0]
+    assert wholesale + named == 3, "and the two branches must cover every row exactly once"
 
 
 # ── The scanners above, checked against known inputs ─────────────────────────

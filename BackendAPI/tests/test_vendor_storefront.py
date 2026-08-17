@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -489,33 +490,155 @@ def test_the_cash_decision_still_lives_in_cod_policy():
     pytest.fail("assert_customer_may_pay_cash not found")
 
 
-@pytest.mark.parametrize(
-    "function",
-    [
-        "get_all_vendors",
-        "get_nearby_vendors",
-        "get_top_rated_vendors",
-        "get_vendors_by_type_service",
-        "get_vendor_by_id_service",
-        "get_top_brands_service",
-        "get_vendor_directory",
-    ],
-)
-def test_every_customer_facing_vendor_read_carries_the_store_state(function):
-    """Seven functions, and the one that gets missed is the bug.
+#: How a read says "I asked whether this store is trading".
+_ANNOTATES = ("_annotated", "vendor_availability.annotate", "availability.annotate")
 
-    The same discipline `discoverable_vendor()` exists for: a store shown as
-    open in the directory and closed on its own page is what people screenshot.
+
+def _storefront_schemas() -> set[str]:
+    """Every response schema that *claims* a store's state.
+
+    Derived from the class hierarchy, not from a list. `StorefrontState`'s six
+    fields default permissively on purpose — a read that forgets to stamp them
+    serves `store_state: "open"` for every store rather than closing them all —
+    so *any* schema carrying that mixin makes a claim, and every read that
+    serves one has to have asked.
+
+    Discovered rather than enumerated because enumeration is what failed:
+    `BaseVendor`, `VendorStorefront`, `VendorWithProductsThin` and
+    `VendorWithProductsFull` all inherit it, and a fifth added tomorrow is
+    covered here with nothing to remember.
     """
-    tree = ast.parse((BACKEND / "services/vendor_service.py").read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == function:
-            assert "_annotated" in ast.unparse(node), (
-                f"{function} returns stores to a customer without saying whether "
-                "they are open"
-            )
-            return
-    pytest.fail(f"{function} not found in vendor_service")
+    import inspect
+
+    from schemas import vendor_schemas
+    from schemas.vendor_schemas import StorefrontState
+
+    return {
+        name
+        for name, obj in inspect.getmembers(vendor_schemas, inspect.isclass)
+        if issubclass(obj, StorefrontState) and obj is not StorefrontState
+    }
+
+
+def _service_functions() -> dict[str, str]:
+    """Every function in `services/`, by name, as source minus docstrings.
+
+    `_code_only` on both sides of this rule, for the two reasons it always is:
+    a note explaining why a read annotates would otherwise satisfy the rule
+    without any code doing it, and a note that merely *names* a schema would
+    pull an unrelated handler into the rule — which is what
+    `vendor_upload_image` did, mentioning `BaseVendor.profile_pic` in prose
+    about presigned URLs.
+    """
+    found: dict[str, str] = {}
+    for path in sorted((BACKEND / "services").rglob("*.py")):
+        try:
+            tree = ast.parse(_code_only(path))
+        except SyntaxError:  # pragma: no cover - a file that cannot parse is not a read
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                found[node.name] = ast.unparse(node)
+    return found
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            fn = sub.func
+            if isinstance(fn, ast.Name):
+                names.add(fn.id)
+            elif isinstance(fn, ast.Attribute):
+                names.add(fn.attr)
+    return names
+
+
+def _storefront_route_handlers():
+    """Route handlers that serve a store's state to a client.
+
+    Matched on the schema appearing anywhere in the handler — decorator or body
+    — rather than on `response_model=` alone, because
+    `GET /vendors` drops `response_model` to cache the serialised dict and calls
+    `VendorWithProductsThin.model_validate` by hand. A rule that read only the
+    decorator would exempt precisely the read that opted out of the decorator.
+    """
+    schemas = _storefront_schemas()
+    for path in sorted((BACKEND / "routes").rglob("*.py")):
+        tree = ast.parse(_code_only(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                continue
+            if not node.decorator_list:
+                continue
+            source = ast.unparse(node)
+            # Whole names: `BaseVendor` must not be matched inside
+            # `BaseVendorSomethingElse`.
+            hit = {s for s in schemas if re.search(rf"\b{re.escape(s)}\b", source)}
+            if hit:
+                yield path.relative_to(BACKEND), node, sorted(hit)
+
+
+def test_every_read_that_claims_a_store_is_open_has_asked():
+    """The one that gets missed is the bug — so nothing here is listed by name.
+
+    This test used to name seven functions in `vendor_service.py`. All seven
+    were correct, and `query_service.search_vendors_service` — a different
+    module, serving `VendorStorefront` to the customer's search screen — was
+    never covered and never annotated. Every store in search results reported
+    `store_state: "open"`, so a paused shop read as open in search and closed on
+    its own page: the two surfaces `StorefrontState` exists to keep in step,
+    out of step.
+
+    Discovery starts at the wire (which routes serve the schema) and walks in,
+    so a new read is covered by existing on the path rather than by somebody
+    remembering to add it to a list.
+    """
+    services = _service_functions()
+    offenders: list[str] = []
+
+    for path, handler, schemas in _storefront_route_handlers():
+        source = ast.unparse(handler)
+        if any(marker in source for marker in _ANNOTATES):
+            continue
+        # The handler may delegate; a service function it calls may annotate.
+        if any(
+            marker in services.get(name, "")
+            for name in _called_names(handler)
+            for marker in _ANNOTATES
+        ):
+            continue
+        offenders.append(
+            f"{path}::{handler.name} serves {', '.join(schemas)} "
+            "without annotating"
+        )
+
+    assert not offenders, (
+        "these routes tell a customer whether a store is trading without ever "
+        "asking `vendor_availability`. StorefrontState defaults to open, so the "
+        "answer is not missing — it is wrong, and a paused store appears open:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_storefront_discovery_is_not_vacuous():
+    """A rule that matches nothing passes forever."""
+    schemas = _storefront_schemas()
+    assert {"BaseVendor", "VendorStorefront"} <= schemas, schemas
+    assert "StorefrontState" not in schemas
+
+    handlers = list(_storefront_route_handlers())
+    assert len(handlers) >= 5, f"only found {len(handlers)} storefront routes"
+
+    # The read that regressed must be among them, and reached via query_service.
+    served = {h.name for _, h, _ in handlers}
+    assert "search_vendors" in served, served
+
+    services = _service_functions()
+    assert any(m in services["search_vendors_service"] for m in _ANNOTATES)
+
+    # And the marker check must be capable of failing.
+    assert not any(m in "async def f():\n    return rows" for m in _ANNOTATES)
 
 
 @pytest.mark.asyncio
