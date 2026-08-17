@@ -79,7 +79,14 @@ APPS = ("drop-customer-app", "drop-rider-app", "drop-vendor-app", "drop-admin")
 #: The high-water mark per app. **Lower these as you clean up; never raise one.**
 #: A rise means a new `any` was written, which is the thing being prevented.
 CEILING = {
-    "drop-customer-app": 114,
+    # 114 -> 113: `product-details/[id].tsx` mirrored the query into
+    # `useState<any>()` and rendered that. The `any` was not incidental to the
+    # bug, it *was* the bug's cover — it hid that `price`/`discount` are decimal
+    # strings, so a seventh copy of the inline `Math.round((price - discount) *
+    # 100) / 100` survived there after the other six were removed, and it hid a
+    # nullable `vendor.lat` being passed to a `number`-typed parameter. Both
+    # failed `tsc` the moment the screen rendered from the typed query instead.
+    "drop-customer-app": 113,
     "drop-rider-app": 82,
     "drop-vendor-app": 81,
     # Written without a single one from the start, and it stays that way.

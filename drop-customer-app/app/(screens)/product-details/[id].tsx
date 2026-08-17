@@ -1,5 +1,5 @@
-import { usePathname, useRouter } from "expo-router";
-import React, { useContext, useEffect, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import * as Haptics from 'expo-haptics';
 import {
     Dimensions,
@@ -28,7 +28,7 @@ import { useDeliveryFee } from "@/hooks/queries/useCart";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
+import { discountedPrice, formatMoney, isZeroMoney, multiplyMoney } from "@/utils/money";
 
 const ProductDetails = () => {
 	// <---------------HOOKES--------------->
@@ -40,12 +40,9 @@ const ProductDetails = () => {
 	const { data: User } = useUserDetails();
 
 	// <---------------STATES--------------->
-	const [Product, setProduct] = useState<any>();
-	const [ProductLoaded, setProductLoaded] = useState<boolean>(false);
 	const [Quantity, setQuantity] = useState(1);
 	const [loading, setLoading] = useState<boolean>(false);
-    const [location, setLocation] = useState<string>("");
-    
+
     const { mutateAsync: addToCartMutation } = useAddToCart();
     const { data: favorites = [] } = useFavorites();
     const { mutateAsync: addFavorite } = useAddFavorite();
@@ -53,17 +50,41 @@ const ProductDetails = () => {
 
 	// <---------------VARIABLES--------------->
 
-	const path = usePathname();
-	const id = path.split("/")[2];
+	// The route's own parameter, not a slice of the URL. `usePathname()` returns
+	// the path with the `(screens)` group stripped, so `split("/")[2]` happened
+	// to land on the id — until this screen moves, gains a segment, or is
+	// reached by a link carrying a query string, at which point it silently
+	// reads the wrong thing. `[id].tsx` already declares this parameter.
+	const { id } = useLocalSearchParams<{ id: string }>();
+
 	// <---------------FUNCTIONS--------------->
-    const { data: ProductData, isSuccess: queryLoaded } = useProduct(id as string);
-    const { location: userDeviceLocation } = useLocation();
+	//
+	// Rendered straight from the query. This screen used to copy the result
+	// into `useState` and render *that*, which is a second source of truth for
+	// the same fact — and the two came apart in the one case that matters.
+	//
+	// Expo Router keeps one component instance for a route pattern and only
+	// swaps the parameters, so moving from product A to product B does not
+	// remount: the mirrored `Product`/`ProductLoaded` survived, and the screen
+	// kept rendering A's name, image, price and vendor under B's id. If B was
+	// withdrawn (`deleted_at` — products here are withdrawn, never deleted, so a
+	// 404 is routine) the effect that copied the result never ran and the screen
+	// showed A *permanently*, with a live "Add to Cart" wired to B. Reproduced
+	// by deep-linking a non-existent id: the page rendered "Alkaline 20L Refill,
+	// KSH 100.00, In Stock" for a product the server had just said did not
+	// exist. A price the customer reads and an id the button sends must be the
+	// same product.
+	const { data: Product, isSuccess: queryLoaded, isError, isPending, error } = useProduct(id as string);
+	const { location: userDeviceLocation } = useLocation();
 
     // Prefer saved location coordinates if available, otherwise device GPS
     const userLat = User?.lat || userDeviceLocation?.coords?.latitude;
     const userLng = User?.lng || userDeviceLocation?.coords?.longitude;
-    const vendorLat = Product?.vendor?.lat;
-    const vendorLng = Product?.vendor?.lng;
+    // `?? undefined` because the column is nullable and `useDeliveryFee` guards
+    // on `!!lat_from`: a null reached it as a null and typechecked only while
+    // `Product` was `any`.
+    const vendorLat = Product?.vendor?.lat ?? undefined;
+    const vendorLng = Product?.vendor?.lng ?? undefined;
     const vendorType = Product?.vendor?.vendor_type || 'retail_refill';
 
 	const { data: deliveryFeeData, isLoading: deliveryFeeLoading } = useDeliveryFee(
@@ -75,36 +96,29 @@ const ProductDetails = () => {
 		'motorbike'
 	);
 
-	useEffect(() => {
-		if (queryLoaded && ProductData) {
-			setProduct(ProductData);
-			setProductLoaded(true);
-			
-			// Extract vendor location from product data if available
-			if (ProductData?.vendor?.location_address) {
-				setLocation(ProductData.vendor.location_address);
-			} else if (ProductData?.vendor) {
-				// Fallback to constructing location from vendor data
-				const vendor = ProductData.vendor as any;
-				const locationParts = [
-					vendor.name,
-					vendor.address_line_1,
-					vendor.address_line_2,
-					vendor.city,
-					vendor.state,
-					vendor.zip_code
-				].filter(part => part && typeof part === "string" && part.trim() !== '');
-				
-				if (locationParts.length > 0) {
-					setLocation(locationParts.join(', '));
-				} else {
-					setLocation("Location not available");
-				}
-			} else {
-				setLocation("Location not available");
-			}
+	const ProductLoaded = queryLoaded && !!Product;
+
+	// Derived, not stored, for the same reason as the product itself: held in
+	// state it outlived the product it described, so a withdrawn product showed
+	// the previous shop's address.
+	const location = useMemo(() => {
+		if (!Product) return "";
+		if (Product?.vendor?.location_address) return Product.vendor.location_address;
+		if (Product?.vendor) {
+			const vendor = Product.vendor as any;
+			const locationParts = [
+				vendor.name,
+				vendor.address_line_1,
+				vendor.address_line_2,
+				vendor.city,
+				vendor.state,
+				vendor.zip_code
+			].filter(part => part && typeof part === "string" && part.trim() !== '');
+
+			if (locationParts.length > 0) return locationParts.join(', ');
 		}
-	}, [queryLoaded, ProductData]);
+		return "Location not available";
+	}, [Product]);
 
 	// Initialize quantity to vendor-defined minimum order quantity once product loads
 	useEffect(() => {
@@ -262,7 +276,38 @@ const ProductDetails = () => {
 					</PressableScale>
 				</View>
 
-				{!ProductLoaded ? (
+				{isError ? (
+					// A withdrawn product is an ordinary outcome, not an exception:
+					// `delete_product` sets `deleted_at` and every catalogue read
+					// carries `live_product()`, so an id that was valid yesterday —
+					// in a favourite, a past order, a shared link, a push
+					// notification's `action_url` — answers 404 today. Without this
+					// branch the screen had nowhere to put that, and the skeleton
+					// below ran for ever while the customer waited for a product
+					// that was never coming.
+					<View className="flex-1 items-center justify-center px-8">
+						<Ionicons
+							name="water-outline"
+							size={64}
+							color={darkTheme ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)"}
+						/>
+						<Text className={`mt-4 text-lg font-heading-semibold text-center ${darkTheme ? "text-white" : "text-black"}`}>
+							This product isn&apos;t available
+						</Text>
+						<Text className={`mt-2 text-center ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
+							{/* The backend's own sentence, never a status code. */}
+							{errorMessage(error, "It may have been withdrawn by the shop.")}
+						</Text>
+						<PressableScale
+							accessibilityLabel="Go back"
+							onPress={() => router.back()}
+							className="mt-8 px-8 py-3 rounded-2xl"
+							style={{ backgroundColor: BRAND.primary }}
+						>
+							<Text className="text-white font-sans-bold">Go back</Text>
+						</PressableScale>
+					</View>
+				) : !ProductLoaded ? (
 					// Professional 1:1 Skeleton Layout
 					<View className="flex-1">
 						{/* Professional Image Placeholder (No Skeleton) */}
@@ -508,7 +553,18 @@ const ProductDetails = () => {
 								<View className="flex-row items-center justify-between mb-5">
 									<Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Subtotal</Text>
 									<Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
-										KSH {Math.round(((Product?.price || 0) - (Product?.discount || 0)) * Quantity * 100) / 100}
+										{/*
+										  * `price` and `discount` are decimal strings. This line was
+										  * `Math.round((price - discount) * Quantity * 100) / 100` with a
+										  * hand-written `KSH ` in front — a float subtraction and the exact
+										  * `* 100` round trip `utils/money.ts` exists to prevent, on the
+										  * subtotal a customer reads immediately before tapping Buy Now.
+										  * It is the seventh copy of a defect the other six screens had
+										  * already had removed, and it survived here only because
+										  * `Product` was typed `any`, so nothing could see that these two
+										  * fields are strings.
+										  */}
+										{formatMoney(multiplyMoney(discountedPrice(Product?.price, Product?.discount), Quantity))}
 									</Text>
 								</View>
 

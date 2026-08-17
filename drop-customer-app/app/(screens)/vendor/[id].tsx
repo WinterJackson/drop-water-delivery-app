@@ -20,7 +20,7 @@ import { errorMessage } from "@/API/errors";
 import { useVendorFavorites, useAddVendorFavorite, useRemoveVendorFavorite } from "@/hooks/queries/useVendorFavorites";
 import { useAuth } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
-import { usePathname, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
@@ -37,7 +37,6 @@ const { height: screenHeight } = Dimensions.get("window");
 const VendorDetails = (props: Props) => {
 	// <-------------------<HOOKES>------------------->
 	const router = useRouter();
-	const path = usePathname();
 	const auth = useAuth();
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
@@ -45,9 +44,12 @@ const VendorDetails = (props: Props) => {
 	const { data: User } = useUserDetails();
 
 	// <--------------------STATES----------------------->
-	const vendorId = path?.split("/")[2];
+	// The declared parameter, not the third slash-separated segment of the URL.
+	// `[id].tsx` names it; slicing the path only works while this screen stays
+	// exactly two segments deep. See the note in `product-details/[id].tsx`.
+	const { id: vendorId } = useLocalSearchParams<{ id: string }>();
 
-	const { data: VendorDetails, isLoading } = useVendorDetails(vendorId);
+	const { data: VendorDetails, isLoading, isError, error } = useVendorDetails(vendorId);
 	const VendorDetailsLoaded = !isLoading;
 
 	/**
@@ -184,6 +186,34 @@ const VendorDetails = (props: Props) => {
 					</PressableScale>
 				</View>
 
+				{isError ? (
+					// A store can leave the platform, and a link to one outlives it —
+					// a favourite, a past order, a shared link. Without this branch
+					// `VendorDetailsLoaded` (`!isLoading`) went true on failure and
+					// every section below rendered its empty state instead: a hero
+					// with no name, no products, and nothing saying why.
+					<View className="flex-1 items-center justify-center px-8">
+						<Ionicons
+							name="storefront-outline"
+							size={64}
+							color={darkTheme ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)"}
+						/>
+						<Text className={`mt-4 text-lg font-heading-semibold text-center ${darkTheme ? "text-white" : "text-black"}`}>
+							This shop isn&apos;t available
+						</Text>
+						<Text className={`mt-2 text-center ${darkTheme ? "text-slate-400" : "text-slate-600"}`}>
+							{errorMessage(error, "It may no longer be on Drop.")}
+						</Text>
+						<PressableScale
+							accessibilityLabel="Go back"
+							onPress={() => router.back()}
+							className="mt-8 px-8 py-3 rounded-2xl"
+							style={{ backgroundColor: BRAND.primary }}
+						>
+							<Text className="text-white font-sans-bold">Go back</Text>
+						</PressableScale>
+					</View>
+				) : (
 				<ScrollView
 					overScrollMode={"never"}
 					showsVerticalScrollIndicator={false}
@@ -458,6 +488,7 @@ const VendorDetails = (props: Props) => {
 						<Reviews targetType="vendor" targetId={vendorId as string} />
 					</View>
 				</ScrollView>
+				)}
 			</View>
 		</>
 	);
