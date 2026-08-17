@@ -65,6 +65,7 @@ import { useRiderStore } from "@/stores/useRiderStore";
 import { useRiderOrders, type RiderOrder } from "@/hooks/queries/useRiderData";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
+import { smsCompletionUrl } from "@/utils/smsFallback";
 import { Popup } from "@/lib/popup";
 import { RiderActiveDeliverySkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts";
@@ -1022,17 +1023,23 @@ export default function ActiveDelivery() {
                       </PressableScale>
                     )}
 
-                    {/* GSM SMS Fallback */}
-                    <PressableScale 
-                       onPress={() => {
-                         const gatewayNumber = process.env.EXPO_PUBLIC_SMS_GATEWAY_NUMBER || "+254700000000";
-                         Linking.openURL(`sms:${gatewayNumber}?body=DELIVERED ${activeOrder.id?.substring(0,8)}`);
-                       }} 
-                       className={`py-4 rounded-3xl items-center border ${darkTheme ? "border-gray-800 bg-white/5" : "border-gray-200 bg-white"}`}>
-                      <Text className={`font-sans-bold text-sm ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
-                        No Data? SMS to Complete
-                      </Text>
-                    </PressableScale>
+                    {/* GSM SMS fallback — rendered only when a gateway exists.
+                        Unconfigured, this used to text a placeholder number the
+                        platform does not own: the rider saw the message send and
+                        believed the delivery was recorded, while the order stayed
+                        open and their float stayed locked. See utils/smsFallback. */}
+                    {smsCompletionUrl(activeOrder.id) && (
+                      <PressableScale
+                         onPress={() => {
+                           const url = smsCompletionUrl(activeOrder.id);
+                           if (url) Linking.openURL(url);
+                         }}
+                         className={`py-4 rounded-3xl items-center border ${darkTheme ? "border-gray-800 bg-white/5" : "border-gray-200 bg-white"}`}>
+                        <Text className={`font-sans-bold text-sm ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                          No Data? SMS to Complete
+                        </Text>
+                      </PressableScale>
+                    )}
                   </>
                 )}
                 {activeOrder.order_status === "mismatch_pending" && (

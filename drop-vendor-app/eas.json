@@ -23,7 +23,8 @@
       },
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA",
-        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com"
+        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://860dc1d16c4dc1854f15c7b261136b58@o4507055338815488.ingest.us.sentry.io/4511925276311552"
       }
     }
   },
