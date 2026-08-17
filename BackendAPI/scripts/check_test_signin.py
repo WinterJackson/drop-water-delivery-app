@@ -65,12 +65,36 @@ CLERK_JS = "5.35.0"
 PACE_SECONDS = 1.5
 
 #: What each status means for somebody holding a handset.
+#:
+#: `needs_second_factor` has **two** causes and they need different fixes. Read
+#: `client_trust_state`, which this script prints, to tell them apart:
+#:
+#:   client_trust_state == "new"  -> Device Trust, NOT multi-factor. Clerk
+#:       challenges a sign-in from an unrecognised device. On an application
+#:       that has not opted into the "Device Trust Status" update, it reports
+#:       the *legacy* status `needs_second_factor` rather than
+#:       `needs_client_trust` — so it is indistinguishable from MFA by status
+#:       alone, and turning every multi-factor option off changes nothing.
+#:
+#:   otherwise -> a genuine enrolled second factor.
+#:
+#: The first is what actually happened here, and the distinction cost real time:
+#: every multi-factor toggle was already off, `two_factor_enabled` was false on
+#: all ten identities, and Clerk's own `/v1/environment` reported no second
+#: factors — while sign-in kept returning `needs_second_factor`.
 EXPLAIN = {
     "complete": "signs in",
     "needs_second_factor": (
-        "the INSTANCE requires a second factor. Not the account — check "
-        "Clerk Dashboard > Configure > User & authentication > Multi-factor "
-        "and turn off every factor. No app implements one."
+        "if client_trust_state is 'new' this is DEVICE TRUST, not MFA — turn it "
+        "off at Clerk Dashboard > Protect > Rules > Device Trust. It is on by "
+        "default for applications created after 14 Nov 2025 and reports the "
+        "legacy 'needs_second_factor' status, so Multi-factor is the wrong "
+        "place to look. Otherwise an enrolled second factor is genuinely set. "
+        "No app implements either."
+    ),
+    "needs_client_trust": (
+        "Device Trust is challenging an unrecognised device. Turn it off at "
+        "Clerk Dashboard > Protect > Rules > Device Trust. No app implements it."
     ),
     "needs_first_factor": "the password was not accepted as a first factor",
     "needs_identifier": "Clerk does not recognise this address",
@@ -137,8 +161,13 @@ def _attempt(client: httpx.Client, email: str) -> tuple[str, str]:
     status = payload.get("status") or "unknown"
     second = [f.get("strategy") for f in (payload.get("supported_second_factors") or [])]
     detail = EXPLAIN.get(status, "unrecognised status")
+    # The field that separates Device Trust from a real second factor. Printed
+    # always, because reading it is the whole diagnosis.
+    trust = payload.get("client_trust_state")
+    if trust:
+        detail += f"  [client_trust_state={trust}]"
     if second:
-        detail += f"  [second factors offered: {', '.join(second)}]"
+        detail += f"  [offered: {', '.join(second)}]"
     return status, detail
 
 
