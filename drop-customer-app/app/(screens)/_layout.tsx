@@ -73,7 +73,7 @@ const Layout = () => {
   }
 
   if (isSignedIn === false) {
-    return <Redirect href={'/(Auth)'} />
+    return <Redirect href={'/(Auth)/sign-in/screen'} />
   }
   return (
       <View

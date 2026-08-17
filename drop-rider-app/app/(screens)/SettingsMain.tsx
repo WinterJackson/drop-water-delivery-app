@@ -134,7 +134,7 @@ export default function SettingsMain() {
                     // doing it here makes the wipe synchronous with the redirect.
                     queryClient.clear();
                     Popup.hide();
-                    router.replace("/(Auth)");
+                    router.replace("/(Auth)/sign-in/screen");
                 } catch (error) {
                     if (__DEV__) console.error("Sign out error", error);
                     Popup.hide();
@@ -168,7 +168,7 @@ export default function SettingsMain() {
                     await signOut();
                     queryClient.clear();
                     Popup.hide();
-                    router.replace("/(Auth)");
+                    router.replace("/(Auth)/sign-in/screen");
                 } catch (error) {
                     Toast.error("Error", "Network error occurred.");
                     Popup.hide();

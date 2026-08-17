@@ -87,7 +87,7 @@ const Profile = () => {
 			queryClient.clear();
 			
 			// Redirect to your desired page
-			Linking.openURL(Linking.createURL("/(Auth)"));
+			Linking.openURL(Linking.createURL("/(Auth)/sign-in/screen"));
 		} catch (err) {
 			// error handling
 		}

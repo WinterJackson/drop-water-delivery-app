@@ -1,6 +1,7 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { ApiError, retryTransientOnly } from '@/API/errors';
 import { useApiRequest } from '@/API/useApiClient';
+import { useAuthReady } from '@/hooks/useAuthReady';
 import { useAuth } from '@clerk/clerk-expo';
 import type { DetailedCart } from '@/types/models';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -84,20 +85,29 @@ export interface CartQuote {
 
 export function useCart() {
     const { userId } = useAuth();
+    const authReady = useAuthReady();
     const api = useApiRequest();
     return useQuery<DetailedCart | null, Error>({
         queryKey: ['cart', userId],
         queryFn: () => api.get<DetailedCart | null>(ROUTES.GET_CART),
+        // `(screens)/_layout.tsx` calls this on its first line and only checks
+        // `isLoaded` further down — but hooks all run before a component can
+        // return, so the guard there cannot stop the request. Without this the
+        // cart was fetched while Clerk still had no token and came back
+        // `403: Not authenticated` on every cold start.
+        enabled: authReady,
         retry: retryTransientOnly(2)
     });
 }
 
 export function useDetailedCart() {
     const { userId } = useAuth();
+    const authReady = useAuthReady();
     const api = useApiRequest();
     return useQuery<DetailedCart | null, Error>({
         queryKey: ['cart', 'detailed', userId],
         queryFn: () => api.get<DetailedCart | null>(ROUTES.GET_DETAILED_CART),
+        enabled: authReady,
         retry: retryTransientOnly(2)
     });
 }

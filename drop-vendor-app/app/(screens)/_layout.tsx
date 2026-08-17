@@ -68,7 +68,7 @@ export default function ScreensLayout() {
   // `=== false` rather than `!isSignedIn`: `undefined` is the pre-resolution
   // value, already handled above.
   if (isSignedIn === false) {
-    return <Redirect href={'/(Auth)'} />;
+    return <Redirect href={'/(Auth)/sign-in/screen'} />;
   }
 
   return (

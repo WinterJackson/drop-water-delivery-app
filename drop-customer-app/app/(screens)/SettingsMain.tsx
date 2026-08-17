@@ -146,7 +146,7 @@ export default function SettingsMain() {
             queryClient.clear();
 
             Popup.hide();
-            router.replace("/(Auth)");
+            router.replace("/(Auth)/sign-in/screen");
         } catch (error) {
             if (__DEV__) console.error("Sign out error", error);
             Popup.hide();
@@ -177,7 +177,7 @@ export default function SettingsMain() {
             await signOut();
             queryClient.clear();
             Popup.hide();
-            router.replace("/(Auth)");
+            router.replace("/(Auth)/sign-in/screen");
         } catch (error) {
             // The backend explains *why* (e.g. active orders block deletion) — show it.
             Toast.error("Cannot delete account", errorMessage(error, "Please try again."));

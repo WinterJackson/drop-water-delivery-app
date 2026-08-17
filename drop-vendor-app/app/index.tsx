@@ -21,11 +21,21 @@ interface Store {
   id: string;
 }
 
+/**
+ * Has the launch animation already played in this process?
+ *
+ * Module scope on purpose: component state resets on remount, and this
+ * route is remounted by every redirect to "/" — which the sign-in screen
+ * does the moment a session is created. Seeded into `useState`, this stops
+ * the full SPLASH_DURATION_MS (10s) replaying after a successful sign-in.
+ */
+let hasPlayedSplash = false;
+
 export default function Index() {
   const { isSignedIn, isLoaded, getToken } = useAuth();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const [splashDone, setSplashDone] = useState(false);
+  const [splashDone, setSplashDone] = useState(hasPlayedSplash);
   const [readyToRoute, setReadyToRoute] = useState<"onboarding" | "main" | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
 
@@ -102,17 +112,40 @@ export default function Index() {
     );
   }
 
-  // Show splash until both animation completes AND Clerk auth resolves.
-  // We also wait for the profile verification to finish cleanly if signed in.
-  const isFullyReady = canProceed && (!isSignedIn || readyToRoute !== null);
-
-  if (!isFullyReady) {
+  // ── Splash gate ──
+  //
+  // Two cases, deliberately separated because they used to be one condition.
+  // This route is re-entered whenever anything redirects to "/", which the
+  // sign-in screen does as soon as a session exists — so a single
+  // `!isFullyReady` check sent a signed-in vendor back into the ten-second
+  // launch animation before routing them onward.
+  if (!splashDone) {
     return (
       <AnimatedSplash
         variant="vendor"
         isDark={darkTheme}
-        onComplete={() => setSplashDone(true)}
+        onComplete={() => {
+          hasPlayedSplash = true;
+          setSplashDone(true);
+        }}
       />
+    );
+  }
+
+  // Splash already shown; Clerk or the profile check is still resolving. A wait
+  // is not a launch, so it gets a spinner rather than the brand animation.
+  if (!isLoaded || (isSignedIn && readyToRoute === null)) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: darkTheme ? "#000000" : "#FFFFFF",
+        }}
+      >
+        <ActivityIndicator size="large" color="#2E9BE6" />
+      </View>
     );
   }
 
@@ -120,5 +153,5 @@ export default function Index() {
     if (readyToRoute === "onboarding") return <Redirect href="/(Auth)/Onboarding" />;
     return <Redirect href="/(screens)" />;
   }
-  return <Redirect href="/(Auth)" />;
+  return <Redirect href="/(Auth)/sign-in/screen" />;
 }

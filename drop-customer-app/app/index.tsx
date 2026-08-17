@@ -10,6 +10,16 @@ import { ROUTES } from "@/API/routes/ApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
 import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
+import { ActivityIndicator, View } from "react-native";
+
+/**
+ * Has the launch animation already played in this process?
+ *
+ * Module scope on purpose: component state resets on remount, and this
+ * route is remounted by every redirect to "/". The splash belongs to the
+ * app launch, not to one mounting of one screen.
+ */
+let hasPlayedSplash = false;
 
 export default function Index() {
 	const router = useRouter();
@@ -19,7 +29,7 @@ export default function Index() {
 	const api = useApiRequest();
 
 	// ── State ──
-	const [splashComplete, setSplashComplete] = useState(false);
+	const [splashComplete, setSplashComplete] = useState(hasPlayedSplash);
 	const [isVerifyingProfile, setIsVerifyingProfile] = useState(false);
 	const [readyToRoute, setReadyToRoute] = useState<"onboarding" | "main" | null>(null);
 
@@ -73,18 +83,42 @@ export default function Index() {
 	}, [deviceLocation]);
 
 	// ── Splash gate ──
-	// Show splash until both the animation completes AND Clerk auth resolves.
-	// We also wait for the profile verification to finish cleanly if they are signed in.
-	const canProceed = splashComplete && isLoaded;
-	const isFullyReady = canProceed && (!isSignedIn || readyToRoute !== null);
-
-	if (!isFullyReady) {
+	//
+	// The splash is a *launch* animation, not a loading spinner, and these two
+	// cases are deliberately separated because they used to be one.
+	//
+	// This route is re-entered every time anything redirects to "/", which the
+	// sign-in screen does the moment a session is created. `useState(false)`
+	// gave the freshly mounted component a fresh `splashComplete`, so the whole
+	// SPLASH_DURATION_MS — ten seconds — played again *after* the user had
+	// signed in, and only then did routing continue. `hasPlayedSplash` lives at
+	// module scope so it survives a remount inside the same process, which is
+	// exactly the lifetime "this app has launched" describes.
+	if (!splashComplete) {
 		return (
 			<AnimatedSplash
 				variant="customer"
 				isDark={darkTheme}
-				onComplete={() => setSplashComplete(true)}
+				onComplete={() => {
+					hasPlayedSplash = true;
+					setSplashComplete(true);
+				}}
 			/>
+		);
+	}
+
+	// Splash already shown, but Clerk or the profile check is still resolving.
+	// That is a wait, not a launch: it gets a spinner rather than ten more
+	// seconds of brand. Previously this branch fell back into <AnimatedSplash>,
+	// which is why signing in replayed the animation a second time.
+	if (!isLoaded || (isSignedIn && readyToRoute === null)) {
+		return (
+			<View
+				className="flex-1 items-center justify-center"
+				style={{ backgroundColor: darkTheme ? BRAND.bgDark : BRAND.bgLight }}
+			>
+				<ActivityIndicator size="large" color={BRAND.primary} />
+			</View>
 		);
 	}
 
@@ -97,6 +131,6 @@ export default function Index() {
 		if (readyToRoute === "onboarding") return <Redirect href="/(Auth)/Onboarding" />;
 		return <Redirect href="/(screens)" />;
 	} else {
-		return <Redirect href="/(Auth)" />;
+		return <Redirect href="/(Auth)/sign-in/screen" />;
 	}
 }

@@ -63,7 +63,7 @@ export default function ScreensLayout() {
   }
 
   if (isSignedIn === false) {
-    return <Redirect href={'/(Auth)'} />
+    return <Redirect href={'/(Auth)/sign-in/screen'} />
   }
 
   // If KYC fails with 403, rider is not registered at all.

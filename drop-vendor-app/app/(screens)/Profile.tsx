@@ -152,7 +152,7 @@ export default function Profile() {
                   clearActiveStore();
                   queryClient.clear();
                   Popup.hide();
-                  router.replace("/(Auth)");
+                  router.replace("/(Auth)/sign-in/screen");
               } catch (error) {
                   if (__DEV__) console.error("Sign out error", error);
                   Popup.hide();
@@ -191,7 +191,7 @@ export default function Profile() {
                   clearActiveStore();
                   queryClient.clear();
                   Popup.hide();
-                  router.replace("/(Auth)");
+                  router.replace("/(Auth)/sign-in/screen");
               } catch (error) {
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                   // "You have unfulfilled orders" is the answer the vendor needs;
