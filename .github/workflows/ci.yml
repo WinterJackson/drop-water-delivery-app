@@ -120,5 +120,22 @@ jobs:
         # Next config is valid — a typecheck alone would not have caught
         # `middleware.ts` needing to become `proxy.ts`.
         env:
-          EXPO_PUBLIC_BACKEND_BASE_URL: https://example.invalid
+          # `ClerkProvider` sits in the root layout, so it renders during the
+          # prerender pass and throws `Missing publishableKey` without one —
+          # taking the whole build down. Locally this is supplied by
+          # `.env.local`, which is gitignored, so the build passed on every
+          # machine that had ever run the console and failed only in CI.
+          #
+          # Committed rather than held as a secret: `NEXT_PUBLIC_` inlines the
+          # value into the client bundle, so it is public by construction. It is
+          # the same key already committed in the three `eas.json` files, and a
+          # secret here would only make the build depend on state no reviewer
+          # can see.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA
+          # `BACKEND_BASE_URL`, not `EXPO_PUBLIC_BACKEND_BASE_URL`. The latter is
+          # an Expo app variable that this console has never read — it was
+          # declared here and did nothing, which is why nothing noticed the one
+          # that was actually missing. Deliberately unroutable: a build must not
+          # depend on a live API, and every page is server-rendered on demand.
+          BACKEND_BASE_URL: https://example.invalid
         run: pnpm build
