@@ -46,9 +46,46 @@ jobs:
         # `test_multi_store_integration.py` is excluded here as it is locally:
         # it drives the app against a live Postgres with PostGIS, which this job
         # does not provide. Everything else runs against mocks and needs nothing.
+        # Every value here is a placeholder that has to *parse*, not one that has
+        # to work. These modules read their configuration at import time, so a
+        # missing variable is not a failing test — it is `conftest.py` failing to
+        # import, thirty frames deep, naming a library rather than the variable.
+        #
+        # The whole set was invisible because it lives in `.env`, which is
+        # gitignored: every developer machine had it, and the one environment
+        # without it was the only one that mattered.
         env:
           PYTHONPATH: .
-        run: pytest -q --ignore=tests/test_multi_store_integration.py
+          # `db/session.py` builds the engine at module scope, so every model
+          # import needs a URL that parses. `create_async_engine` does not
+          # connect, so a DSN pointing nowhere is enough and no service is
+          # needed — no test touches a database, `conftest.py` yields an
+          # `AsyncMock`.
+          NEONDB_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
+          # `utils/encryption.py` refuses to import without one. Generated for
+          # CI alone and deliberately *not* the real key: it decrypts stored
+          # data, and nothing here encrypts anything worth keeping.
+          DB_ENCRYPTION_KEY: jeYNa9upTpmK-AK-r3WaP0EMkfpHMIFQSAmm9aEVgD0=
+          # `test_auth_security.py` exercises JWKS caching and key rotation
+          # against a mocked endpoint, but `core/security.py` still needs to be
+          # configured for the code under test to reach that far. All three are
+          # public values — an issuer, a well-known URL and a publishable key.
+          # `CLERK_SECRET_KEY` is a real secret and is deliberately absent; no
+          # test needs it.
+          CLERK_ISSUER: https://safe-marmot-72.clerk.accounts.dev
+          CLERK_JWKS_URL: https://safe-marmot-72.clerk.accounts.dev/.well-known/jwks.json
+          FRONTEND_CLERK_API_KEY: pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA
+        # `test_admin_e2e.py` joins `test_multi_store_integration.py` in needing
+        # a real Postgres. Note *why* it needs excluding rather than skipping
+        # itself: its guard is `skipif(not os.getenv("NEONDB_URL"))`, which reads
+        # the variable as a proxy for "a database exists". The placeholder above
+        # satisfies that proxy and arms all 17 of its tests against a database
+        # that is not there. If you ever drop this flag, that is what the SSL
+        # errors mean.
+        run: >-
+          pytest -q
+          --ignore=tests/test_multi_store_integration.py
+          --ignore=tests/test_admin_e2e.py
 
   apps:
     name: ${{ matrix.app }}

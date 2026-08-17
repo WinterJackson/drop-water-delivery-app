@@ -11,9 +11,36 @@ load_dotenv()  # Load variables from .env
 
 DATABASE_URL = os.getenv("NEONDB_URL")
 
+# Say which variable is missing, rather than letting SQLAlchemy say it is not a
+# URL. Unset, `create_async_engine(None)` raises
+#
+#     sqlalchemy.exc.ArgumentError: Expected string or URL object, got None
+#
+# thirty frames down a traceback that names five libraries and not the one thing
+# the reader can act on. The engine is built at module scope, so this is an
+# *import* failure: every module that touches a model fails to load, and the
+# first thing anybody sees is `conftest.py` failing to import.
+#
+# It cost a CI run to diagnose for exactly that reason — the value comes from
+# `.env`, which is gitignored, so every developer machine had it and the one
+# environment without it was the only one that mattered.
+#
+# No default, deliberately. A fallback DSN would let a misconfigured deployment
+# start and then fail per-request against a database nobody meant to use; this
+# is the same fail-closed posture as `core/security.py` refusing to boot without
+# its Clerk variables. Tests need no database — `conftest.py` yields an
+# `AsyncMock` — but they do need this module to import, so CI sets a
+# syntactically valid DSN that points nowhere.
+if not DATABASE_URL:
+    raise RuntimeError(
+        "NEONDB_URL is not set. The API cannot start without a database URL. "
+        "Set it in BackendAPI/.env locally, or in the service environment on "
+        "Render. For a test or build environment that needs no real database, "
+        "any valid DSN will do: postgresql+asyncpg://ci:ci@localhost:5432/ci"
+    )
+
 # asyncpg does not accept sslmode/channel_binding as URL query params — strip them
-if DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.split("?")[0]
+DATABASE_URL = DATABASE_URL.split("?")[0]
 
 # ── Timeouts ────────────────────────────────────────────────────────────────
 #
