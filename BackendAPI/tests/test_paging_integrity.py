@@ -441,9 +441,15 @@ def test_product_and_vendor_search_are_bounded_by_the_service_radius():
         "both the product search and the vendor search must apply the radius; "
         f"found {len(calls)} call sites"
     )
-    assert "DispatchPolicy.max_distance_km" in source, (
-        "the radius is the configured Platform_Settings row, read through the "
-        "accessor — never the shipped dataclass default"
+    # The accessor read is asserted where the predicate now lives, not here.
+    # It moved to `dispatch_policy.within_service_radius` so that product
+    # discovery could share the one implementation — this module previously had
+    # a private copy, and the home grid, which could not reach it, applied no
+    # radius at all. Pinning the *name of the module that reads the setting* is
+    # what made this assertion fail on a change that made the rule stronger;
+    # `tests/test_service_radius.py` asserts the rule itself.
+    assert "within_service_radius" in source, (
+        "search must apply the shared radius predicate"
     )
 
 

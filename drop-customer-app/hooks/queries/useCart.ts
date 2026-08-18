@@ -83,11 +83,36 @@ export interface CartQuote {
     max_distance_km: number;
 }
 
+/**
+ * The cart is never served stale from disk.
+ *
+ * The app persists the whole query cache to AsyncStorage for 24 hours and the
+ * global `staleTime` is 5 minutes, which is right for a catalogue and wrong for
+ * this. The cart is small, private to one customer, changes on almost every
+ * interaction, and is the one screen where being confidently out of date is
+ * worse than being slow: a basket rehydrated from disk is rendered as *the*
+ * basket, so an item added before the last restart — or on another device, or
+ * on an add whose invalidation never landed — showed up as "Your cart is
+ * empty", under a heading, with a Continue Shopping button. The customer is
+ * told something false about their own money.
+ *
+ * `staleTime: 0` does not cost a blank screen: React Query still paints the
+ * cached basket immediately and revalidates behind it, so the only change is
+ * that what is on screen becomes true a moment later instead of five minutes
+ * later. `refetchOnMount: "always"` is the half that matters after a cold
+ * start, when the rehydrated value would otherwise be considered fresh.
+ */
+const CART_FRESHNESS = {
+    staleTime: 0,
+    refetchOnMount: "always",
+} as const;
+
 export function useCart() {
     const { userId } = useAuth();
     const authReady = useAuthReady();
     const api = useApiRequest();
     return useQuery<DetailedCart | null, Error>({
+        ...CART_FRESHNESS,
         queryKey: ['cart', userId],
         queryFn: () => api.get<DetailedCart | null>(ROUTES.GET_CART),
         // `(screens)/_layout.tsx` calls this on its first line and only checks
@@ -105,6 +130,7 @@ export function useDetailedCart() {
     const authReady = useAuthReady();
     const api = useApiRequest();
     return useQuery<DetailedCart | null, Error>({
+        ...CART_FRESHNESS,
         queryKey: ['cart', 'detailed', userId],
         queryFn: () => api.get<DetailedCart | null>(ROUTES.GET_DETAILED_CART),
         enabled: authReady,

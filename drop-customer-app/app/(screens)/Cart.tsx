@@ -512,7 +512,24 @@ export default function Cart() {
 							}
 							>
 							
-							{CartLoaded && Cart === undefined ? (
+							{/*
+							  * An empty cart is "no items", not "no response".
+							  *
+							  * This read `Cart === undefined`, which is the one value a
+							  * *successful* fetch never produces: `fetch_detailed_cart`
+							  * returns `None` when the customer has no cart row at all
+							  * (so `data` is `null`), and a cart object with
+							  * `cart_item: []` when the row exists but has been emptied.
+							  * `null !== undefined`, so both fell through to the items
+							  * branch below, which mapped over nothing and drew nothing —
+							  * a header over a blank screen, with no way to tell a broken
+							  * page from an empty basket.
+							  *
+							  * The predicate below is the one the other six conditions in
+							  * this file already use; only this one, which decides whether
+							  * the customer sees anything at all, was different.
+							  */}
+							{CartLoaded && (Cart?.cart_item?.length ?? 0) === 0 ? (
 								<View className="mt-10 flex-1">
 									<EmptyState 
 										mood="sad" 
@@ -798,13 +815,31 @@ export default function Cart() {
 											</View>
 										</View>
 									)}
-									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && isOutOfRange && (
+									{/*
+									  * One explanation of a refusal, and it is the server's.
+									  *
+									  * There used to be two. This banner re-derived "is it too
+									  * far?" locally and printed its own sentence, while the
+									  * server's own reason — already computed by the same
+									  * `validate_quote` that will refuse the order — was shown
+									  * again as `checkoutBlockedReason`. The customer was told
+									  * the same thing twice, in different words.
+									  *
+									  * And the local copy had the number wrong. It rendered the
+									  * limit with `.toFixed(0)`, and `(2.5).toFixed(0)` is "3":
+									  * a cart that explained a refusal by quoting a 3 km rule
+									  * this platform does not have. The radius is deliberately a
+									  * *decimal* setting — the guide is explicit that storing it
+									  * as an int would silently make 2.5 into 2 — and rounding it
+									  * for display reintroduces exactly that, on the sentence
+									  * telling somebody why they cannot buy water.
+									  */}
+									{CartLoaded && (Cart?.cart_item?.length ?? 0) > 0 && checkoutBlockedReason && (
 										<View className={`w-full mt-2 p-4 rounded-2xl border ${darkTheme ? 'bg-red-500/10 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
 											<View className="flex-row items-center gap-2">
-												<Ionicons name="location-outline" size={18} color="#ef4444" />
+												<Ionicons name={isOutOfRange ? "location-outline" : "alert-circle-outline"} size={18} color="#ef4444" />
 												<Text className={`flex-1 text-sm font-sans-medium ${darkTheme ? 'text-red-300' : 'text-red-700'}`}>
-													This vendor is {quote?.distance_km.toFixed(1)} km away — beyond the {quote?.max_distance_km.toFixed(0)} km limit.
-													Choose a closer vendor or update your delivery location.
+													{checkoutBlockedReason}
 												</Text>
 											</View>
 										</View>
@@ -840,7 +875,7 @@ export default function Cart() {
 													<ActivityIndicator color="white" />
 												) : (
 													<Text className={`text-xl font-sans-bold tracking-tight ${canCheckout ? 'text-white' : (darkTheme ? 'text-gray-400' : 'text-gray-500')}`}>
-														{canCheckout ? `Checkout • ${formatMoney(finalTotal)}` : (checkoutBlockedReason || "Checkout unavailable")}
+														{canCheckout ? `Checkout • ${formatMoney(finalTotal)}` : "Checkout unavailable"}
 													</Text>
 												)}
 											</View>

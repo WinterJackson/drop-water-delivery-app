@@ -1,12 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_, func, or_
-from geoalchemy2.functions import ST_DWithin
+from sqlalchemy import func
 from models.product_model import Product
 from models.vendor_model import Vendor
 from schemas.product_schemas import ProductFull
 from schemas.vendor_schemas import VendorStorefront
-from services.dispatch_policy import DispatchPolicy
+from services.dispatch_policy import within_service_radius
 from services.vendor_service import _annotated, discoverable_vendor
 from services.product_service import live_product
 
@@ -15,50 +14,13 @@ from geoalchemy2 import Geography
 from utils.paging import stable
 
 
-def _within_service_radius(user_location):
-    """The predicate that keeps a search result orderable.
-
-    One figure per vendor type — `retail_max_distance_km` /
-    `wholesale_max_distance_km` — read through `DispatchPolicy`'s accessors so
-    it is the configured row and not the shipped default. A store with no
-    `vendor_type` is treated as retail, the narrower of the two: a NULL is a
-    row nobody has classified, and guessing the wider radius would list it to
-    customers who cannot be delivered to.
-
-    Note the SQL: `vendor_type != 'wholesale_b2b'` is *NULL* for a NULL column,
-    not true, so an unclassified store would drop out of both branches and out
-    of search entirely. The NULL is therefore spelled out rather than left to
-    three-valued logic, and the two branches are exhaustive by construction.
-
-    **Not `coalesce`.** `Vendor.vendor_type` is a Postgres enum
-    (`vendor_business_type`); a Python string beside it in the same call binds
-    as `varchar`, and Postgres refuses to `COALESCE` the two rather than
-    guessing which type the result is —
-
-        DatatypeMismatchError: COALESCE types vendor_business_type and
-        character varying cannot be matched
-
-    A comparison is not affected, because there the column's own type decides
-    how the literal binds, which is why `= 'wholesale_b2b'` on the *other* side
-    of the very same expression was correct. Half the predicate was right, and
-    the endpoint answered 500 only once a location was known: search with no
-    coordinates never reaches here, so `/api/search` and `/api/search/vendors`
-    both worked in exactly the case no real customer is in, and failed for
-    everybody the moment the app held a fix or a saved delivery address.
-    """
-    retail_m = DispatchPolicy.max_distance_km("retail_refill") * 1000.0
-    wholesale_m = DispatchPolicy.max_distance_km("wholesale_b2b") * 1000.0
-    is_wholesale = Vendor.vendor_type == "wholesale_b2b"
-    # An unclassified store is retail — the narrower radius. `!=` alone would
-    # drop it, so the NULL is named.
-    is_retail = or_(Vendor.vendor_type != "wholesale_b2b", Vendor.vendor_type.is_(None))
-    return and_(
-        Vendor.location.isnot(None),
-        or_(
-            and_(is_wholesale, ST_DWithin(Vendor.location, user_location, wholesale_m)),
-            and_(is_retail, ST_DWithin(Vendor.location, user_location, retail_m)),
-        ),
-    )
+#: The radius predicate now lives in `dispatch_policy`, beside the two figures
+#: it measures against, because product discovery needs it too and a second copy
+#: is how the home grid came to ignore a limit the vendor list was enforcing.
+#: Re-exported under the old private name so the compiled-SQL assertion in
+#: `tests/test_paging_integrity.py` keeps pointing at the predicate this module
+#: actually applies.
+_within_service_radius = within_service_radius
 
 
 async def search_service(session: AsyncSession, query: str | None, limit: int = 20, offset: int = 0, category: str | None = None, mode: str | None = None, user_lat: float | None = None, user_lng: float | None = None) -> list[ProductFull]:

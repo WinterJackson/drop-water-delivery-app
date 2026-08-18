@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { useCallback, useMemo } from "react";
 
-import { ApiError, toApiError } from "./errors";
+import { ApiError, isRefusal, toApiError } from "./errors";
 import { kindForMethod, timeoutFor } from "./netBudget";
 
 /**
@@ -100,9 +100,18 @@ export const useApiClient = () => {
                 );
 
                 if (__DEV__) {
-                    console.error(
-                        `API ${error.config?.method?.toUpperCase() ?? "?"} ${error.config?.url ?? "?"} → ${status}: ${apiError.message}`
-                    );
+                    // `console.error` raises LogBox's full-screen red overlay, so
+                    // it has to mean *fault*, not *failure*. A 4xx is an answer:
+                    // a withdrawn product 404s, an order that is not yours 403s,
+                    // and both are handled. Red-screening them is how a developer
+                    // learns to dismiss LogBox without reading it, and then
+                    // misses the one that mattered.
+                    const line = `API ${error.config?.method?.toUpperCase() ?? "?"} ${error.config?.url ?? "?"} → ${status}: ${apiError.message}`;
+                    if (isRefusal(apiError)) {
+                        console.warn(line);
+                    } else {
+                        console.error(line);
+                    }
                 }
 
                 return Promise.reject(apiError);

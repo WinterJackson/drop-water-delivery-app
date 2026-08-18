@@ -25,7 +25,7 @@ import { useCallback, useMemo } from "react";
 
 import { useActiveStore } from "@/stores/activeStoreStore";
 import { apiFetch, type ApiFetchOptions } from "./apiFetch";
-import { ApiError } from "./errors";
+import { ApiError, isRefusal } from "./errors";
 
 export interface RequestConfig extends Omit<ApiFetchOptions, "token" | "method" | "body"> {
   /**
@@ -80,7 +80,14 @@ export const useApiRequest = () => {
         }
 
         if (__DEV__ && error instanceof ApiError) {
-          console.error(`API ${method} ${url} → ${error.status}: ${error.message}`);
+          // See the note in the customer app: `console.error` raises LogBox's
+          // red overlay, so it must mean a fault. A 4xx is a handled answer.
+          const line = `API ${method} ${url} → ${error.status}: ${error.message}`;
+          if (isRefusal(error)) {
+            console.warn(line);
+          } else {
+            console.error(line);
+          }
         }
         throw error;
       }

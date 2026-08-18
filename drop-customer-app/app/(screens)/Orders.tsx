@@ -222,8 +222,16 @@ const Orders = () => {
 						</View>
 
 						{/* DROPDOWN */}
+						{/*
+						  * `left-4 right-4` rather than a fixed `w-[140px]` pinned to
+						  * `right-5`: the bar above is `m-4`, so those two insets make the
+						  * menu exactly as wide as the control it belongs to and aligned
+						  * to the same edges. A 140px box floating under a full-width bar
+						  * read as an unrelated popover rather than that bar's options,
+						  * and it clipped the longer status names.
+						  */}
 						{showFilter && (
-							<View className={`${darkTheme?"bg-slate-950":"bg-white"} w-[140px] absolute right-5 top-[70px] rounded-xl shadow p-2 z-50`}>
+							<View className={`${darkTheme?"bg-slate-950":"bg-white"} absolute left-4 right-4 top-[70px] rounded-xl shadow p-2 z-50 border ${darkTheme?"border-slate-800":"border-slate-200"}`}>
 								{filterOptions.map((label, index) => (
 									<PressableScale
 										key={index}

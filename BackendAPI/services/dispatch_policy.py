@@ -156,14 +156,35 @@ class DispatchPolicy:
             if total_weight_kg < moq:
                 raise HTTPException(status_code=400, detail=f"Wholesale requires a minimum payload of {moq:g}kg. Current payload: {total_weight_kg}kg. Please add more items.")
 
-        # 3. Retail Rules
+        # 3. Service radius — every vendor type, not just retail.
+        #
+        # This branch used to sit inside `if vendor_type == "retail_refill"`, so
+        # the 15 km wholesale radius was enforced *nowhere on the ordering path*.
+        # Discovery bounded it (`query_service._within_service_radius`) and the
+        # rider search bounded it, but a wholesale basket that reached checkout
+        # by any other route — a favourite, a past order, a shared link, a cart
+        # that outlived a change of address — was priced and accepted at any
+        # distance at all. The one figure that is supposed to mean "what this
+        # platform will deliver" was advisory on half the catalogue.
+        #
+        # A NULL `vendor_type` matched neither branch and so escaped entirely.
+        # `max_distance_km` resolves it the way discovery does: anything that is
+        # not wholesale is retail, the narrower of the two, because an
+        # unclassified store is one nobody has decided about and the wider radius
+        # would be a decision made by omission.
+        limit = cls.max_distance_km(vendor_type)
+        if distance_km > limit:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This store is {distance_km:.1f} km away, beyond the "
+                    f"{limit:g} km delivery limit for this kind of store. "
+                    "Please choose a closer vendor or update your delivery location."
+                ),
+            )
+
+        # 4. Retail Rules
         if vendor_type == "retail_refill":
-            limit = cls.retail_max_distance_km()
-            if distance_km > limit:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Distance {distance_km:.1f}km exceeds the single-trip retail limit of {limit:g}km. Please select a closer vendor."
-                )
             motorbike_capacity = cls.VEHICLE_CAPACITIES["motorbike"]
             if total_quantity > motorbike_capacity:
                 raise HTTPException(
@@ -237,3 +258,45 @@ class DispatchPolicy:
             return _money(base + premium + per_km * km)
 
         return _money(base + config.get_decimal("retail_delivery_per_km") * km)
+
+
+def within_service_radius(user_location):
+    """SQL predicate: is this store close enough to deliver to `user_location`?
+
+    The one implementation of "may this customer see and order from this store",
+    used by vendor discovery, product discovery and search alike. It lived in
+    `query_service` and was reachable only from the two search endpoints, which
+    is how the home screen came to show a grid of products from stores the same
+    screen had just said were out of range.
+
+    It belongs here because this module owns the two radii it measures against
+    and reads them through the accessors, never the shipped defaults.
+
+    `Vendor.location IS NOT NULL` is part of the predicate rather than a
+    precondition: a store with no coordinates cannot be measured, and an
+    unmeasurable store is not one a customer can be promised delivery from.
+
+    An unclassified `vendor_type` is retail — the narrower radius — because a
+    NULL is a store nobody has classified, and taking the wider one would be a
+    decision made by omission. The NULL is named rather than coalesced: Postgres
+    refuses `COALESCE(vendor_business_type, varchar)` outright, and `!=` alone is
+    NULL for a NULL column, which would drop the store from both branches.
+    """
+    from sqlalchemy import and_, or_
+    from geoalchemy2.functions import ST_DWithin
+
+    from models.vendor_model import Vendor
+
+    retail_m = DispatchPolicy.max_distance_km("retail_refill") * 1000.0
+    wholesale_m = DispatchPolicy.max_distance_km("wholesale_b2b") * 1000.0
+
+    is_wholesale = Vendor.vendor_type == "wholesale_b2b"
+    is_retail = or_(Vendor.vendor_type != "wholesale_b2b", Vendor.vendor_type.is_(None))
+
+    return and_(
+        Vendor.location.isnot(None),
+        or_(
+            and_(is_wholesale, ST_DWithin(Vendor.location, user_location, wholesale_m)),
+            and_(is_retail, ST_DWithin(Vendor.location, user_location, retail_m)),
+        ),
+    )

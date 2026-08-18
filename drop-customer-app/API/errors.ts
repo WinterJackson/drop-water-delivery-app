@@ -128,10 +128,27 @@ export function toApiError(status: number, body: unknown, fallback?: string): Ap
  */
 export function retryTransientOnly(maxAttempts = 2) {
 	return (failureCount: number, error: unknown) => {
-		const status = error instanceof ApiError ? error.status : asStatus(error);
-		if (status >= 400 && status < 500) return false;
+		if (isRefusal(error)) return false;
 		return failureCount < maxAttempts;
 	};
+}
+
+/**
+ * Did the server refuse this request, as opposed to failing to serve it?
+ *
+ * A 4xx is an *answer*: this product has been withdrawn, this basket belongs to
+ * another vendor, you may not see this order. The request worked. A 5xx or a
+ * transport failure is the opposite — nobody decided anything and trying again
+ * may well succeed.
+ *
+ * The distinction was already written out inline in `retryTransientOnly`, and
+ * `useApiClient` needed the same question for a different purpose: what to log a
+ * failure *as*. Two copies of one rule is how they come to disagree, so it is a
+ * function.
+ */
+export function isRefusal(error: unknown): boolean {
+	const status = error instanceof ApiError ? error.status : asStatus(error);
+	return status >= 400 && status < 500;
 }
 
 /**
