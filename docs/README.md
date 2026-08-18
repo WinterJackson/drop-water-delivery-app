@@ -18,6 +18,7 @@ get something running, the per-surface READMEs are shorter:
 | Deploy or redeploy the admin console | [admin-console-deployment.md](./admin-console-deployment.md) |
 | Operate the console day to day | [admin-console-runbook.md](./admin-console-runbook.md) |
 | Set an environment variable correctly | [render-environment.md](./render-environment.md) |
+| Build a database, locally or on a new provider | [database-setup.md](./database-setup.md) |
 | Know what is still missing | [platform-audit.md](./platform-audit.md) |
 
 ---
@@ -100,6 +101,13 @@ different confusing failure, and the document names each.
 ### [admin-console-runbook.md](./admin-console-runbook.md)
 Running it, and walking every screen as every role, so a capability that was
 supposed to hide a control can be seen not hiding it.
+
+### [database-setup.md](./database-setup.md)
+
+Why `alembic upgrade head` cannot build this database and `scripts/bootstrap_database.py`
+can; the local Postgres + PostGIS container that stops `pytest` spending metered
+compute; and moving the deployed database to another provider, with what each free
+tier actually meters.
 
 ### [render-environment.md](./render-environment.md)
 Every environment variable the backend reads, annotated with what breaks when it

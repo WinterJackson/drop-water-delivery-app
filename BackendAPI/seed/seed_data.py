@@ -427,16 +427,30 @@ async def seed_rider_registrations(session, vendors, riders) -> int:
     """
     from services.dispatch_policy import DispatchPolicy
 
+    def _name(value) -> str:
+        """The string form of a column that may or may not have been coerced.
+
+        SQLAlchemy hands back an enum member for a row it has just flushed and a
+        plain string for one it loaded — so the same attribute has `.value` or
+        does not, depending on where the object came from. This was written
+        inline three times and guarded in only one of them, so seeding died on
+        `'str' object has no attribute 'value'` after the vendors and riders had
+        already been committed: a half-seeded database, and a rerun that then
+        duplicated everything it had managed to write.
+        """
+        return value.value if hasattr(value, "value") else str(value)
+
     created = 0
     for rider in riders:
         eligible = []
+        vehicle = _name(rider.vehicle_type)
         for vendor in vendors:
-            vendor_type = vendor.vendor_type.value if hasattr(vendor.vendor_type, "value") else str(vendor.vendor_type)
+            vendor_type = _name(vendor.vendor_type)
 
             # Retail is motorbike work; the bigger vehicles serve wholesale.
-            if vendor_type == "retail_refill" and rider.vehicle_type.value != "motorbike":
+            if vendor_type == "retail_refill" and vehicle != "motorbike":
                 continue
-            if vendor_type == "wholesale_b2b" and rider.vehicle_type.value == "motorbike":
+            if vendor_type == "wholesale_b2b" and vehicle == "motorbike":
                 continue
 
             limit_km = (

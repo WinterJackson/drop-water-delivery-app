@@ -1,0 +1,44 @@
+# Postgres for development, so the test suite stops billing a managed provider.
+#
+# `test_admin_e2e.py` connects to whatever `NEONDB_URL` names — it is the one
+# file in the suite that touches a real database. Pointed at a managed provider,
+# every `pytest` run spends metered compute, which is how the Neon project
+# reached its quota and took the deployed API down with it. Pointed here, a test
+# run costs nothing.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   python scripts/bootstrap_database.py
+#   python -m seed.seed_data
+#
+# PostGIS is not optional: 44 spatial calls across `services/` and `routes/`
+# measure the delivery radius, and no migration creates the extension —
+# `bootstrap_database.py` does.
+services:
+  postgres:
+    # PostGIS 3.4 on Postgres 16. Match the major version to whatever the
+    # deployed database reports (`SELECT version()`), so the planner and type
+    # behaviour a test exercises here is the behaviour production has.
+    image: postgis/postgis:16-3.4
+    container_name: drop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: drop
+      POSTGRES_PASSWORD: drop_local_dev
+      POSTGRES_DB: drop
+    ports:
+      # Bound to loopback only. The password is in this file and in every
+      # developer's `.env`; on 0.0.0.0 it would be an open database on any
+      # network the machine joins. `db/session.py` also drops TLS for loopback
+      # hosts and keeps it for every other, so this binding is what makes the
+      # unencrypted connection safe.
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - drop-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drop -d drop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  drop-postgres-data:

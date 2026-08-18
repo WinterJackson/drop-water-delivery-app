@@ -45,10 +45,18 @@ in a vendor's app cannot drift apart when they come from the same query.
 ```bash
 cd BackendAPI
 source venv/bin/activate
+docker compose -f docker-compose.dev.yml up -d   # Postgres 16 + PostGIS, port 5434
 uvicorn main:app --reload
 arq worker.WorkerSettings          # second terminal
 pytest -q --ignore=tests/test_multi_store_integration.py
 ```
+
+`tests/test_admin_e2e.py` connects to whatever `NEONDB_URL` names — it is the
+one file in the suite that touches a real database. Pointed at a managed
+provider, **every `pytest` run spends metered compute**; that is how the Neon
+project reached its quota and took the deployed API down with it. Point it at
+the local container. Full setup, and moving the deployed database to another
+provider, is `docs/database-setup.md`.
 
 ### Expo apps
 ```bash
@@ -214,3 +222,26 @@ expand/contract sequence is in the gated migration's own docstring.
 A new revision goes **before** the gated drop, never after it — anything parented
 on `e6b2c8d40f17` could only ever run on a deploy that had already accepted the
 column drop.
+
+**The chain cannot build this database.** Sixty-five revisions, two bases, and
+not one creates `Vendors`, `Users`, `Orders` or `Products` — those tables
+predate Alembic, so every revision *alters* a schema no revision *creates* and
+`alembic upgrade head` against an empty database dies on the first `ALTER
+TABLE`. PostGIS is in the same position: 44 spatial calls depend on it and no
+migration creates it, because it was enabled by hand on the first database and
+never written down. `scripts/bootstrap_database.py` is the path for an empty
+one — extensions, `Base.metadata.create_all`, then stamp — and it refuses if a
+migration history already exists, because there `create_all` is exactly what
+`db/session.py` warns against.
+
+That premise only holds while `Base.metadata` *is* the schema. Four models —
+`Bottle_Rejection_Tickets`, `Customer_First_Delivery`, `Deliverer_Vendors`,
+`failed_webhooks` — existed as files that `models/__init__.py` never imported,
+so they were reachable only by the services importing them directly and nothing
+ever failed. A database built from the models came out four tables short, and
+every guard that reflects over the models had been skipping them, including
+`test_sql_type_safety.py` — three of the four carry enum columns, which is the
+blind spot that let `COALESCE(vendor_business_type, varchar)` reach customers.
+`test_model_registry.py` reads `models/__init__.py` **statically**: `conftest`
+imports `main`, which reaches those modules anyway, so a runtime check of
+`Base.metadata` passes on the very commit it exists to catch.

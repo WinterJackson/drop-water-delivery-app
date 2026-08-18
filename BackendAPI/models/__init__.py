@@ -26,5 +26,23 @@ from .platform_setting_model import (
     SupportTicket,
 )
 
+# Four models existed as files and were never imported here, so `Base.metadata`
+# — which is what `create_all` builds from and what `test_sql_type_safety.py`
+# reflects over — did not know their tables existed. They were reachable only by
+# importing their module directly, which the services that use them do, so
+# nothing failed at runtime and the gap stayed invisible.
+#
+# It surfaced when a database was built from the models for the first time: four
+# tables missing, including `Customer_First_Delivery`, which is the materialised
+# acquisition cohort the growth report reads. The static SQL-safety guard had
+# also been skipping all four, and three of them carry enum columns — the exact
+# thing that guard exists to check.
+from .bottle_rejection_model import BottleRejectionTicket, RejectionStatus
+from .customer_cohort_model import CustomerFirstDelivery
+from .deliverer_vendor_model import DelivererVendor, VendorRiderStatus
+from .failed_webhook_model import FailedWebhook
+
 __all__ = ["Cart", "Vendor", "User", "CartItem", "Product", "Order", "OrderItem", "Deliverer", "Favorite", "VendorFavorite", "Review", "Payout", "Payment", "Notification", "VendorRiderRegistry", "SavedLocation", "WalletTransaction", "OrderTrackingLog", "BottleLedgerEntry", "BottleLedgerEntryType", "BottleReturnRequest", "BottleReturnStatus", "VendorStaff", "AdminUser", "AdminAuditLog", "PlatformSetting", "PlatformSettingHistory",
-           "SupportTicket", "BroadcastCampaign", "AcquisitionSpend"]
+           "SupportTicket", "BroadcastCampaign", "AcquisitionSpend",
+           "BottleRejectionTicket", "RejectionStatus", "CustomerFirstDelivery",
+           "DelivererVendor", "VendorRiderStatus", "FailedWebhook"]

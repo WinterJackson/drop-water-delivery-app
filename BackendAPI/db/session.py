@@ -2,6 +2,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.engine import make_url
 
 
 from dotenv import load_dotenv
@@ -74,6 +75,29 @@ _SERVER_SETTINGS = {
     "application_name": os.getenv("DB_APPLICATION_NAME", "drop-api"),
 }
 
+def _requires_tls(url: str) -> bool:
+    """Whether to demand TLS on the way to Postgres.
+
+    `ssl=True` was hardcoded, which is right for every managed provider — Neon,
+    Supabase, Aiven all refuse a plaintext connection and should — and refuses
+    to connect at all to a Postgres on this machine, which serves no TLS. That
+    single literal is what made the codebase unable to run against a local
+    database, which in turn is why the test suite has always pointed at a
+    managed one and why running `pytest` bills somebody.
+
+    Decided from the host rather than an env var, so it cannot be *switched off*
+    for a remote database by mistake: loopback is the only case where an
+    unencrypted connection stays inside one machine and there is nothing to
+    intercept. Anything else keeps TLS, whatever the caller thinks.
+    """
+    host = (make_url(url).host or "").lower()
+    return host not in {"localhost", "127.0.0.1", "::1", ""}
+
+
+_CONNECT_ARGS: dict = {"server_settings": _SERVER_SETTINGS}
+if _requires_tls(DATABASE_URL):
+    _CONNECT_ARGS["ssl"] = True
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # F-031 FIX
@@ -87,7 +111,7 @@ engine = create_async_engine(
     # which adds a *second* request queuing for the same exhausted pool. Failing
     # in five gives the caller an error it can surface instead of a hang.
     pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "5")),
-    connect_args={"ssl": True, "server_settings": _SERVER_SETTINGS},
+    connect_args=_CONNECT_ARGS,
 )
 AsyncSessionLocal = sessionmaker (bind=engine, class_=AsyncSession, autoflush=False, expire_on_commit=False)
 

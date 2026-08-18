@@ -97,3 +97,6 @@ BackendAPI/test.db
 *serviceaccount*.json
 *-firebase-adminsdk-*.json
 google-service-account*.json
+
+# Local development database volume (docker-compose.dev.yml)
+BackendAPI/pgdata/
