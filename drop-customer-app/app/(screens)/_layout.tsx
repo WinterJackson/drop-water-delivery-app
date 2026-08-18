@@ -7,7 +7,7 @@ import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
-import { useContext } from "react";
+import { useCallback, useContext, useMemo } from "react";
 import { PressableScale } from "@/components/ui/PressableScale";
 import {
     ActivityIndicator,
@@ -44,14 +44,20 @@ const Layout = () => {
     return pathname === path;
   };
 
-  const fetchCart = async () => {
+  // Memoised, and the provider value with them. Both were rebuilt on every
+  // render of this layout — which re-renders on every navigation — so the
+  // context value was a new object each time and every consumer of it
+  // re-rendered with it, including the Cart screen mid-checkout.
+  const fetchCart = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['cart'] });
-  };
+  }, [queryClient]);
 
-  const SignOut = async () => {
+  const SignOut = useCallback(async () => {
     queryClient.clear();
     await signOut();
-  };
+  }, [queryClient, signOut]);
+
+  const dropContext = useMemo(() => ({ fetchCart, SignOut }), [fetchCart, SignOut]);
   
   // <------------------VARIABLES------------------>
   const statusbarHieght = StatusBar.currentHeight || 0;
@@ -84,7 +90,7 @@ const Layout = () => {
         }]}
       >
 
-				<Context.Provider value={{ fetchCart, SignOut }}>
+				<Context.Provider value={dropContext}>
           <Stack
             screenOptions={{
               headerShown: false,

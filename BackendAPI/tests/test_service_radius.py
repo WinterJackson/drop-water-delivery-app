@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -172,7 +173,17 @@ def test_a_catalogue_route_knows_who_is_asking(route):
         f"{route} does not resolve the customer's delivery point, so it cannot "
         "bound what it returns"
     )
-    assert "user_lat=lat" in body and "user_lng=lng" in body
+    # The resolved point reaches the service. Asserted as "the origin travels"
+    # rather than by pinning the local variable's name, which is what an earlier
+    # guard in this suite did — it then failed on a correct refactor exactly as
+    # loudly as on a regression.
+    assert "user_lat=point.lat" in body and "user_lng=point.lng" in body, (
+        f"{route} resolves a delivery point and does not pass it on"
+    )
+    assert re.search(r"if\s+point\s+is\s+None", body), (
+        f"{route} does not handle a caller with no delivery address, so `None` "
+        "reaches the radius clause and the bound stops applying"
+    )
 
 
 def test_the_delivery_point_is_never_taken_from_the_client():
@@ -182,5 +193,20 @@ def test_the_delivery_point_is_never_taken_from_the_client():
     say where they are standing would make it advisory.
     """
     body = _fn("routes/product_routes.py", "_delivery_point")
-    assert "get_user_coordinates(" in body
+    # Through the shared resolver, which takes no coordinates at all — see
+    # `services/delivery_point`. Three modules used to answer this question
+    # themselves and gave three different answers.
+    assert "delivery_point.resolve(" in body, (
+        "the catalogue resolves a delivery point some other way; there is one "
+        "implementation and it is `services/delivery_point.resolve`"
+    )
     assert "Query(" not in body
+
+    import inspect
+
+    from services import delivery_point
+
+    assert set(inspect.signature(delivery_point.resolve).parameters) == {"session", "clerk_id"}, (
+        "`delivery_point.resolve` accepts coordinates from its caller, so any "
+        "endpoint can be pointed somewhere the customer is not."
+    )

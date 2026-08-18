@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from services.vendor_service import get_all_vendors, get_nearby_vendors, get_top_rated_vendors, get_vendor_by_id_service, get_vendors_by_type_service, get_top_brands_service
-from services.user_service import get_user_coordinates
+from services import delivery_point
 from schemas.vendor_schemas import VendorWithProductsThin, BaseVendor, VendorWithProductsFull, RequestBodyVendorId, VendorType
 from dependencies.dependencies import get_db
 from dependencies.auth_dependencies import get_current_customer
@@ -27,8 +27,8 @@ async def fetch_all_vendors(session: AsyncSession = Depends(get_db), limit: int 
 @router.get("/nearby_vendors") # Removed response_model to return dict directly for cache compatibility
 async def fetch_nearby_vendors(db: AsyncSession = Depends(get_db),user = Depends(get_current_customer)):
   clerk_id = user["sub"]
-  coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-  if not coords or not coords.lat or not coords.lng:
+  point = await delivery_point.resolve(session=db, clerk_id=clerk_id)
+  if point is None:
       return []
   
   cache_key = f"nearby_vendors_{clerk_id}"
@@ -36,7 +36,7 @@ async def fetch_nearby_vendors(db: AsyncSession = Depends(get_db),user = Depends
   if cached:
       return cached
 
-  vendors = await get_nearby_vendors(session=db, lat=coords.lat, lng=coords.lng)
+  vendors = await get_nearby_vendors(session=db, lat=point.lat, lng=point.lng)
   # Serialize manually because we dropped response_model for caching
   result = [VendorWithProductsThin.model_validate(v).model_dump() for v in vendors]
   
@@ -47,10 +47,10 @@ async def fetch_nearby_vendors(db: AsyncSession = Depends(get_db),user = Depends
 @router.get("/top_rated_vendors", response_model=list[BaseVendor])
 async def top_rated_vendors( db: AsyncSession = Depends(get_db), user = Depends(get_current_customer)):
   clerk_id = user["sub"]
-  coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-  if not coords or not coords.lat or not coords.lng:
+  point = await delivery_point.resolve(session=db, clerk_id=clerk_id)
+  if point is None:
       return []
-  vendors = await get_top_rated_vendors(session=db, lat=coords.lat, lng=coords.lng)
+  vendors = await get_top_rated_vendors(session=db, lat=point.lat, lng=point.lng)
   return vendors
 
 # GET VENDOR BY ID FOR THE VENDOR PROFILE 
@@ -66,21 +66,21 @@ async def get_vendor_by_id(request_body: RequestBodyVendorId, db : AsyncSession 
 async def get_vendors_by_type(request_body: VendorType, db : AsyncSession = Depends(get_db), user = Depends(get_current_customer) ):
   # get coordinates from the database  
   clerk_id = user["sub"]
-  coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-  if not coords or not coords.lat or not coords.lng:
+  point = await delivery_point.resolve(session=db, clerk_id=clerk_id)
+  if point is None:
       return []
-  vendors = await get_vendors_by_type_service(session=db, type=request_body.vendor_type, lng=coords.lng, lat=coords.lat)
+  vendors = await get_vendors_by_type_service(session=db, type=request_body.vendor_type, lng=point.lng, lat=point.lat)
   return vendors
 
 #  GET VENDORS OF TOP BRANDS AND THAT ARE NEAR YOUR OF TYPE WHOLE_SELLER 
 @router.get("/get_top_brands", response_model=list[BaseVendor])
 async def get_top_brands(db : AsyncSession = Depends(get_db), user = Depends(get_current_customer)):
   clerk_id = user["sub"]
-  coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-  if not coords or not coords.lat or not coords.lng:
+  point = await delivery_point.resolve(session=db, clerk_id=clerk_id)
+  if point is None:
     return []
   
-  vendors = await get_top_brands_service(session=db, lat=coords.lat, lng=coords.lng)
+  vendors = await get_top_brands_service(session=db, lat=point.lat, lng=point.lng)
   return vendors
 
 # GET VENDOR DIRECTORY (ALL VENDORS BY DISTANCE)
@@ -95,13 +95,13 @@ async def fetch_vendor_directory(
 ):
   from services.vendor_service import get_vendor_directory
   clerk_id = user["sub"]
-  coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-  if not coords or not coords.lat or not coords.lng:
+  point = await delivery_point.resolve(session=db, clerk_id=clerk_id)
+  if point is None:
       return []
   vendors = await get_vendor_directory(
       session=db,
-      lat=coords.lat,
-      lng=coords.lng,
+      lat=point.lat,
+      lng=point.lng,
       limit=limit,
       offset=offset,
       search_query=search_query,

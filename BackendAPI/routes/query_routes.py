@@ -14,10 +14,16 @@ two took it from the client, and the client only sends it when it holds a live
 GPS fix — so a customer who has denied location permission, or who opened the
 app indoors before the first fix landed, searched the whole country.
 
-`_coordinates` therefore prefers the live fix (more accurate for somebody out on
-the street than their saved address) and falls back to the saved address. A
-caller with neither has no delivery address, so nothing found here could have
-been ordered anyway.
+`services/delivery_point.resolve` is the origin, for these two exactly as for
+every other discovery read: the saved delivery address, resolved server-side,
+answering `None` when there is none — at which point these endpoints serve
+nothing, because nothing they could find would have been orderable.
+
+These two used to take `user_lat`/`user_lng` from the client and prefer them.
+That made search the only surface on the platform measured from the handset
+rather than from the address the order is delivered to, so it listed shops that
+could reach the phone and checkout refused the ones that could not reach the
+house.
 """
 
 from fastapi import APIRouter, Query, Depends
@@ -25,33 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
 from utils.verify_user_token import get_current_user
 from services.query_service import search_service, search_vendors_service
-from services.user_service import get_user_coordinates
+from services import delivery_point
 from schemas.product_schemas import ProductFull
 from schemas.vendor_schemas import VendorStorefront
 
 router = APIRouter()
 
 
-async def _coordinates(
-    db: AsyncSession,
-    clerk_id: str,
-    user_lat: float | None,
-    user_lng: float | None,
-) -> tuple[float | None, float | None]:
-    """Where to measure the service radius from.
-
-    Both halves must be present to be usable: a latitude with no longitude is
-    not half a location, and passing one through would leave the radius
-    unapplied exactly as before.
-    """
-    if user_lat is not None and user_lng is not None:
-        return user_lat, user_lng
-
-    coords = await get_user_coordinates(session=db, clerk_id=clerk_id)
-    if coords and coords.lat is not None and coords.lng is not None:
-        return coords.lat, coords.lng
-
-    return None, None
 
 
 @router.get("/search", response_model=list[ProductFull])
@@ -61,13 +47,16 @@ async def search(
   mode: str | None = Query(None),
   limit: int = Query(20, ge=1, le=100),
   offset: int = Query(0, ge=0),
-  user_lat: float | None = Query(None),
-  user_lng: float | None = Query(None),
   db: AsyncSession = Depends(get_db),
   user=Depends(get_current_user)
 ):
-  lat, lng = await _coordinates(db, user["sub"], user_lat, user_lng)
-  products = await search_service(session=db, query=query, category=category, mode=mode, limit=limit, offset=offset, user_lat=lat, user_lng=lng)
+  point = await delivery_point.resolve(db, user["sub"])
+  if point is None:
+      # No delivery address and no live fix. Nothing found here could be
+      # ordered, and an unbounded search is how the top hit for "20L" came to be
+      # a shop in another town.
+      return []
+  products = await search_service(session=db, query=query, category=category, mode=mode, limit=limit, offset=offset, user_lat=point.lat, user_lng=point.lng)
   return products
 
 @router.get("/search/vendors", response_model=list[VendorStorefront])
@@ -75,11 +64,11 @@ async def search_vendors(
   query: str | None = Query(None, min_length=2, max_length=100),
   limit: int = Query(20, ge=1, le=100),
   offset: int = Query(0, ge=0),
-  user_lat: float | None = Query(None),
-  user_lng: float | None = Query(None),
   db: AsyncSession = Depends(get_db),
   user=Depends(get_current_user)
 ):
-  lat, lng = await _coordinates(db, user["sub"], user_lat, user_lng)
-  vendors = await search_vendors_service(session=db, query=query, limit=limit, offset=offset, user_lat=lat, user_lng=lng)
+  point = await delivery_point.resolve(db, user["sub"])
+  if point is None:
+      return []
+  vendors = await search_vendors_service(session=db, query=query, limit=limit, offset=offset, user_lat=point.lat, user_lng=point.lng)
   return vendors

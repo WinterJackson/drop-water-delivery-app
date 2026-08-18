@@ -86,7 +86,7 @@ CEILING = {
     # 100) / 100` survived there after the other six were removed, and it hid a
     # nullable `vendor.lat` being passed to a `number`-typed parameter. Both
     # failed `tsc` the moment the screen rendered from the typed query instead.
-    "drop-customer-app": 113,
+    "drop-customer-app": 109,
     "drop-rider-app": 82,
     "drop-vendor-app": 81,
     # Written without a single one from the start, and it stays that way.

@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import UserAvatar from "@/components/ui/UserAvatar";
 import BentoCategories from "@/components/common/BentoCategories";
 import FavouritesList from "@/components/common/FavouritesList";
+import LocationRequired, { NoStoresInRange } from "@/components/common/LocationRequired";
 import { Ionicons } from "@expo/vector-icons";
 import images from "@/constants/images/images";
 import Context from "@/context/context";
@@ -12,6 +13,7 @@ import { usePaginatedProducts, useProductsWithOffer, offerRows } from "@/hooks/q
 import { useUserDetails } from "@/hooks/queries/useUser";
 import { useNearByVendors, useTopBrandsVendors, useTopRatedVendors } from "@/hooks/queries/useVendors";
 import { useLocation } from "@/hooks/useLocation";
+import { useDeliveryLocation } from "@/hooks/useDeliveryLocation";
 import { useUnreadNotificationCount } from "@/hooks/queries/useNotifications";
 import { useActiveOrder } from "@/hooks/queries/useOrders";
 import useWebSocket from "@/hooks/useWebSocket";
@@ -85,8 +87,21 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 								transition={200}
 							/>
 						</View>
-						{/* Name, pricing and delivery time  */}
-						<View className="flex-1 px-3 py-2 justify-center w-full">
+						{/* Name and pricing.
+						    Not `flex-1`. The card around this has a fixed `width`
+						    and **no height**, so it is an auto-height column — and
+						    `flex-1` is `flexGrow:1, flexShrink:1, flexBasis:0%`. In
+						    a container with no height there is no free space to
+						    grow into, so the base size of 0 is the final size: the
+						    row collapsed to nothing and `overflow-hidden` on the
+						    card clipped the name and the price away silently.
+						    It read as intermittent because FlashList recycles
+						    cells, so a view that had already been laid out at a
+						    usable height kept it and a freshly recycled one did
+						    not — some cards showed their name and price and some
+						    did not, in the same grid, changing as you scrolled.
+						    The content decides the height here. */}
+						<View className="px-3 py-2 w-full">
 							<Text className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
 								{item?.name}
 							</Text>
@@ -132,6 +147,11 @@ export default function Home() {
 	useEffect(() => {
 		if (!deviceLocation) requestLocation().catch(() => {});
 	}, []);
+
+	// Whether this app knows where to deliver at all. Everything below is a list
+	// of what can be delivered *to somewhere*, so this is the question that has
+	// to be answered before any of it means anything.
+	const { hasAddress, address, isResolved: locationResolved } = useDeliveryLocation();
 
 	const { data: unreadData } = useUnreadNotificationCount();
 	const unreadCount = unreadData?.unread_count || 0;
@@ -206,6 +226,26 @@ export default function Home() {
 			setRefreshing(false);
 		}
 	}, [r1, r2, r6, r7, rActive, refetchProducts]);
+
+	/**
+	 * An address is set and every discovery read has come back empty.
+	 *
+	 * Distinct from having no address, and it has to be derived from *all* of
+	 * them rather than from the nearby rail alone: that rail is retail-only and
+	 * capped at three, so it answers empty for a customer whose only options are
+	 * wholesale depots — which is how a screen full of stores came to sit under
+	 * "No vendors currently deliver to your location".
+	 */
+	const everythingLoaded =
+		NearbyVendorsLoaded && TopRatedVendorsLoaded && TopBrandsloaded && OffersLoaded && !isFetchingMore;
+	const nothingInRange =
+		hasAddress &&
+		everythingLoaded &&
+		NearByVendors.length === 0 &&
+		TopRatedVendors.length === 0 &&
+		TopBrands.length === 0 &&
+		Offers.length === 0 &&
+		paginatedProducts.length === 0;
 
 	// <---------------VARIABLES---------------->
 	const renderProductItem: ListRenderItem<Product> = useCallback(
@@ -313,21 +353,18 @@ export default function Home() {
 						</View>
 					</View>
 					</View>
-					{/* H3 Service Area Banner — warn customers outside delivery zones */}
-					{NearbyVendorsLoaded && NearByVendors.length === 0 && (
-						<View className={`mx-5 mb-2 p-4 rounded-2xl flex-row items-center gap-3 ${darkTheme ? "bg-yellow-500/10 border border-yellow-500/20" : "bg-yellow-50 border border-yellow-200"}`}>
-							<Text style={{ fontSize: 22 }}>⚠️</Text>
-							<View className="flex-1">
-								<Text className={`font-sans-bold text-sm ${darkTheme ? "text-yellow-400" : "text-yellow-700"}`}>
-									Limited Coverage Area
-								</Text>
-								<Text className={`text-xs mt-0.5 ${darkTheme ? "text-yellow-400/70" : "text-yellow-600"}`}>
-									No vendors currently deliver to your location. Try updating your address or browsing all stores.
-								</Text>
-							</View>
-						</View>
-					)}
-
+					{/* Three states, and they are three different questions.
+					    `unknown` is not a warning — it is the first-run state, and
+					    rendering it as "Limited Coverage Area" told a customer their
+					    neighbourhood was unserved when nobody had asked them where
+					    they live yet. `uncovered` is the only one that is bad news.
+					    Nothing below renders until the account has loaded, or the
+					    prompt flashes over a home screen that is about to be fine. */}
+					{locationResolved && !hasAddress ? (
+						<LocationRequired />
+					) : nothingInRange ? (
+						<NoStoresInRange address={address} />
+					) : (
 					<FlashList
 						data={paginatedProducts}
 						// @ts-ignore
@@ -454,6 +491,7 @@ export default function Home() {
 							) : null
 						}
 					/>
+					)}
 
 					{/* Location permission prompt. Non-blocking by design: a denied
 					    permission must not lock the user out of the app — they can still

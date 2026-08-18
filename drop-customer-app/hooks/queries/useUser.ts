@@ -32,7 +32,14 @@ export function useUpdateLocation() {
             // Delivery fee and serviceability depend on the destination.
             queryClient.invalidateQueries({ queryKey: ['cart', 'quote'] });
             queryClient.invalidateQueries({ queryKey: ['delivery-fee'] });
+            // Everything discovery serves is measured from this address, and the
+            // server resolves it rather than taking it from the request — so the
+            // request that produced a cached result is byte-identical to the one
+            // that would produce a different result now, and nothing about the
+            // key can express that. Moving the address is the invalidation.
             queryClient.invalidateQueries({ queryKey: ['vendors'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            queryClient.invalidateQueries({ queryKey: ['search'] });
         }
     });
 }

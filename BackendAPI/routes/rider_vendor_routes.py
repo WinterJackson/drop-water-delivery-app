@@ -62,11 +62,16 @@ async def discover_nearby_vendors(
 
     # Find closest 20 vendors using H3 pruning (max 15km bounds for wholesale)
     import h3
+    from services.vendor_service import in_search_cells
     center_h3 = h3.latlng_to_cell(lat, lng, 8)
     neighbor_cells = [str(cell) for cell in h3.grid_disk(center_h3, 32)]
     
+    # Through `in_search_cells`, so a store whose H3 cache has never been written
+    # is skipped by the ring rather than rejected by it. Twenty-one of
+    # twenty-three had a NULL here; on this screen that is a rider unable to find
+    # the depot they are standing outside.
     query = select(Vendor, ST_Distance(Vendor.location, point).label("distance")).where(
-        Vendor.h3_index_res8.in_(neighbor_cells)
+        in_search_cells(neighbor_cells)
     )
     
     if registered_vendor_ids:

@@ -3,7 +3,7 @@ import { ApiError, retryTransientOnly } from '@/API/errors';
 import { useApiRequest } from '@/API/useApiClient';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { useAuth } from '@clerk/clerk-expo';
-import type { DetailedCart } from '@/types/models';
+import type { CartItem, DetailedCart } from '@/types/models';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 /**
@@ -106,6 +106,54 @@ const CART_FRESHNESS = {
     staleTime: 0,
     refetchOnMount: "always",
 } as const;
+
+
+/**
+ * Keep the badge's copy of the basket in step with the screen's copy.
+ *
+ * The cart is two queries over one fact: `get_cart` backs the count on the tab
+ * bar, `get_detailed_cart` backs the Cart screen. Every mutation below patched
+ * the detailed one optimistically and left the summary to catch up on the
+ * `invalidateQueries` in `onSettled` — so between the tap and the server's reply
+ * the tab badge and the screen disagreed about how many items the customer had.
+ *
+ * On a congested cell that gap is seconds, and with `networkMode:
+ * 'offlineFirst'` and no connection the refetch never lands at all: the item
+ * visibly leaves the list while the badge keeps counting it, indefinitely.
+ * "Two representations of one fact, updated by different mechanisms" is the
+ * defect this codebase already names elsewhere; this is it inside one hook file.
+ *
+ * Both keys are patched from the same delta, so there is nothing left that can
+ * make them drift.
+ */
+function patchCartCaches(
+    queryClient: ReturnType<typeof useQueryClient>,
+    userId: string | null | undefined,
+    apply: (cart: DetailedCart) => DetailedCart,
+) {
+    for (const key of [['cart', userId], ['cart', 'detailed', userId]]) {
+        queryClient.setQueryData<DetailedCart | null>(key, (old) => (old ? apply(old) : old));
+    }
+}
+
+/**
+ * Replace the item rows and the count that has to agree with them.
+ *
+ * The rows arrive as **`cart_item`** — `CartDetailed` on the server names them
+ * that, and `types/models.ts` has always declared them that way. Both optimistic
+ * updates here read `old.items`, which no response has ever carried, so both
+ * began `if (!old || !old.items) return old;` and returned unchanged **every
+ * time**. The cart had optimistic updates in name only: removing an item left it
+ * on screen until the server replied, which on a congested cell is the whole
+ * point of having them.
+ *
+ * `items_count` is a stored column the server maintains incrementally, so it is
+ * set from the rows rather than adjusted by a delta — the two cannot disagree
+ * if only one of them is ever written.
+ */
+function withItems(cart: DetailedCart, items: CartItem[]): DetailedCart {
+    return { ...cart, cart_item: items, items_count: items.length };
+}
 
 export function useCart() {
     const { userId } = useAuth();
@@ -214,18 +262,20 @@ export function useChangeCartQty() {
         mutationFn: (payload: { id: string; quantity: number }) =>
             api.post(ROUTES.CHANGE_CART_QTY, payload),
         onMutate: async ({ id, quantity }) => {
+            await queryClient.cancelQueries({ queryKey: ['cart', userId] });
             await queryClient.cancelQueries({ queryKey: ['cart', 'detailed', userId] });
+            const prevSummary = queryClient.getQueryData(['cart', userId]);
             const prevDetailed = queryClient.getQueryData(['cart', 'detailed', userId]);
-            queryClient.setQueryData(['cart', 'detailed', userId], (old: any) => {
-                if (!old || !old.items) return old;
-                return {
-                    ...old,
-                    items: old.items.map((item: any) => (item.id === id ? { ...item, quantity } : item))
-                };
-            });
-            return { prevDetailed };
+            patchCartCaches(queryClient, userId, (cart) =>
+                withItems(
+                    cart,
+                    (cart.cart_item ?? []).map((item) => (item.id === id ? { ...item, quantity } : item)),
+                ),
+            );
+            return { prevSummary, prevDetailed };
         },
         onError: (err, payload, context) => {
+            if (context?.prevSummary) queryClient.setQueryData(['cart', userId], context.prevSummary);
             if (context?.prevDetailed) queryClient.setQueryData(['cart', 'detailed', userId], context.prevDetailed);
         },
         onSettled: () => {
@@ -241,15 +291,20 @@ export function useDeleteCartItem() {
     return useMutation({
         mutationFn: (payload: { id: string }) => api.post(ROUTES.DELETE_CART_ITEM, payload),
         onMutate: async ({ id }) => {
+            await queryClient.cancelQueries({ queryKey: ['cart', userId] });
             await queryClient.cancelQueries({ queryKey: ['cart', 'detailed', userId] });
+            const prevSummary = queryClient.getQueryData(['cart', userId]);
             const prevDetailed = queryClient.getQueryData(['cart', 'detailed', userId]);
-            queryClient.setQueryData(['cart', 'detailed', userId], (old: any) => {
-                if (!old || !old.items) return old;
-                return { ...old, items: old.items.filter((item: any) => item.id !== id) };
-            });
-            return { prevDetailed };
+            // `items_count` moves with the row. It is a stored column the server
+            // maintains incrementally, so leaving it untouched here is what let
+            // the badge outlive the item it was counting.
+            patchCartCaches(queryClient, userId, (cart) =>
+                withItems(cart, (cart.cart_item ?? []).filter((item) => item.id !== id)),
+            );
+            return { prevSummary, prevDetailed };
         },
         onError: (err, payload, context) => {
+            if (context?.prevSummary) queryClient.setQueryData(['cart', userId], context.prevSummary);
             if (context?.prevDetailed) queryClient.setQueryData(['cart', 'detailed', userId], context.prevDetailed);
         },
         onSettled: () => {

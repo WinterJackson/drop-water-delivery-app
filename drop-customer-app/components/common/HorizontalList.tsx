@@ -201,8 +201,14 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 										)
 									}
 								</View>
-								{/* TEXT CONTENT WRAPPER */}
-								<View className="flex-1 px-3 py-2 justify-center">
+								{/* TEXT CONTENT WRAPPER — sized by its content, never `flex-1`.
+								    The card is a fixed-width, auto-height column, so
+								    `flex-1` resolves to `flexBasis: 0` with no free
+								    space to grow into and the row collapses to zero
+								    height under the card's `overflow-hidden`. Same
+								    defect as the home grid: the name and the price
+								    are there, laid out, and clipped to nothing. */}
+								<View className="px-3 py-2">
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
 										<Text

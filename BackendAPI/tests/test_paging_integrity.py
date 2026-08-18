@@ -583,63 +583,68 @@ def test_no_search_filter_compares_a_category_against_the_word_all():
         )
 
 
-def test_search_resolves_a_location_when_the_client_sends_none():
-    """The radius is only a bound if there is somewhere to measure it from.
+def test_search_resolves_its_own_location_and_takes_none_from_the_client():
+    """The radius is only a bound if there is somewhere to measure it from — and
+    that somewhere is the saved delivery address, never the request.
 
-    Every other discovery endpoint reads the customer's saved delivery address
-    server-side (`get_user_coordinates`) and answers `[]` without one. Search
-    took coordinates from the client, and the client only sends them while it
-    holds a live GPS fix — so a customer who denied location permission, or who
-    opened the app indoors before the first fix landed, searched the whole
-    country with the radius silently inapplicable. Bounding the query without
-    this is half a fix that looks like a whole one.
+    This started as half a fix. Search took coordinates from the client, which
+    only sends them while it holds a live GPS fix, so a customer who denied
+    location permission searched the whole country with the radius silently
+    inapplicable. Falling back to the saved address closed that, and left a
+    subtler version of the same problem: when the client *did* send a fix, it
+    won — so search was the only surface on the platform measured from where the
+    handset was rather than from where the water is delivered. The results listed
+    the shops that could reach the customer at work and `validate_cart_preflight`
+    refused the basket using the shops that could reach their house.
+
+    Both halves are closed by removing the parameters: there is one origin, it is
+    resolved server-side, and `services/delivery_point` is the only thing that
+    resolves it.
     """
     source = (BACKEND / "routes" / "query_routes.py").read_text()
 
-    assert "get_user_coordinates" in source, (
-        "search must fall back to the customer's saved address"
+    assert "delivery_point.resolve" in source, (
+        "search must resolve the customer's delivery address server-side"
     )
-    assert source.count("await _coordinates(") == 2, (
+    assert source.count("await delivery_point.resolve(") == 2, (
         "both the product search and the vendor search must resolve a location"
+    )
+    # The signatures, not the prose: the module docstring explains why these
+    # parameters were removed, and reading the raw text finds that explanation.
+    import ast
+
+    declared = {
+        argument.arg
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for argument in node.args.args + node.args.kwonlyargs
+    }
+    assert not (declared & {"user_lat", "user_lng"}), (
+        "search accepts a client-supplied origin again. The radius decides "
+        "whether a store may be ordered from at all, so a caller-supplied "
+        "origin is a caller-supplied answer."
     )
 
 
 @pytest.mark.asyncio
-async def test_the_coordinate_fallback_prefers_the_live_fix_and_never_half_a_location():
-    """A latitude with no longitude is not a location.
+async def test_a_search_without_a_delivery_address_returns_nothing():
+    """No origin, no results — rather than no bound.
 
-    Passing one through would leave `ST_DWithin` unapplied exactly as before,
-    which is the failure this whole path exists to close — and it would do it
-    silently, for whichever clients send a partial payload.
+    The radius clause reads "apply it when coordinates are known", so an
+    unresolved location did not produce an error or an empty list: it produced
+    the **entire national catalogue**, unbounded, on the screen most customers
+    actually use. A rider or vendor hitting the same endpoint has nowhere to be
+    delivered to, and neither does a customer who has not set an address yet.
     """
-    from types import SimpleNamespace
-
-    from routes.query_routes import _coordinates
-
-    saved = SimpleNamespace(lat=-1.30, lng=36.80)
-
-    async def _db_with_saved_address(session, clerk_id):
-        return saved
+    from unittest.mock import AsyncMock, patch
 
     import routes.query_routes as module
 
-    original = module.get_user_coordinates
-    module.get_user_coordinates = _db_with_saved_address
-    try:
-        # A live fix wins: somebody out on the street is not at their home address.
-        assert await _coordinates(None, "u", -1.2921, 36.8219) == (-1.2921, 36.8219)
-        # No fix at all falls back to the saved delivery address.
-        assert await _coordinates(None, "u", None, None) == (-1.30, 36.80)
-        # Half a fix is not a fix.
-        assert await _coordinates(None, "u", -1.2921, None) == (-1.30, 36.80)
-        assert await _coordinates(None, "u", None, 36.8219) == (-1.30, 36.80)
+    with patch.object(module.delivery_point, "resolve", AsyncMock(return_value=None)):
+        with patch.object(module, "search_service", AsyncMock()) as search_service:
+            assert await module.search(db=None, user={"sub": "u"}) == []
+            search_service.assert_not_called()
 
-        # A caller with no saved address either — a rider or vendor hitting the
-        # same endpoint. Unbounded, but they have nowhere to be delivered to.
-        async def _no_address(session, clerk_id):
-            return None
-
-        module.get_user_coordinates = _no_address
-        assert await _coordinates(None, "u", None, None) == (None, None)
-    finally:
-        module.get_user_coordinates = original
+        with patch.object(module, "search_vendors_service", AsyncMock()) as search_vendors:
+            assert await module.search_vendors(db=None, user={"sub": "u"}) == []
+            search_vendors.assert_not_called()

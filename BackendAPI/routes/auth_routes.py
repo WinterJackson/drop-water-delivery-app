@@ -20,6 +20,7 @@ from utils.serializers import safe_serialize
 import asyncio
 import logging
 import os
+from services.vendor_service import set_vendor_position, clear_vendor_position
 
 logger = logging.getLogger(__name__)
 
@@ -262,10 +263,18 @@ async def register_vendor(request: Request, vendor_data: CreateVendor, session: 
     if vendor_data.vendor_type:
         existing_vendor.vendor_type = vendor_data.vendor_type
     if vendor_data.lat and vendor_data.lng:
-        existing_vendor.lat = vendor_data.lat
-        existing_vendor.lng = vendor_data.lng
-        existing_vendor.location_address = vendor_data.location_address
-        existing_vendor.location = f"POINT({vendor_data.lng} {vendor_data.lat})"
+        # Through the one writer. This branch set `lat`, `lng` and `location` and
+        # left `h3_index_res8` NULL — and it is the branch onboarding actually
+        # takes, because the row already exists by the time the form is posted.
+        # Every discovery query pre-filters on that cell, so the store was
+        # invisible in "near you", in the directory and in search while being
+        # 1.8 km from the customer.
+        set_vendor_position(
+            existing_vendor,
+            vendor_data.lat,
+            vendor_data.lng,
+            location_address=vendor_data.location_address,
+        )
     if vendor_data.profile_pic:
         existing_vendor.profile_pic = vendor_data.profile_pic
     if vendor_data.shift_start:
@@ -500,9 +509,7 @@ async def delete_account(
             db_vendor.push_token = None
             db_vendor.verification_status = "deleted"
             db_vendor.location_address = None
-            db_vendor.lat = None
-            db_vendor.lng = None
-            db_vendor.location = None
+            clear_vendor_position(db_vendor)
             db_vendor.business_license = None
             db_vendor.payment_methods = []
 

@@ -1,11 +1,14 @@
 
 import h3
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models.vendor_model import Vendor
 from schemas.vendor_schemas import BaseVendor, VendorWithProductsThin, VendorWithProductsFull
 from geoalchemy2.functions import ST_Distance, ST_DWithin
+from geoalchemy2.shape import from_shape
+from shapely.geometry import Point
 from sqlalchemy.orm import joinedload
 from uuid import UUID
 from services import platform_config_service
@@ -19,6 +22,74 @@ from utils.paging import stable
 #: `deleted` is set by account deletion in `auth_routes`, which anonymises the
 #: row but leaves it in place for the orders that reference it.
 UNDISCOVERABLE_STATUSES = ("deleted",)
+
+
+def in_search_cells(neighbour_cells):
+  """The H3 ring, written so it can only ever *narrow work*, never hide a store.
+
+  `h3_index_res8` is a **cache** of a fact `location` already holds. It exists
+  to let Postgres discard most of the table on a cheap string index before the
+  exact `ST_DWithin` runs, and the comment above `_search_bounds` is careful to
+  call it a pre-filter rather than a radius.
+
+  Written as a bare `IN (...)` it was not a pre-filter. `NULL IN (...)` is NULL,
+  never true, so a store whose cache column had never been written dropped out
+  of every discovery query on the platform while sitting 1.8 km from the
+  customer with a perfectly good `location`. That is exactly what happened:
+  twenty-one of twenty-three stores had a NULL here, because the *insert* path
+  wrote the cell and the *onboarding update* path — the branch every real vendor
+  actually takes — wrote `lat`, `lng` and `location` and forgot it. The customer
+  app showed "No vendors currently deliver to your location" to somebody with
+  six deliverable shops inside 2.5 km.
+
+  So the ring is now allowed to *skip* rows and never to *reject* them: a row
+  with no cached cell falls through to `ST_DWithin`, which is authoritative and
+  is present on every one of these queries. Correctness stops depending on a
+  backfill having run, which is the only reason this defect could ever have
+  reached a customer.
+  """
+  return or_(Vendor.h3_index_res8.in_(neighbour_cells), Vendor.h3_index_res8.is_(None))
+
+
+def set_vendor_position(vendor, lat: float, lng: float, location_address: str | None = None) -> None:
+  """Write every column that describes where a store is, in one place.
+
+  Four columns say the same thing — `lat`, `lng`, `location` (the PostGIS
+  geography every distance query measures against) and `h3_index_res8` (the
+  ring pre-filter's cache) — and there were three writers, each setting a
+  different subset:
+
+  * `create_vendor` wrote `lat`, `lng` and the H3 cell, and never `location`.
+  * the onboarding update branch in `auth_routes` wrote `lat`, `lng` and
+    `location`, and never the H3 cell.
+  * `vendor_management_service` was the only one that wrote all four.
+
+  A store was therefore invisible to distance queries or invisible to the ring
+  depending on which door it came in through, and nothing anywhere reported it.
+  Callers pass a position; this decides what a position *is*.
+  """
+  vendor.lat = lat
+  vendor.lng = lng
+  vendor.location = from_shape(Point(lng, lat), srid=4326)
+  vendor.h3_index_res8 = str(h3.latlng_to_cell(lat, lng, 8))
+  if location_address is not None:
+    vendor.location_address = location_address
+
+
+def clear_vendor_position(vendor) -> None:
+  """Erase every column that says where a store was.
+
+  Account deletion anonymises the row and leaves it in place for the orders that
+  reference it. It nulled `lat`, `lng` and `location` and left `h3_index_res8`
+  standing — a res-8 cell is a hexagon about 460 m across, so the "erased"
+  record still named the neighbourhood the business traded from. Position is one
+  fact in four columns on the way out as well as on the way in.
+  """
+  vendor.lat = None
+  vendor.lng = None
+  vendor.location = None
+  vendor.h3_index_res8 = None
+
 
 
 def discoverable_vendor():
@@ -129,7 +200,7 @@ async def get_nearby_vendors(session : AsyncSession, lat : float, lng : float ) 
           and_(
               discoverable_vendor(),
               Vendor.vendor_type == "retail_refill",
-              Vendor.h3_index_res8.in_(neighbour_cells),
+              in_search_cells(neighbour_cells),
               Vendor.location.isnot(None),
               ST_DWithin(Vendor.location, user_point, max_distance_m),
           )
@@ -151,7 +222,7 @@ async def get_top_rated_vendors(session: AsyncSession, lat : float, lng: float) 
               discoverable_vendor(),
               Vendor.vendor_type == "retail_refill",
               Vendor.rating >= 4,
-              Vendor.h3_index_res8.in_(neighbour_cells),
+              in_search_cells(neighbour_cells),
               Vendor.location.isnot(None),
               ST_DWithin(Vendor.location, user_point, max_distance_m),
           )
@@ -183,7 +254,7 @@ async def get_vendors_by_type_service(session : AsyncSession, type: str, lng: fl
           and_(
               discoverable_vendor(),
               Vendor.vendor_type == type,
-              Vendor.h3_index_res8.in_(neighbour_cells),
+              in_search_cells(neighbour_cells),
               Vendor.location.isnot(None),
               ST_DWithin(Vendor.location, user_point, max_distance_m),
           )
@@ -229,7 +300,7 @@ async def get_top_brands_service(session : AsyncSession, lat : float, lng : floa
               discoverable_vendor(),
               Vendor.vendor_type == "wholesale_b2b",
               Vendor.rating >= 4,
-              Vendor.h3_index_res8.in_(neighbour_cells),
+              in_search_cells(neighbour_cells),
               Vendor.location.isnot(None),
               ST_DWithin(Vendor.location, user_point, max_distance_m),
           )
@@ -258,20 +329,29 @@ async def get_vendor_directory(
     50 stores and the screen had no way to ask for the 51st. In a dense estate
     that is half a suburb.
     """
-    # "all" spans both business models, so bound it by the wider of the two radii
-    # and let the per-type filter narrow it when the customer picks one.
-    bounds_type = vendor_type if vendor_type in ("retail_refill", "wholesale_b2b") else "wholesale_b2b"
-    user_point, neighbour_cells, max_distance_m = _search_bounds(lat, lng, bounds_type)
+    # The ring is bounded by the wider of the two radii, because it is only a
+    # pre-filter and over-reaching is what it is for. The *distance* is not:
+    # `within_service_radius` measures every row against its own type's limit, so
+    # a refill shop drops out past 2.5 km in the same query where a depot
+    # survives to 15.
+    #
+    # Bounding the whole listing at one figure was the defect. With `vendor_type`
+    # unset — which is this screen's default, "All" — the wider figure applied to
+    # every row, so the directory listed refill shops up to 15 km away. Each one
+    # opened, showed a catalogue, filled a basket and was refused at checkout by
+    # the 2.5 km rule this very list exists to express.
+    from services.dispatch_policy import within_service_radius
+
+    user_point, neighbour_cells, _ = _search_bounds(lat, lng, "wholesale_b2b")
 
     query = (
         select(Vendor)
         .options(joinedload(Vendor.products.and_(live_product())))
         .where(
             discoverable_vendor(),
-            Vendor.h3_index_res8.in_(neighbour_cells),
-            Vendor.location.isnot(None),
+            in_search_cells(neighbour_cells),
             # Never list a vendor the customer cannot actually order from.
-            ST_DWithin(Vendor.location, user_point, max_distance_m),
+            within_service_radius(user_point),
         )
     )
 

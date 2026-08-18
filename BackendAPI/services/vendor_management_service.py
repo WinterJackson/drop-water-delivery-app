@@ -1,5 +1,4 @@
 import logging
-import h3
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -9,13 +8,12 @@ from models.vendor_model import Vendor
 from models.product_model import Product
 from models.order_model import Order, OrderItem
 from models.user_model import User
-from geoalchemy2.shape import from_shape
-from shapely.geometry import Point
 from services.expo_push_service import send_push_message, dispatch_background
 from services.notification_service import create_notification, push_allowed
 from sqlalchemy import func, and_
 from services.order_service import apply_status_transition
 from utils.paging import stable
+from services.vendor_service import set_vendor_position
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +162,10 @@ async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict
             setattr(vendor, field, data[field])
 
     if "lat" in data and "lng" in data and data["lat"] is not None:
-        vendor.lat = data["lat"]
-        vendor.lng = data["lng"]
-        vendor.location = from_shape(Point(data["lng"], data["lat"]), srid=4326)
-        vendor.h3_index_res8 = str(h3.latlng_to_cell(data["lat"], data["lng"], 8))
+        # This was the only one of the three writers that set all four columns.
+        # It goes through the shared function regardless, so "what a position is"
+        # has one definition rather than one correct copy and two wrong ones.
+        set_vendor_position(vendor, data["lat"], data["lng"])
 
     await session.commit()
     await session.refresh(vendor)

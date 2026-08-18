@@ -1,8 +1,8 @@
-import h3
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models.vendor_model import Vendor
 from schemas.vendor_schemas import CreateVendor
+from services.vendor_service import set_vendor_position
 
 async def get_existing_vendor(clerk_id: str, db: AsyncSession):
     """This caller's own store — the oldest one, deterministically.
@@ -38,12 +38,14 @@ async def create_vendor(db: AsyncSession, data: CreateVendor):
         business_license=data.business_license,
         profile_pic=data.profile_pic,
         location_address=data.location_address,
-        lat=data.lat,
-        lng=data.lng,
         verification_status="pending"
     )
     if data.lat is not None and data.lng is not None:
-        new_vendor.h3_index_res8 = str(h3.latlng_to_cell(data.lat, data.lng, 8))
+        # Through the one writer. This path set `lat`, `lng` and the H3 cell and
+        # never `location` — the PostGIS column every distance query measures
+        # against — so a store created here was in the ring and outside every
+        # radius test that follows it.
+        set_vendor_position(new_vendor, data.lat, data.lng)
     if data.shift_start is not None:
         new_vendor.shift_start = data.shift_start
     if data.shift_end is not None:
