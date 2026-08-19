@@ -57,9 +57,20 @@ QUOTE_FIELDS = (
     "bottle_fee_total",
     "debt_settlement",
     "welcome_discount",
+    "mpesa_discount",
     "wallet_discount",
     "finalTotal",
 )
+
+# Quote fields that move the total but are deliberately not their own line, with
+# the reason. Anything else the quote sends must be rendered.
+NOT_A_LINE = {
+    # Platform margin *inside* the delivery fee, not a separate charge. Adding
+    # it as a line would bill the customer twice on screen for one figure.
+    "delivery_markup",
+    # The total is the sum, not a component of it.
+    "total",
+}
 
 
 def _strip_comments(source: str) -> str:
@@ -134,4 +145,46 @@ def test_no_screen_states_the_welcome_rate(path: pathlib.Path) -> None:
         + "; ".join(offenders)
         + ". The rate is a Platform_Settings row and it applies to one bottle's "
         "deposit; the amount rendered beside the label is already the truth."
+    )
+
+
+def _quote_money_fields() -> set[str]:
+    """Every money field `compute_order_quote` serialises to the cart."""
+    source = (ROOT / "BackendAPI" / "services" / "pricing_service.py").read_text(encoding="utf-8")
+    return set(re.findall(r'"([a-z_]+)":\s*money_str', source))
+
+
+def test_the_quote_field_scan_still_works() -> None:
+    """If this stops matching, the assertion below passes vacuously."""
+    fields = _quote_money_fields()
+    assert {"product_subtotal", "delivery_fee", "welcome_discount"} <= fields
+    assert len(fields) >= 10, sorted(fields)
+
+
+def test_every_figure_in_the_total_has_a_line_on_the_cart(cart_source: str) -> None:
+    """A charge or credit the customer cannot see is a difference they cannot check.
+
+    `debt_settlement` sat inside `total` with no line, so the customer paid an
+    unexplained amount. `mpesa_discount` was the same defect pointing the other
+    way — money *off* the total, applied by the server, rendered nowhere. That
+    one is self-defeating as well as opaque: the reason it is framed as a
+    discount for paying by M-Pesa rather than a surcharge for paying cash is so
+    the customer sees they are being rewarded, and a reward nobody is shown
+    steers nobody.
+
+    Discovered from the quote rather than listed here, so a new component of the
+    total is covered the day somebody adds it.
+    """
+    missing = sorted(
+        field
+        for field in _quote_money_fields() - NOT_A_LINE
+        # `bottle_deposit` reaches the screen through the `bottle_fee_total`
+        # local; the others are read under their own name.
+        if field != "bottle_deposit"
+        and not re.search(rf"quote\?\.{re.escape(field)}\b", cart_source)
+    )
+    assert not missing, (
+        "These figures are part of the total the customer is charged and appear "
+        "nowhere on the cart: " + ", ".join(missing) + ". Every charge in a "
+        "quote is rendered as its own line."
     )

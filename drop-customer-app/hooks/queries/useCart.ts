@@ -195,14 +195,32 @@ export function useCartQuote(
     lng?: number | null,
     deliveryType: string = 'exchange',
     enabled: boolean = true,
+    /**
+     * The method the customer has actually chosen, because the total depends on
+     * it. `mpesa_payment_discount` is taken off when they are not paying cash,
+     * and the server defaults this field to `"mpesa"` — so a cart that never
+     * sent it quoted every basket, including a cash one, with the discount
+     * applied. The customer then chose Cash on Delivery and `create_order`
+     * priced the same basket without it, which is the quoted-versus-charged
+     * drift the pricing module exists to eliminate.
+     *
+     * It is in the query key as well as the body: without that, switching to
+     * cash returns the cached M-Pesa answer and the screen does not move.
+     */
+    paymentMethod: string = 'mpesa',
 ) {
     const { userId } = useAuth();
     const api = useApiRequest();
     const hasLocation = typeof lat === 'number' && typeof lng === 'number' && !(lat === 0 && lng === 0);
 
     return useQuery<CartQuote, Error>({
-        queryKey: ['cart', 'quote', userId, lat, lng, deliveryType],
-        queryFn: () => api.post<CartQuote>(ROUTES.CART_QUOTE, { lat, lng, delivery_type: deliveryType }),
+        queryKey: ['cart', 'quote', userId, lat, lng, deliveryType, paymentMethod],
+        queryFn: () => api.post<CartQuote>(ROUTES.CART_QUOTE, {
+            lat,
+            lng,
+            delivery_type: deliveryType,
+            payment_method: paymentMethod,
+        }),
         enabled: enabled && hasLocation,
         // Surge windows and delivery fees change with time and location, so keep
         // this fresh but not chatty.

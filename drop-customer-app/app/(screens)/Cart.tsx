@@ -86,6 +86,10 @@ export default function Cart() {
 	const [deliveryType, setDeliveryType] = useState<BottleOption>('exchange');
 	
 	// <--------------REACT QUERY-------------->
+	// Declared before the quote because the quote depends on it: the total
+	// differs by `mpesa_payment_discount` depending on how the customer pays.
+	const [PaymentMethod, setPaymentMethod] = useState<string | null>(null); // "mpesa" | "cash"
+
 	const { data: Cart, isLoading: isCartLoading, refetch: refetchCart, isRefetching } = useDetailedCart();
 
 	const total_quantity = Cart?.total_quantity ?? Cart?.cart_item?.reduce((acc: number, item: any) => acc + item.quantity, 0) ?? 0;
@@ -103,7 +107,17 @@ export default function Cart() {
 		isLoading: isQuoteLoading,
 		error: quoteError,
 		refetch: refetchQuote,
-	} = useCartQuote(User?.lat, User?.lng, deliveryType, !!Cart?.cart_item?.length);
+	} = useCartQuote(
+		User?.lat,
+		User?.lng,
+		deliveryType,
+		!!Cart?.cart_item?.length,
+		// The chosen method, not a fixed "mpesa". `mpesa_payment_discount` comes
+		// off when the customer is not paying cash, and the server defaults this
+		// to "mpesa" — so quoting without it showed every basket the discounted
+		// figure and then charged a cash order the undiscounted one.
+		PaymentMethod ?? "mpesa",
+	);
 
 	// Per-option fees, used only to label the delivery-type selector.
 	const { data: deliveryFeeData } = useDeliveryFee(
@@ -156,7 +170,6 @@ export default function Cart() {
 	const [SuccessModal, setSuccessModal] =useState(false)
 	const [ErrorMessage, setErrorMessage] =useState("")
 	const [ErrorModal, setErrorModal] =useState(false)
-	const [PaymentMethod, setPaymentMethod ] = useState<string | null>(null) // mpesa or card/stripe
 	const [idempotencyKey, setIdempotencyKey] = useState<string>(() => randomUUID())
 	const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
 	const [pollAttempts, setPollAttempts] = useState(0)
@@ -208,6 +221,7 @@ export default function Cart() {
 	const bottle_fee_total = quote?.bottle_deposit ?? "0";
 	const debt_settlement = quote?.debt_settlement ?? "0";
 	const welcome_discount = quote?.welcome_discount ?? "0";
+	const mpesa_discount = quote?.mpesa_discount ?? "0";
 	const wallet_discount = quote?.wallet_discount ?? "0";
 	const finalTotal = quote?.total ?? "0";
 
@@ -697,6 +711,19 @@ export default function Cart() {
 															{formatMoney(deliveryFee)}
 														</Text>
 													</View>
+													{/* A caption, not a line. `delivery_markup` is platform
+													    margin *inside* `delivery_fee` — the server says so at
+													    the field itself and leaves it out of the `gross` sum —
+													    so giving it its own row in the amount column made the
+													    column stop adding up: the lines summed to KSH 152.12
+													    against a total of KSH 144.40, adrift by exactly the
+													    markup. Shown here it stays visible without being
+													    counted twice. */}
+													{!isZeroMoney(deliveryMarkup) && (
+														<Text className={`text-xs italic mt-1 ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+															Includes {formatMoney(deliveryMarkup)} logistics handling.
+														</Text>
+													)}
 													{vendor_type === 'wholesale_b2b' && (
 														<Text className={`text-xs italic mt-1 ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
 															* 0% commission on delivery. Fees are set directly by the wholesale vendor.
@@ -726,16 +753,7 @@ export default function Cart() {
 														</Text>
 													</View>
 												)}
-												{!isZeroMoney(deliveryMarkup) && (
-													<View className="flex-row justify-between items-center pt-2">
-														<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
-															Logistics Handling
-														</Text>
-														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															{formatMoney(deliveryMarkup)}
-														</Text>
-													</View>
-												)}
+
 												
 												{/* --- Surcharges --- */}
 												{!isZeroMoney(payload_surcharge) && (
@@ -761,6 +779,31 @@ export default function Cart() {
 														</View>
 														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
 															{formatMoney(staircase_surcharge)}
+														</Text>
+													</View>
+												)}
+												{/* Paying by M-Pesa instead of cash is worth
+												    `mpesa_payment_discount` off the total. It was
+												    applied by the server and rendered nowhere, so the
+												    total sat below the sum of the lines with nothing
+												    accounting for the difference — the same defect as
+												    `debt_settlement`, and self-defeating here: the
+												    whole reason this is framed as a discount rather
+												    than a cash surcharge is so the customer sees they
+												    are being rewarded. A reward nobody is shown steers
+												    nobody. */}
+												{!isZeroMoney(mpesa_discount) && (
+													<View className="flex-row justify-between items-center pt-2">
+														<View className="flex-col flex-1 pr-3">
+															<Text className="text-base font-sans-medium" style={{ color: BRAND.primary }}>
+																M-Pesa Payment Discount
+															</Text>
+															<Text className={`text-xs italic ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+																For paying by M-Pesa instead of cash
+															</Text>
+														</View>
+														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
+															- {formatMoney(mpesa_discount)}
 														</Text>
 													</View>
 												)}
