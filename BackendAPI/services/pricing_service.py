@@ -187,6 +187,10 @@ class OrderQuote:
     #: surcharge — see `compute_order_quote`.
     mpesa_discount: Decimal
     wallet_discount: Decimal
+    #: What the whole-shilling rounding of `total` added or removed, so the
+    #: itemised column the customer reads adds up to the figure they are
+    #: charged. Never a business decision — see `compute_order_quote`.
+    rounding_adjustment: Decimal
 
     # ── Result ──
     total: Decimal  # whole shillings — this is what we charge AND persist
@@ -247,6 +251,7 @@ class OrderQuote:
             "welcome_discount": money_str(self.welcome_discount),
             "mpesa_discount": money_str(self.mpesa_discount),
             "wallet_discount": money_str(self.wallet_discount),
+            "rounding_adjustment": money_str(self.rounding_adjustment),
             "total": money_str(self.total),
             "surge_active": self.surge_active,
             "is_welcome_offer": self.is_welcome_offer,
@@ -560,9 +565,27 @@ async def compute_order_quote(
     # Whole shillings: M-Pesa cannot push a fraction, and persisting anything
     # else would reintroduce the charged-vs-recorded drift this module exists to
     # eliminate.
-    total = (after_welcome - wallet_discount).quantize(WHOLE, rounding=ROUND_HALF_UP)
+    net = _money(after_welcome - wallet_discount)
+    total = net.quantize(WHOLE, rounding=ROUND_HALF_UP)
     if total < min_chargeable_total():
         total = min_chargeable_total()
+
+    # What that rounding moved, reported as its own figure.
+    #
+    # Every line above is exact to the cent, and `total` is not — the delivery
+    # fee alone is `base + per_km × distance` with distance to two decimals, so
+    # four retail deliveries in five beyond the short hop land on a fraction of
+    # a shilling. The customer could add the column on the cart screen and get a
+    # different number from the one on the button, by up to 50 cents in either
+    # direction, with nothing on the screen accounting for the difference. A
+    # total that does not equal its own itemisation is the exact complaint this
+    # module was built to answer; that it was small made it quieter, not
+    # smaller.
+    #
+    # It is deliberately *not* folded into another line. Rounding the delivery
+    # fee, say, would make the cart reconcile by telling the customer a
+    # different delivery fee from the one the rider is paid out of.
+    rounding_adjustment = _money(total - net)
 
     revenue = calculate_revenue_splits(
         product_total=product_subtotal,
@@ -599,6 +622,7 @@ async def compute_order_quote(
         welcome_discount=welcome_discount,
         mpesa_discount=mpesa_discount,
         wallet_discount=wallet_discount,
+        rounding_adjustment=rounding_adjustment,
         total=total,
         surge_active=surge_active,
         is_welcome_offer=is_welcome_offer,
@@ -616,7 +640,26 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None, vendor=None) ->
     `vendor` is optional so a caller that has priced without loading the row
     still validates everything else; every checkout path passes it.
     """
-    # 1. Capacity + wholesale MOQ + retail distance/quantity caps.
+    # 1. The store can be located at all.
+    #
+    # `calculate_delivery_fee` guards with `if not all([lat_from, ...])` and
+    # falls back to distance **0.0**, which then prices as a short hop and
+    # sails through the radius check below — a store nobody can measure reads
+    # as a store next door. Discovery already refuses these
+    # (`within_service_radius` carries `Vendor.location IS NOT NULL`), but a
+    # cart is reached by other routes: a favourite, a past order, a shared
+    # link, a notification's `action_url`. The same reachability argument the
+    # product-withdrawal rule is built on applies here.
+    if quote.lat_from is None or quote.lng_from is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This store has not set its location yet, so we cannot work out "
+                "delivery to your address. Please choose another store."
+            ),
+        )
+
+    # 2. Capacity + wholesale MOQ + retail distance/quantity caps.
     DispatchPolicy.validate_cart_preflight(
         vendor_type=quote.vendor_type,
         distance_km=quote.distance_km,
@@ -624,19 +667,47 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None, vendor=None) ->
         total_weight_kg=float(quote.total_weight_kg),
     )
 
-    # 2. Stock availability.
+    # 3. The goods are still on sale, and there are enough of them.
+    #
+    # `live_product()` runs on the way *into* the cart (`get_product_for_cart`)
+    # and never again, so it only ever answered "was this on sale when it was
+    # added". A cart is a database row with no expiry — a customer can add a
+    # bottle, close the app for a fortnight and come back to it — and in the
+    # meantime the vendor may have withdrawn the product (`deleted_at`, which is
+    # how products are removed here, never a delete) or simply switched it off
+    # (`is_available`). Neither was re-checked anywhere on the checkout path, so
+    # both went through: the customer paid, and the store received an order for
+    # something it had deliberately taken down.
+    #
+    # Withdrawal is checked before availability because it is the stronger
+    # statement, and stock last: "we no longer sell this" and "we have run out"
+    # are different sentences and the customer's next move differs for each.
     for item in items:
         product = getattr(item, "product", None)
-        if product is None or product.stock < item.quantity:
+        name = getattr(product, "name", None) or "This item"
+
+        if product is None or getattr(product, "deleted_at", None) is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{name}' is no longer sold by this store. Please remove it from your cart.",
+            )
+
+        if getattr(product, "is_available", True) is False:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{name}' is currently unavailable at this store. Please remove it from your cart.",
+            )
+
+        if product.stock < item.quantity:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Insufficient stock for '{product.name if product else 'unknown'}'. "
-                    f"Available: {product.stock if product else 0}, requested: {item.quantity}."
+                    f"Insufficient stock for '{name}'. "
+                    f"Available: {product.stock}, requested: {item.quantity}."
                 ),
             )
 
-    # 3. Outstanding debt. Below the ceiling it is collected on this order
+    # 4. Outstanding debt. Below the ceiling it is collected on this order
     #    (`quote.debt_settlement`) rather than refused; only a balance the
     #    platform is no longer willing to carry blocks checkout, and the message
     #    names the mechanism instead of leaving the customer with no way out.
@@ -653,13 +724,13 @@ def validate_quote(quote: OrderQuote, items: list, *, user=None, vendor=None) ->
                 ),
             )
 
-    # 4. Self-dealing.
+    # 5. Self-dealing.
     if user is not None and quote.vendor_id is not None:
         # Vendor identity is checked in create_order where the Vendor row is
         # loaded; nothing to assert here without another query.
         pass
 
-    # 5. The store's own minimum, on the goods rather than the total — see
+    # 6. The store's own minimum, on the goods rather than the total — see
     #    `vendor_availability.assert_meets_minimum`. Here rather than beside the
     #    open/closed check because this one is basket arithmetic, and putting it
     #    in `validate_quote` reaches the quote, the pre-push validation and

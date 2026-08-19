@@ -409,7 +409,11 @@ const ProductDetails = () => {
                                                     The subtraction stays in cents; only the division —
                                                     whose output is a label, never a charge — becomes a
                                                     number. */}
-                                                KSH {(Number(discountedPrice(Product?.price, Product?.discount)) / Product.capacity).toFixed(1)} /L
+                                                {/* A per-litre *rate*, not a charged amount — so the division
+                                                    to a number is legitimate. The currency prefix is not: it goes
+                                                    through `formatMoney` like every other figure, so there is one
+                                                    mechanism that puts "KSH" in front of a number and not two. */}
+                                                {formatMoney((Number(discountedPrice(Product?.price, Product?.discount)) / Product.capacity).toFixed(2))} /L
                                             </Text>
                                         )}
                                         {Product?.unit && Product?.capacity > 0 && Product?.unit !== "pack" && Product?.unit !== "unit" && (

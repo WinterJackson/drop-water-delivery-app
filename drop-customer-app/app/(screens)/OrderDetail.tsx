@@ -665,7 +665,7 @@ export default function OrderDetail() {
                                     {item.product?.name || "Product"}
                                 </Text>
                                 <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                                    Qty: {item.quantity} × KSH {item.price}
+                                    Qty: {item.quantity} × {formatMoney(item.price)}
                                 </Text>
                             </View>
                             <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>

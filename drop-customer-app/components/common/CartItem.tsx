@@ -12,7 +12,7 @@ import { useChangeCartQty, useDeleteCartItem } from "@/hooks/queries/useCart";
 import { Toast } from "@/lib/toast";
 import { Ionicons } from "@expo/vector-icons";
 import { BRAND } from "../../constants/brandColors";
-import { formatMoney } from "@/utils/money";
+import { formatMoney, multiplyMoney } from "@/utils/money";
 
 type Props = {
 	data?: any;
@@ -163,7 +163,12 @@ const CartItem = ({ data, func }: Props) => {
 				<View className="gap-4 items-end justify-between py-1">
 					{/* subtotal */}
 					<Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-black"}`}>
-						KSH {Math.round((data?.price * data?.quantity) * 100) / 100}
+						{/* `data.price` is a decimal *string*. `"249.50" * 3` coerces it to a
+						    JS float, and the `* 100` round trip is the exact defect
+						    `utils/money.ts` exists to prevent — it also rendered "KSH 748.5"
+						    rather than "KSH 748.50", on the line the customer checks their
+						    basket against. */}
+						{formatMoney(multiplyMoney(data?.price, data?.quantity ?? 0))}
 					</Text>
 					{/* <--------<REMOVE BUTTON>--------> */}
 					<PressableScale accessibilityLabel="Remove this item from your cart"

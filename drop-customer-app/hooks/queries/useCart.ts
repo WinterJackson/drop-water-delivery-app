@@ -42,6 +42,14 @@ export interface CartQuote {
     welcome_discount: string;
     mpesa_discount: string;
     wallet_discount: string;
+    /**
+     * Signed. What rounding `total` to a whole shilling added or removed —
+     * M-Pesa moves whole shillings, and every line above is exact to the cent,
+     * so without this the itemised column does not add up to the figure on the
+     * button. Not a business decision and never a fee: rendered only when it is
+     * non-zero.
+     */
+    rounding_adjustment: string;
     total: string;
     surge_active: boolean;
     is_welcome_offer: boolean;

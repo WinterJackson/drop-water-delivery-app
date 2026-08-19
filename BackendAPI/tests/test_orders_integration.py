@@ -128,6 +128,9 @@ class TestOrdersIntegration:
         cart_item.quantity = 2
         cart_item.product.stock = 50
         cart_item.product.name = "Dasani 20L"
+        # On sale and not withdrawn — a bare MagicMock is neither.
+        cart_item.product.deleted_at = None
+        cart_item.product.is_available = True
 
         cart = MagicMock()
         cart.id = cart_id
@@ -146,6 +149,7 @@ class TestOrdersIntegration:
             debt_settlement=Decimal("0.00"),
             welcome_discount=Decimal("0.00"),
             mpesa_discount=Decimal('0.00'), wallet_discount=Decimal("0.00"),
+            rounding_adjustment=Decimal("0.00"),
             total=Decimal("590"), surge_active=True, is_welcome_offer=False,
             revenue={
                 "vendor_commission": 25.0, "service_fee": 12.0, "rider_commission": 6.8,

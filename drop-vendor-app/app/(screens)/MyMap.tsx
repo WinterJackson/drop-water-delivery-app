@@ -25,6 +25,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { ScrollView } from "react-native-gesture-handler";
+import { formatMoney } from "@/utils/money";
 
 import type MapViewType from 'react-native-maps';
 import type {
@@ -264,7 +265,7 @@ export default function MyMap() {
                         key={`active-${order.id || idx}`}
                         coordinate={{ latitude: Number(order.lat), longitude: Number(order.lng) }}
                         title={`Drop-off #${order.id?.substring(0, 8)}`}
-                        description={`${order.order_status} · KSH ${order.total_amount}`}
+                        description={`${order.order_status} · ${formatMoney(order.total_amount)}`}
                         pinColor={STATUS_COLORS[order.order_status ?? ""] || "red"}
                     />
                 );
@@ -330,7 +331,7 @@ export default function MyMap() {
                         key={`delivered-${order.id || idx}`}
                         coordinate={{ latitude: Number(order.lat), longitude: Number(order.lng) }}
                         title={`Delivered #${order.id?.substring(0, 8)}`}
-                        description={`KSH ${order.total_amount}`}
+                        description={formatMoney(order.total_amount)}
                         pinColor="green"
                         opacity={0.5}
                     />

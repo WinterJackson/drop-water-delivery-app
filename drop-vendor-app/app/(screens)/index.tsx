@@ -28,6 +28,7 @@ import StoreSwitcherSheet, { type StoreSwitcherSheetRef } from "@/components/das
 import LowStockCard from "@/components/dashboard/LowStockCard";
 import StorePauseCard from "@/components/dashboard/StorePauseCard";
 import { useActiveStore } from "@/stores/activeStoreStore";
+import { formatMoney } from "@/utils/money";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -228,7 +229,7 @@ export default function Dashboard() {
               <StatCard title="Pending" value={dashboard?.pending_orders || 0} icon="time-outline" color={BRAND.primary} />
               <StatCard
                 title="Revenue"
-                value={`KSH ${dashboard?.total_revenue?.toLocaleString() || 0}`}
+                value={formatMoney(dashboard?.total_revenue ?? 0)}
                 icon="cash-outline" color={BRAND.primary}
               />
               <StatCard title="Products" value={dashboard?.product_count || 0} icon="pricetags-outline" color={BRAND.primary} />

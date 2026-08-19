@@ -26,7 +26,7 @@ import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts"
 import { PERMISSIONS, useCan } from "@/hooks/queries/useVendorProfile";
 import { useWalletSummary } from "@/hooks/queries/useWallet";
 import { useRef, useMemo, useCallback } from "react";
-import { compareMoney, formatMoney, isZeroMoney, subtractMoney, sumMoney } from "@/utils/money";
+import { compareMoney, formatMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 export default function OrderDetail() {
   const { id } = useLocalSearchParams();
@@ -380,7 +380,10 @@ export default function OrderDetail() {
                   </Text>
                 </View>
                 <Text className={`font-sans-extrabold ${darkTheme ? "text-white" : "text-gray-900"}`}>
-                  KSH {item.price * item.quantity}
+                  {/* `item.price` is a decimal string; `"249.50" * 3` is a float
+                      multiplication that renders "KSH 748.5" on the vendor's own
+                      copy of a line the customer sees priced correctly. */}
+                  {formatMoney(multiplyMoney(item.price, item.quantity ?? 0))}
                 </Text>
               </View>
             ))}

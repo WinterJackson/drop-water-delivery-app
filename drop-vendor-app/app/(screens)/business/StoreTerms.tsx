@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { formatMoney } from "@/utils/money";
 
 /**
  * The terms this store trades on: will it take cash, and what is the smallest
@@ -198,8 +199,8 @@ export default function StoreTerms() {
                             }`}
                         >
                             {overCeiling
-                                ? `The highest allowed is KSH ${ceiling.toLocaleString()}. A minimum above that hides you from customers who could not have met it, without showing you as closed.`
-                                : `Up to KSH ${ceiling.toLocaleString()}.`}
+                                ? `The highest allowed is ${formatMoney(ceiling)}. A minimum above that hides you from customers who could not have met it, without showing you as closed.`
+                                : `Up to ${formatMoney(ceiling)}.`}
                         </Text>
 
                         <PressableScale

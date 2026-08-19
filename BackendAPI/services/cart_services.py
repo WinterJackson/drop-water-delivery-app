@@ -34,6 +34,57 @@ async def fetch_cart(user_id: UUID, session: AsyncSession) -> Cart:
           
   return cart
 
+async def _resync_cart_prices(cart, session: AsyncSession) -> bool:
+  """Re-price every line against the product as it stands right now.
+
+  `CartItem.price` and `CartItem.Subtotal` are written once, when the item is
+  added, and nothing anywhere ever updated them again. A cart is a database row
+  with no expiry, so "once" means indefinitely: a customer adds a 20 L bottle at
+  KSH 430, the vendor puts it on offer at KSH 370, and the shelf, the product
+  page and the Offers grid all say 370 while the cart says 430 — and
+  `compute_order_quote` reads `Subtotal`, so 430 is also what M-Pesa takes. Two
+  prices for the same bottle, on two screens of the same app, at the same
+  moment.
+
+  It is wrong in both directions. Upward, the store is paid last month's price
+  and its commission is computed off it; downward, the customer is charged more
+  than the price they are looking at, which is the half that produces a
+  complaint.
+
+  The live figure is `price - discount`, exactly as `add_to_cart_service`
+  computes it — one definition of what a bottle costs, not two.
+
+  Returns whether anything moved, so the caller only commits when it has to. A
+  cart mid-checkout is left alone: `is_locked` means an STK push is out with a
+  figure already on the customer's phone, and re-pricing underneath it is how
+  the charged amount and the recorded amount come apart again.
+  """
+  if getattr(cart, "is_locked", False) or not cart.cart_item:
+      return False
+
+  changed = False
+  for item in cart.cart_item:
+      product = getattr(item, "product", None)
+      if product is None:
+          continue
+      live_price = Decimal(product.price) - Decimal(product.discount or 0)
+      if live_price < 0:
+          live_price = Decimal(0)
+      if Decimal(item.price) != live_price:
+          item.price = live_price
+          changed = True
+      expected_subtotal = live_price * int(item.quantity or 0)
+      if Decimal(item.Subtotal or 0) != expected_subtotal:
+          item.Subtotal = expected_subtotal
+          changed = True
+
+  if changed:
+      cart.total_amount = sum((Decimal(i.Subtotal or 0) for i in cart.cart_item), Decimal(0))
+      cart.items_count = len(cart.cart_item)
+      await session.commit()
+  return changed
+
+
 async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetailed:
   query = select(Cart).where(Cart.customer_id == user_id).options(
     joinedload(Cart.cart_item).joinedload(CartItem.product).joinedload(Product.vendor),
@@ -44,6 +95,9 @@ async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetai
   if not cart:
     return None
   cart.cart_item.sort(key=lambda item: item.id)  # or item.product.name.lower()
+
+  # Before anything reads a price off this cart — the screen or the quote.
+  await _resync_cart_prices(cart, session)
 
   # Metadata the cart screen needs to explain the platform's rules before the
   # customer reaches checkout. The fee itself comes from `pricing_service` so this

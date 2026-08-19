@@ -261,7 +261,7 @@ export default function WalletScreen() {
                 <Text className={`font-sans-bold text-lg ${darkTheme ? "text-white" : "text-slate-900"}`}>Free Cashout Status</Text>
                 <Text className={`text-xs ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
                   {!isZeroMoney(withdrawalFee)
-                    ? `Smaller withdrawals cost KSH ${withdrawalFee.toLocaleString()}`
+                    ? `Smaller withdrawals cost ${formatMoney(withdrawalFee)}`
                     : "Withdrawals are free"}
                 </Text>
               </View>

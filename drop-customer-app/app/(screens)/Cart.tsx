@@ -47,7 +47,7 @@ import { RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import PressableScale from "@/components/ui/PressableScale";
-import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney, subtractMoney } from "@/utils/money";
+import { compareMoney, formatMoney, formatMoneyShort, isNegativeMoney, isZeroMoney, subtractMoney } from "@/utils/money";
 
 const { width, height } = Dimensions.get("screen");
 
@@ -223,6 +223,10 @@ export default function Cart() {
 	const welcome_discount = quote?.welcome_discount ?? "0";
 	const mpesa_discount = quote?.mpesa_discount ?? "0";
 	const wallet_discount = quote?.wallet_discount ?? "0";
+	// Signed: negative when the rounding takes money off. Rendered whenever it
+	// is not zero, because a column that does not add up to the button is the
+	// complaint the itemised breakdown exists to answer.
+	const rounding_adjustment = quote?.rounding_adjustment ?? "0";
 	const finalTotal = quote?.total ?? "0";
 
 	// Platform rules, surfaced before checkout rather than as a 400 afterwards.
@@ -819,6 +823,24 @@ export default function Cart() {
 														</View>
 														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
 															- {formatMoney(wallet_discount)}
+														</Text>
+													</View>
+												)}
+
+												{!isZeroMoney(rounding_adjustment) && (
+													<View className="flex-row justify-between items-center pt-2">
+														<View className="flex-col flex-1 pr-3">
+															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
+																Rounding
+															</Text>
+															<Text className={`text-xs italic ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+																M-Pesa charges whole shillings only
+															</Text>
+														</View>
+														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
+															{isNegativeMoney(rounding_adjustment)
+																? `- ${formatMoney(subtractMoney("0", rounding_adjustment))}`
+																: `+ ${formatMoney(rounding_adjustment)}`}
 														</Text>
 													</View>
 												)}

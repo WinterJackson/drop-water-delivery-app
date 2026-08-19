@@ -26,7 +26,11 @@ def _cart_item(vendor_id, *, quantity=1, price="100.00", capacity=20, weight=20.
     item.price = Decimal(price)
     item.Subtotal = Decimal(price) * quantity
     item.product = MagicMock(
-        stock=stock, name="Water 20L", weight_kg=weight, capacity=capacity, vendor_id=vendor_id
+        stock=stock, name="Water 20L", weight_kg=weight, capacity=capacity, vendor_id=vendor_id,
+        # A real product row has these; a bare MagicMock answers a truthy
+        # sentinel to both, which reads as "withdrawn" and "switched off" to the
+        # gates in `validate_quote`.
+        deleted_at=None, is_available=True,
     )
     return item
 

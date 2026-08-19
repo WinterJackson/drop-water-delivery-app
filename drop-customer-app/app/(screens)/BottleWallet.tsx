@@ -95,7 +95,7 @@ export default function BottleWallet() {
   const handleTopUp = async () => {
     const amount = Number(topUpAmount);
     if (!topUpAmount || isNaN(amount) || amount < MIN_TOP_UP_KSH) {
-      Toast.error("Invalid amount", `Enter at least KSH ${MIN_TOP_UP_KSH} to top up.`);
+      Toast.error("Invalid amount", `Enter at least ${formatMoney(MIN_TOP_UP_KSH)} to top up.`);
       return;
     }
     const msisdn = toMsisdn(phoneNumber);
@@ -122,7 +122,7 @@ export default function BottleWallet() {
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
     if (!withdrawAmount || isNaN(amount) || amount < MIN_WITHDRAWAL_KSH) {
-      Toast.error("Invalid amount", `Enter at least KSH ${MIN_WITHDRAWAL_KSH} to withdraw.`);
+      Toast.error("Invalid amount", `Enter at least ${formatMoney(MIN_WITHDRAWAL_KSH)} to withdraw.`);
       return;
     }
     const msisdn = toMsisdn(phoneNumber);

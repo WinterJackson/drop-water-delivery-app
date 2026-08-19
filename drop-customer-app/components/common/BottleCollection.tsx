@@ -188,7 +188,7 @@ export function BottleCollectionCard({
                     if (result.status === "settled") {
                       Toast.success(
                         "Deposit returned",
-                        `KSH ${result.amount_refunded} is back in your wallet.`,
+                        `${formatMoney(result.amount_refunded)} is back in your wallet.`,
                       );
                     } else if (result.status === "disputed") {
                       // Deliberately not framed as an error. Nothing is wrong
