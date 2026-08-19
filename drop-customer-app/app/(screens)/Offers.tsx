@@ -1,7 +1,7 @@
 import React, { useContext, useCallback, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
-import { View, StatusBar, RefreshControl, Dimensions, Image } from "react-native";
+import { View, StatusBar, RefreshControl, Dimensions } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { Stack, useRouter } from "expo-router";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -11,10 +11,9 @@ import { useProductsWithOffer, offerRows } from "@/hooks/queries/useProducts";
 import { keepPaging } from "@/utils/paging";
 import { OfferItemSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { PressableScale } from "@/components/ui/PressableScale";
-import { Ionicons } from "@expo/vector-icons";
-import { discountPercent, discountedPrice, formatMoney } from "@/utils/money";
-import { estimateDeliveryTime, hasEstimate } from "@/utils/distance";
 import { useUserDetails } from "@/hooks/queries/useUser";
+import ProductCard from "@/components/common/ProductCard";
+import { useAddToCartAction } from "@/hooks/useAddToCartAction";
 
 const { width } = Dimensions.get("window");
 
@@ -24,6 +23,7 @@ export default function Offers() {
     const router = useRouter();
 
     const { data: User } = useUserDetails();
+    const { addToCart, isAdding } = useAddToCartAction();
     const offersQuery = useProductsWithOffer();
     const { isLoading, isFetchingNextPage, hasNextPage, refetch } = offersQuery;
     const Offers = offerRows(offersQuery.data);
@@ -45,80 +45,29 @@ export default function Offers() {
         );
     };
 
-    const renderItem = ({ item }: { item: any }) => {
-        const percentageOffer = discountPercent(item.price, item.discount);
-        return (
-            <View className={`items-center`} style={{ width: "100%", paddingHorizontal: 8, paddingVertical: 10 }}>
-                <PressableScale activeOpacity={0.7} onPress={() => router.push(`/product-details/${item.id}`)} className="w-full">
-                    <View className={`rounded overflow-hidden relative ${darkTheme?"bg-black":"bg-white "} w-full`}>
-                        {/* Offer Badge */}
-                        <View className={`absolute w-[60px] bg-red-500 z-20 right-0 items-center justify-center rotate-45 translate-x-4 translate-y-2`}>
-                            <Text className={`text-white font-sans-semibold text-xs`}>{percentageOffer}%</Text>
-                        </View>
-                        {/* image */}
-                        <View className={`w-full`} style={{ height: width * 0.3 }}>
-                            <Image source={{ uri: item.image_url }} className="w-full h-full rounded" resizeMode="cover" />
-                        </View>
-                        {/* Name, pricing and delivery time.
-                            Height is left to the content. It was `h-[50px]`
-                            with the price and the estimate side by side on one
-                            `justify-between` row, which does not fit a card
-                            this wide: the estimate was clipped mid-word by the
-                            card's edge, so "40 mins" reached the customer as
-                            "40 m". A fixed height cannot adapt to a longer
-                            price, a longer name or a larger system font. */}
-                        <View className={`w-full px-1 py-2`}>
-                            {/* `numberOfLines`, not `substring(0, 20)`. Cutting
-                                at a character count ignores how wide the glyphs
-                                actually are, so it truncated names that fit and
-                                left ones that did not still overflowing — and it
-                                appended "..." to text the renderer would have
-                                ellipsised itself. */}
-                            <Text
-                                className={`${darkTheme ? "text-white" : " text-black"}`}
-                                numberOfLines={1}
-                            >
-                                {item.name}
-                            </Text>
-                            {/* price and discount */}
-                            <View className={`flex-row gap-2 items-center mt-0.5`}>
-                                <Text className={`font-sans-semibold ${darkTheme ? "text-white" : " text-black"}`}>
-                                    {formatMoney(discountedPrice(item.price, item.discount))}
-                                </Text>
-                                {!!item.discount && (
-                                    <Text style={{ textDecorationLine: "line-through" }} className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
-                                        {formatMoney(item.price)}
-                                    </Text>
-                                )}
-                            </View>
-                            {/* Est. delivery, measured from this store to this
-                                customer. It was the string "40 mins", hard-coded
-                                — the same figure on every card whatever the
-                                distance, on the one screen built for comparing
-                                offers across stores. `estimateDeliveryTime` is
-                                what the rest of the app quotes from. */}
-                            {hasEstimate(item.vendor?.lat, item.vendor?.lng, User?.lat, User?.lng) && (
-                                <View className="flex-row gap-1 items-center mt-1">
-                                    <Ionicons name="bicycle" size={14} color={BRAND.primary} />
-                                    <Text
-                                        className={darkTheme ? "text-gray-300 text-xs" : "text-gray-700 text-xs"}
-                                        numberOfLines={1}
-                                    >
-                                        {estimateDeliveryTime(
-                                            item.vendor?.lat ?? undefined,
-                                            item.vendor?.lng ?? undefined,
-                                            User?.lat ?? undefined,
-                                            User?.lng ?? undefined,
-                                        )}
-                                    </Text>
-                                </View>
-                            )}
-                        </View>
-                    </View>
-                </PressableScale>
-            </View>
-        );
-    };
+    /* Two columns with an even gutter on both sides of both cards.
+       `GRID_GAP` is applied as half-padding per cell, so the outer margins and
+       the middle channel are the same width — a wrapper that only padded
+       between cards leaves the row hugging the screen edges. The card is told
+       its exact pixel width rather than `100%`, because it sizes its own square
+       image from that number. */
+    const GRID_GAP = 12;
+    const cardWidth = Math.floor((width - GRID_GAP * 3) / 2);
+
+    const renderItem = ({ item }: { item: any }) => (
+        <View style={{ paddingHorizontal: GRID_GAP / 2, paddingBottom: GRID_GAP, alignItems: "center" }}>
+            <ProductCard
+                item={item}
+                width={cardWidth}
+                darkTheme={darkTheme}
+                onPress={() => router.push(`/product-details/${item.id}`)}
+                onAddToCart={() => addToCart(item.id)}
+                isAdding={isAdding(item.id)}
+                userLat={User?.lat}
+                userLng={User?.lng}
+            />
+        </View>
+    );
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : "bg-white"}`}>
@@ -158,7 +107,7 @@ export default function Offers() {
                     renderItem={renderItem}
                     keyExtractor={(item) => item.id.toString()}
                     numColumns={2}
-                    contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 120, paddingTop: 10 }}
+                    contentContainerStyle={{ paddingHorizontal: GRID_GAP / 2, paddingBottom: 120, paddingTop: GRID_GAP }}
                     ListEmptyComponent={renderEmpty}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "#fff" : "#000"} />

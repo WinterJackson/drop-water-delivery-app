@@ -14,16 +14,13 @@ import {
     FlatList,
 } from "react-native";
 import { Text } from '@/components/ui/Text';
-import { useAddToCart, isVendorConflict, vendorConflictInfo } from "@/hooks/queries/useCart";
 import { estimateDeliveryTime } from "@/utils/distance";
 import { Skeleton, SkeletonText, SkeletonAvatar } from "../ui/Skeleton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Ionicons } from "@expo/vector-icons";
-import { Popup } from "@/lib/popup";
-import { Toast } from "@/lib/toast";
-import { errorMessage } from "@/API/errors";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
-import { discountPercent, discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
+import ProductCard from "@/components/common/ProductCard";
+import { useAddToCartAction } from "@/hooks/useAddToCartAction";
 
 type Props = {
 	title: string;
@@ -44,48 +41,11 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 	const { currentTheme } = useContext(UIThemeContext);
 	const { data: User } = useUserDetails()
 	const darkTheme = currentTheme === "dark";
-	const { mutate: addToCartMutation, isPending: AddToCartLoading } = useAddToCart();
+	const { addToCart, isAdding } = useAddToCartAction();
 
-	const [clickedItemId, setClickedItemId] = useState<string | null>(null);
 
 	// <----------------FUNCTIONS----------------> 
 	// API CALLS
-	const AddToCart = (id: string, forceReplace = false) => {
-		setClickedItemId(id);
-		addToCartMutation({
-			id: id,
-			quantity: 1,
-			force_replace: forceReplace,
-		}, {
-			onSettled: () => {
-				setClickedItemId(null);
-			},
-			onError: (error: Error) => {
-				// The vendor name lives on `ApiError.detail`; reading it off the
-				// error itself rendered "Your cart has items from undefined."
-				if (isVendorConflict(error)) {
-					const { existingVendor } = vendorConflictInfo(error);
-					Popup.show({
-						title: "Replace Cart?",
-						message: `Your cart has items from ${existingVendor}. Adding this will replace your current cart.`,
-						cancelText: "Cancel",
-						confirmText: "Replace",
-						isDestructive: true,
-						onConfirm: () => {
-							Popup.hide();
-							AddToCart(id, true);
-						}
-					});
-					return;
-				}
-				// Every other failure used to be swallowed entirely: tapping "add"
-				// on a sold-out item from the home screen did nothing at all, with
-				// no explanation. This is the app's busiest add-to-cart surface.
-				Toast.error("Couldn't add to cart", errorMessage(error, "Please try again."));
-			}
-		});
-	}
-
 	if (!loaded && (!data || data.length === 0)) {
 		return (
 			<View className={` ${darkTheme ? "" : ""} shadow-2x`}>
@@ -154,180 +114,81 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 					showsHorizontalScrollIndicator={false}
 					contentContainerStyle={{ paddingHorizontal: 20 }}
 					ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
-					renderItem={({ item, index }: { item: any, index: number }) => (
-						<PressableScale
-							onPress={() => {
-								if (type === "product") {
-									router.push(`/product-details/${item.id}`);
-								} else {
-									router.push(`/vendor/${item.id}`);
-								}
-							}}
-							activeOpacity={0.9}
-						>
-							<View
-								className={`overflow-hidden relative h-full border ${darkTheme
-										? "bg-surface-container border-outline-variant"
-										: "bg-white border-gray-200"
-									}`}
-								style={darkTheme ? { width: w * 0.38, borderRadius: 24 } : { width: w * 0.38, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+					renderItem={({ item }: { item: any }) =>
+						/* Products render `components/common/ProductCard` — the same
+						   component Deals & Offers uses. This markup used to live
+						   here, and the offers screen carried its own copy with a
+						   4pt radius against this one's 24, a bare `bg-black`
+						   against a bordered surface, a plain `Image` against
+						   `expo-image`, a 60pt discount ribbon against 65, and no
+						   add control at all. Two hand-kept copies of one card
+						   drift by definition; there is now one. */
+						type === "product" ? (
+							<ProductCard
+								item={item}
+								width={w * 0.38}
+								darkTheme={darkTheme}
+								onPress={() => router.push(`/product-details/${item.id}`)}
+								onAddToCart={() => addToCart(item.id)}
+								isAdding={isAdding(item.id)}
+								userLat={User?.lat}
+								userLng={User?.lng}
+							/>
+						) : (
+							<PressableScale
+								onPress={() => router.push(`/vendor/${item.id}`)}
+								activeOpacity={0.9}
 							>
-								{type === "product" && !isZeroMoney(item.discount) && (
-									<View
-										className={`absolute w-[65px]  bg-red-500 z-20 top-0 right-0 items-center justify-center rotate-45 translate-x-5 translate-y-2`}
-									>
-										<Text className={`text-white font-sans-semibold`}>
-											{item.price ? `${discountPercent(item.price, item.discount)}%` : "Sale"}
-										</Text>
+								<View
+									className={`overflow-hidden relative border ${darkTheme
+											? "bg-surface-container border-outline-variant"
+											: "bg-white border-gray-200"
+										}`}
+									style={darkTheme ? { width: w * 0.38, borderRadius: 24 } : { width: w * 0.38, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+								>
+									{/* IMAGE (PERFECT SQUARE) */}
+									<View className="w-full" style={{ height: w * 0.38 }}>
+										<Image
+											source={{ uri: item.profile_pic }}
+											style={{ width: '100%', height: '100%', borderRadius: 24 }}
+											contentFit="cover"
+											transition={200}
+										/>
 									</View>
-								)}
-								{/* IMAGE (PERFECT SQUARE) */}
-								<View className="w-full" style={{ height: w * 0.38 }}>
-									{
-										type == "product" ? (
-											<Image
-												source={{ uri: item.image_url }}
-												style={{ width: '100%', height: '100%', borderRadius: 24 }}
-												contentFit="cover"
-												transition={200}
-											/>
-										) : (
-											<Image
-												source={{ uri: item.profile_pic }}
-												style={{ width: '100%', height: '100%', borderRadius: 24 }}
-												contentFit="cover"
-												transition={200}
-											/>
-										)
-									}
-								</View>
-								{/* TEXT CONTENT WRAPPER — sized by its content, never `flex-1`.
-								    The card is a fixed-width, auto-height column, so
-								    `flex-1` resolves to `flexBasis: 0` with no free
-								    space to grow into and the row collapses to zero
-								    height under the card's `overflow-hidden`. Same
-								    defect as the home grid: the name and the price
-								    are there, laid out, and clipped to nothing. */}
-								{/* Name, price and the add control share one row, and the row
-								    owns the geometry. The button used to be absolutely
-								    positioned inside this block (bottom-8 right-8), which took
-								    it out of flow — the name knew nothing about it, ran
-								    underneath, and `numberOfLines={1}` ellipsised against the
-								    card edge instead of against the button, so the shelf label
-								    read "Bale 1L Branded (12-p[cart]ck)". Reserving a `pr-9`
-								    gutter hid that, but only by hard-coding the button's width
-								    and offsets in a second place, where the next change to
-								    either silently reopens the overlap.
-								    Here the text column flexes and the button keeps its own
-								    width, so the two cannot collide whatever either becomes.
-								    `flex-1` is safe on this axis and is *not* the defect the
-								    comment above warns about: that one was `flex-1` in an
-								    auto-height **column**, where there is no free space to
-								    grow into. This row's width is definite — the card sets
-								    it — so the main axis has space to distribute. */}
-								<View className="px-3 py-2 flex-row items-center gap-2">
-									<View className="flex-1">
-									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
-									{type === "product" ? (
-										<Text
-											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
-											numberOfLines={1}
-										>
-											{item.name}
-										</Text>
-									) : (
+									<View className="px-3 py-2">
 										<Text
 											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
 										>
 											{item.business_name}
 										</Text>
-									)}
-
-									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
-									{type === "product" ? (
-										// <---------------------<PRODUCT PRICE>--------------------->
-										<View className={`flex-row gap-2 items-center mt-0.5`}>
-											<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-												{formatMoney(discountedPrice(item.price, item.discount))}
-											</Text>
-											{!isZeroMoney(item.discount) && (
-												<Text
-													className={`text-xs ${darkTheme ? "text-gray-500" : "text-gray-400"}`}
-													style={{
-														textDecorationLine: "line-through"
-													}}
-												>
-													{item.price}
-												</Text>
-											)}
-										</View>
-									) : (
-										// <------------------------<RATING>------------------------->
-										// A shut shop shows why it is shut instead of a delivery
-										// estimate it cannot meet. The store page renders the same
-										// component from the same server field — a card that says
-										// open over a page that says paused is the version of this
-										// bug people screenshot.
-										item.is_accepting_orders === false ? (
+										{/* A shut shop shows why it is shut instead of a delivery
+										    estimate it cannot meet. The store page renders the same
+										    component from the same server field — a card that says
+										    open over a page that says paused is the version of this
+										    bug people screenshot. */}
+										{item.is_accepting_orders === false ? (
 											<View className="mt-1">
 												<StoreClosedNotice store={item} compact />
 											</View>
 										) : (
-										<View className="flex-row gap-3 justify-between items-center mt-1">
-											<View className="flex-row gap-1 items-center">
-												<Ionicons name="bicycle" size={14} color={BRAND.primary} />
-												<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
+											<View className="flex-row gap-3 justify-between items-center mt-1">
+												<View className="flex-row gap-1 items-center">
+													<Ionicons name="bicycle" size={14} color={BRAND.primary} />
+													<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+														{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}
+													</Text>
+												</View>
+												<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+													⭐ {Number(item.rating ?? 0).toFixed(1)}
+												</Text>
 											</View>
-											<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
-												⭐ {Number(item.rating).toFixed(1)}
-											</Text>
-										</View>
-										)
-									)}
-
+										)}
 									</View>
-									{/* <--------------------<ADD TO CART BUTTON>--------------------> */}
-									{/* A sibling of the text column rather than an overlay of it,
-									    and filled in the brand colour. It used to be `bg-white`
-									    on the light theme — on a card that is itself `bg-white`,
-									    so the one action on the card was an invisible square
-									    that people found by accident. It is also the only
-									    control here with no words in it, which is why it carries
-									    a label naming the product: React Native builds a
-									    touchable's accessible name from its `<Text>` children,
-									    and this one has none, so a screen reader announced
-									    twenty identical "button"s down the shelf.
-									    `hitSlop` buys the 44pt target the 36pt circle does not
-									    have, without making the circle heavy enough to compete
-									    with the price beside it. */}
-									{type === "product" && (
-										<PressableScale
-											activeOpacity={0.6}
-											accessibilityLabel={`Add ${item.name} to cart`}
-											hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-											onPress={() => AddToCart(item.id)}
-										>
-											<View
-												className="w-9 h-9 items-center justify-center rounded-full"
-												style={{ backgroundColor: BRAND.primary }}
-											>
-												{AddToCartLoading && clickedItemId === item.id ? (
-													<SkeletonAvatar size={16} />
-												) : (
-													<Image
-														source={require("../../assets/icons/addtocart-black.png")}
-														style={{ width: 16, height: 16 }}
-														tintColor="white"
-													/>
-												)}
-											</View>
-										</PressableScale>
-									)}
 								</View>
-							</View>
-						</PressableScale>
-					)}
+							</PressableScale>
+						)
+					}
 				/>
 			</View>
 		</View>
