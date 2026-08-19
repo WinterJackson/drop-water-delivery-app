@@ -85,10 +85,16 @@ export const useWalletTransactionsPaginated = (search: string, type: string, lim
 };
 
 export interface WalletSummary {
-  wallet_balance: number;
+  /**
+   * Decimal **strings**, all of them — `vendor_wallet_summary` serialises every
+   * one through `money_str`. They were declared `number` here, so `tsc` was
+   * type-checking this screen's whole money path against a shape the server has
+   * never sent. The rider app's copy of this interface had it right.
+   */
+  wallet_balance: string;
   /** Held against open cash orders — the vendor's, but not theirs to withdraw. */
-  committed_cash_float: number;
-  available_for_withdrawal: number;
+  committed_cash_float: string;
+  available_for_withdrawal: string;
   /** Negative balance: the store owes the platform and must settle. */
   is_in_arrears: boolean;
   /**
@@ -100,10 +106,12 @@ export interface WalletSummary {
    * the balance held; see `settlement_service.fee_for`.
    */
   withdrawal?: {
-    minimum: number;
-    fee: number;
-    fee_waiver_threshold: number;
+    minimum: string;
+    fee: string;
+    fee_waiver_threshold: string;
   };
+  /** The floor an STK push may be raised for — `min_wallet_topup`. */
+  topup?: { minimum: string };
 }
 
 /**

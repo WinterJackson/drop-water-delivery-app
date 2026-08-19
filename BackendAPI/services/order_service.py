@@ -1748,6 +1748,17 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
         "ready": "late_cancellation_penalty",
         "picked_up": "late_cancellation_penalty_after_pickup",
     }
+    # What actually happened, reported back to the caller. The endpoint used to
+    # return "Order cancelled successfully" and nothing else, while adding up to
+    # KSH 150 to the customer's `debt_balance` — collected silently on their
+    # next order as a line they had never been told about. The app filled the
+    # gap by *guessing* in the confirmation dialog: it warned about "a KSH 50
+    # cancellation penalty" for every penalised status, which is the wrong
+    # figure after pickup and the wrong answer entirely while the customer still
+    # has a free cancellation left.
+    penalty_charged = Decimal("0.00")
+    free_remaining = 0
+
     if order.order_status in PENALISED_STATUSES and user:
         penalty = _config.get_decimal(PENALISED_STATUSES[order.order_status])
         allowance = _config.get_int("free_cancellations_per_month")
@@ -1773,11 +1784,13 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
             ).scalar() or 0
 
         if recent < allowance:
+            free_remaining = allowance - recent - 1
             logger.info(
                 "Cancellation by user %s waived: %s of %s free cancellations used.",
                 user_id, recent, allowance,
             )
         elif penalty > 0:
+            penalty_charged = penalty
             user.debt_balance = Decimal(str(user.debt_balance or 0)) + penalty
             logger.info(
                 "Cancellation penalty of KSH %s applied to user %s (status %s)",
@@ -1849,7 +1862,16 @@ async def cancel_customer_order(session: AsyncSession, user_id: UUID, order_id: 
     except Exception as e:
         logger.error(f"WS Broadcast fail in cancel_customer_order: {e}")
 
-    return {"message": "Order cancelled successfully", "order_id": str(order.id)}
+    return {
+        "message": "Order cancelled successfully",
+        "order_id": str(order.id),
+        # Zero when nothing was charged — a status that carries no penalty, or a
+        # free cancellation. The app renders this rather than composing its own
+        # sentence: the two figures and the allowance behind them are settings
+        # rows, and a number stated by an app goes stale the moment one moves.
+        "penalty_charged": money_str(penalty_charged),
+        "free_cancellations_remaining": free_remaining,
+    }
 
 
 # ── Order Assignment Retry Engine ──────────────────────────────────────────

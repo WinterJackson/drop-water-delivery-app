@@ -80,7 +80,10 @@ export const useWalletTopUp = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ amount, phoneNumber }: { amount: number; phoneNumber: string }) =>
+    // `amount` is a decimal *string*, like every other money value that crosses
+    // this wire. It used to be a `number`, so the one figure on the screen the
+    // customer types themselves was the one that became a float on the way out.
+    mutationFn: ({ amount, phoneNumber }: { amount: string; phoneNumber: string }) =>
       api.post(ROUTES.WALLET_TOP_UP, {
         amount,
         phone_number: phoneNumber,
@@ -98,7 +101,7 @@ export const useWalletWithdraw = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ amount, phoneNumber }: { amount: number; phoneNumber: string }) =>
+    mutationFn: ({ amount, phoneNumber }: { amount: string; phoneNumber: string }) =>
       api.post(ROUTES.WALLET_WITHDRAW, {
         amount,
         phone_number: phoneNumber,

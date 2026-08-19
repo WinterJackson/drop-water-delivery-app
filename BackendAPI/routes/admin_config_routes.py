@@ -169,7 +169,9 @@ class PreviewRequest(BaseModel):
     """
 
     changes: dict[str, object] = Field(default_factory=dict)
-    product_total: float = Field(500.0, ge=0, le=1_000_000)
+    # Money, so `Decimal` — this basket is priced by `compute_order_quote` and
+    # the figures come back on the console beside the live ones.
+    product_total: Decimal = Field(Decimal("500.00"), ge=0, le=1_000_000)
     distance_km: float = Field(2.0, ge=0, le=200)
     quantity: int = Field(2, ge=1, le=200)
     bottle_capacity: int = Field(20, ge=1, le=1000)

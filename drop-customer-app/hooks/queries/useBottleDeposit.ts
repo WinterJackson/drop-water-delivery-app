@@ -53,6 +53,25 @@ export type BottleDepositSummary = {
    * condition and the customer is entitled to know before relying on it.
    */
   wallet_not_withdrawable: string;
+  /**
+   * The terms this customer's withdrawal will actually be judged by, from the
+   * same `withdrawal_terms` the withdrawal itself calls.
+   *
+   * The screen used to state its own — `MIN_WITHDRAWAL_KSH = 500`, under a
+   * comment claiming it mirrored the server. The server's figure for a
+   * customer is **1**, with no fee: it is their own unspent credit coming
+   * back, not earnings. So the app was refusing, before any request was sent,
+   * every withdrawal under KSH 500 that the platform would have paid — a rule
+   * stated by an app that the platform does not implement, which is the exact
+   * defect the rider and vendor wallets already had removed.
+   */
+  withdrawal: {
+    minimum: string;
+    fee: string;
+    /** Measured against the amount withdrawn, never the balance held. */
+    fee_waiver_threshold: string;
+  };
+  topup: { minimum: string };
   open_request: BottleCollection | null;
 };
 

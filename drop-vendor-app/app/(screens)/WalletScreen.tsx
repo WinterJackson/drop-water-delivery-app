@@ -89,8 +89,17 @@ export default function WalletScreen() {
   };
 
   const handleTopUp = async () => {
-    if (!topUpAmount || isNaN(Number(topUpAmount)) || Number(topUpAmount) < 10) {
-      Alert.alert("Invalid Amount", "Please enter a valid amount of at least KSH 10 to top up.");
+    // The floor is `min_wallet_topup`, a settings row. It was `< 10` here with
+    // "at least KSH 10" beside it — right today, wrong the moment an
+    // administrator moves the row, and refusing client-side so no server log
+    // would ever show it happening.
+    const minTopUp = summary?.topup?.minimum ?? null;
+    if (!topUpAmount || isNaN(Number(topUpAmount))) {
+      Alert.alert("Invalid Amount", "Please enter the amount you want to top up.");
+      return;
+    }
+    if (minTopUp !== null && compareMoney(topUpAmount, minTopUp) < 0) {
+      Alert.alert("Invalid Amount", `Please enter at least ${formatMoney(minTopUp)} to top up.`);
       return;
     }
     if (!phoneNumber) {
@@ -485,7 +494,8 @@ export default function WalletScreen() {
             </View>
 
             <Text className={`text-sm mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-              Withdraw your float balance directly to your M-Pesa. Minimum amount is KSH 500.
+              Withdraw your available balance straight to M-Pesa.
+              {!isZeroMoney(minWithdrawal) ? ` Minimum ${formatMoney(minWithdrawal)}.` : ""}
             </Text>
 
             <View className="mb-4">

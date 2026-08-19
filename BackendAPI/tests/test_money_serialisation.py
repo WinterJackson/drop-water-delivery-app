@@ -70,12 +70,50 @@ MONEY_FIELDS = frozenset(
         "total", "bottle_deposit", "mpesa_discount", "platform_cost",
         "platform_net", "exchange_fee", "new_bottle_fee", "refill_mine_fee",
         "quick_swap_fee", "keep_my_bottle_fee",
+        # The whole-shilling residue published on the quote so the cart's own
+        # column adds up to the figure on the button.
+        "rounding_adjustment",
+        # What a customer tops up or withdraws. Every other declaration of it
+        # was already `Decimal` or `MoneyField`; the two that were not sat in a
+        # route file, which this guard did not read.
+        "amount",
     }
 )
 
 
 def _schema_modules() -> list[pathlib.Path]:
     return sorted(p for p in SCHEMAS.glob("*.py") if p.name != "__init__.py")
+
+
+def _model_bearing_modules() -> list[pathlib.Path]:
+    """Everywhere a request or response model may actually be declared.
+
+    `schemas/` is the intended home and was the only place this guard looked.
+    But FastAPI is perfectly happy with a `BaseModel` declared beside the route
+    that uses it, and several are — including `TopUpRequest` and
+    `WithdrawRequest`, whose `amount: float` is money on the way *in*. A rule
+    enforced by directory rather than by shape is a rule with a doorway in it.
+    """
+    return _schema_modules() + sorted((BACKEND / "routes").rglob("*.py"))
+
+
+def _pydantic_field_annotations(path: pathlib.Path):
+    """`(lineno, name, annotation)` for every field of every `BaseModel`.
+
+    Scoped to Pydantic classes on purpose. Walking bare `AnnAssign` nodes over
+    `routes/` would also pick up module-level and local annotations that are not
+    wire shapes at all.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = {ast.unparse(b) for b in node.bases}
+        if not any("BaseModel" in b for b in bases):
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                yield stmt.lineno, stmt.target.id, _annotation_text(stmt.annotation)
 
 
 def _source_modules() -> list[pathlib.Path]:
@@ -101,17 +139,10 @@ def test_no_money_field_on_any_schema_is_annotated_float():
     """
     offenders: list[str] = []
 
-    for path in _schema_modules():
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
-                continue
-            name = node.target.id
-            if name not in MONEY_FIELDS:
-                continue
-            annotation = _annotation_text(node.annotation)
-            if "float" in annotation:
-                offenders.append(f"{path.name}:{node.lineno} {name}: {annotation}")
+    for path in _model_bearing_modules():
+        for lineno, name, annotation in _pydantic_field_annotations(path):
+            if name in MONEY_FIELDS and "float" in annotation:
+                offenders.append(f"{path.name}:{lineno} {name}: {annotation}")
 
     assert not offenders, (
         "Money fields annotated `float` — use `MoneyField` / `OptionalMoneyField` "

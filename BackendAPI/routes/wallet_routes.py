@@ -2,6 +2,8 @@ import logging
 
 from fastapi import APIRouter, Depends, Header, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +25,13 @@ router = APIRouter(prefix="/api/wallet", tags=["Wallet"])
 
 
 class TopUpRequest(BaseModel):
-    amount: float = Field(gt=0, le=150_000)
+    # `Decimal`, not `float`. Money annotated `float` on a Pydantic model is the
+    # quiet version of a `float(...)` cast — there is nothing to grep for,
+    # because Pydantic does the coercion. It is the *inbound* half of the rule
+    # the schemas already follow, and it was invisible to
+    # `test_money_serialisation.py` because that walk only ever looked at
+    # `schemas/`, and these two models are declared in a route file.
+    amount: Decimal = Field(gt=0, le=150_000)
     phone_number: str
     # Which of the caller's wallets to act on. Verified against the token in
     # `resolve_wallet_owner` — a client cannot name an account it does not own.
@@ -31,7 +39,7 @@ class TopUpRequest(BaseModel):
 
 
 class WithdrawRequest(BaseModel):
-    amount: float = Field(gt=0, le=150_000)
+    amount: Decimal = Field(gt=0, le=150_000)
     phone_number: str
     user_type: str = "customer"
 

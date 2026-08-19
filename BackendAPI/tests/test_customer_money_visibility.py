@@ -155,3 +155,76 @@ def test_the_ceiling_is_a_setting_rather_than_a_number_in_the_app():
     assert "debt_balance >" not in source, (
         "the cart is deciding the debt ceiling itself; `validate_quote` owns that"
     )
+
+
+# ── The wallet screen's terms come from the platform, not from the app ─────
+#
+# `BottleWallet.tsx` carried `MIN_TOP_UP_KSH = 10` and `MIN_WITHDRAWAL_KSH =
+# 500` under a comment claiming they mirrored the server. The top-up figure
+# happened to match `min_wallet_topup`; the withdrawal one was invented.
+# `withdrawal_terms` returns **1** for a customer, with no fee — unspent wallet
+# credit is their own money coming back, not earnings — so the screen refused,
+# client-side and before any request, every withdrawal under KSH 500 the
+# platform would have paid. Nothing logged it, because no request was made.
+
+@pytest.mark.asyncio
+async def test_a_customer_withdrawal_has_no_minimum_beyond_a_shilling():
+    """The figure the app must render, asserted where it is decided."""
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, patch
+
+    from services.settlement_service import withdrawal_terms
+
+    with patch("services.platform_config_service.ensure_fresh", new=AsyncMock()):
+        minimum, fee, waiver = await withdrawal_terms(
+            AsyncMock(), provider_type="customer"
+        )
+
+    assert minimum == Decimal("1")
+    # The platform's *margin* on the withdrawal, which is zero for everybody by
+    # default. Safaricom's own B2C tariff is recovered separately, through
+    # `settlement_service.B2C_TARIFF_BANDS`, and is not this figure.
+    assert fee == Decimal("0")
+    assert waiver == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_a_rider_and_a_customer_are_not_judged_by_the_same_terms():
+    """Non-vacuity: the customer branch is a branch, not the only answer."""
+    from unittest.mock import AsyncMock, patch
+
+    from services.settlement_service import withdrawal_terms
+
+    with patch("services.platform_config_service.ensure_fresh", new=AsyncMock()):
+        customer, _, _ = await withdrawal_terms(AsyncMock(), provider_type="customer")
+        rider, _, rider_waiver = await withdrawal_terms(AsyncMock(), provider_type="rider")
+        vendor, _, _ = await withdrawal_terms(
+            AsyncMock(), provider_type="vendor", vendor_type="wholesale_b2b"
+        )
+
+    # A rider and a vendor are withdrawing earnings, and each disbursement costs
+    # the platform an M-Pesa tariff — hence a floor worth clearing. A customer is
+    # taking back credit they already paid in.
+    assert customer < rider < vendor
+    assert rider_waiver > 0
+
+
+def test_the_deposit_summary_publishes_the_terms_it_will_be_judged_by():
+    """The endpoint the customer wallet screen reads must carry them.
+
+    Asserted on the source rather than by calling the route: this file's
+    session is an `AsyncMock` and the endpoint loads a `User` row. What matters
+    is that the terms are served from `withdrawal_terms` and the settings row —
+    not restated here.
+    """
+    import pathlib
+
+    source = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "routes" / "bottle_return_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "withdrawal_terms" in source, "the terms are re-derived, not read"
+    assert '"minimum": money_str(minimum)' in source
+    assert '"fee": money_str(fee)' in source
+    assert 'config.get_decimal("min_wallet_topup")' in source

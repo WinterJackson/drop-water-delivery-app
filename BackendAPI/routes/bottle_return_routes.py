@@ -37,6 +37,7 @@ from models.deliverer_model import Deliverer
 from models.user_model import User
 from services import customer_bottle_service as deposits
 from services.notification_service import create_notification, queue_push
+from utils.money import money_str
 from utils.verify_user_token import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -96,19 +97,51 @@ async def my_deposit_summary(
     existed and appeared on no screen the customer could open — a balance
     somebody cannot check is a balance they cannot trust.
     """
+    from services import platform_config_service as config
+    from services.settlement_service import withdrawal_terms
+
     user = await _customer_row(db, auth)
     ceiling = await deposits.bottle_ceiling(db, user)
     open_request = await deposits.open_request_for(db, user.id)
 
+    # The terms this customer's withdrawal and top-up will actually be judged
+    # by, from the same `withdrawal_terms` the withdrawal itself calls and the
+    # same settings row `initiate_wallet_topup` enforces.
+    #
+    # The app had both as literals — `MIN_TOP_UP_KSH = 10` and
+    # `MIN_WITHDRAWAL_KSH = 500`, under a comment claiming they mirrored the
+    # server. The top-up figure happened to match; the withdrawal one was
+    # invented. `withdrawal_terms` returns a minimum of **1** and a fee of
+    # **0** for a customer — it is their own unspent credit coming back, not
+    # earnings — so the screen was refusing, client-side and before any
+    # request, every withdrawal under KSH 500 that the platform would have
+    # paid. That is the same defect the rider and vendor wallets already had
+    # fixed: a rule stated by an app that the platform does not implement.
+    #
+    # One load, before either read, so the two figures cannot come from two
+    # different configurations. `withdrawal_terms` refreshes too, but reading a
+    # settings row on the strength of another function having happened to load
+    # it first is not a dependency worth having.
+    await config.ensure_fresh(db)
+    minimum, fee, waiver = await withdrawal_terms(db, provider_type="customer")
+    min_topup = config.get_decimal("min_wallet_topup")
+
     return {
         "bottles_held": int(user.bottles_held or 0),
-        "deposit_balance": str(user.bottle_deposit_balance or 0),
+        "deposit_balance": money_str(user.bottle_deposit_balance or 0),
         "bottle_limit": ceiling,
-        "wallet_balance": str(user.wallet_balance or 0),
+        "wallet_balance": money_str(user.wallet_balance or 0),
         # Stated plainly rather than left to be discovered at the withdrawal
         # screen. Money you can spend and cannot cash out is a real condition
         # and the customer is entitled to know before they rely on it.
-        "wallet_not_withdrawable": str(user.non_withdrawable_balance or 0),
+        "wallet_not_withdrawable": money_str(user.non_withdrawable_balance or 0),
+        "withdrawal": {
+            "minimum": money_str(minimum),
+            "fee": money_str(fee),
+            # Measured against the amount withdrawn, never the balance held.
+            "fee_waiver_threshold": money_str(waiver),
+        },
+        "topup": {"minimum": money_str(min_topup)},
         "open_request": _serialise(open_request) if open_request else None,
     }
 

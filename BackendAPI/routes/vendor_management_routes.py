@@ -26,7 +26,9 @@ from services.vendor_management_service import (
     cancel_order,
     assign_order_rider
 )
-from pydantic import BaseModel
+from decimal import Decimal
+
+from pydantic import BaseModel, Field
 from uuid import UUID
 from typing import Optional, List, Literal
 from utils.serializers import safe_serialize
@@ -84,12 +86,10 @@ class VendorProfileUpdateRequest(BaseModel):
     preferred_payment_method: Optional[List[str]] = None
     vendor_type: Optional[Literal["retail_refill", "wholesale_b2b"]] = None
     is_online: Optional[bool] = None
-    deposit_fee: Optional[float] = None
+    # Money, so `Decimal`. It is written to a `Numeric` column and read back
+    # into a deposit the platform owes the customer.
+    deposit_fee: Optional[Decimal] = None
 
-
-from decimal import Decimal
-
-from pydantic import BaseModel, Field
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -703,6 +703,11 @@ async def vendor_wallet_summary(
         db, provider_type="vendor", vendor_type=vendor.vendor_type
     )
 
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(db)
+    topup_min = config.get_decimal("min_wallet_topup")
+
     return {
         "wallet_balance": money_str(balance),
         "committed_cash_float": money_str(committed),
@@ -719,6 +724,10 @@ async def vendor_wallet_summary(
             # Compared against the **amount withdrawn**, never the balance held.
             "fee_waiver_threshold": money_str(waiver),
         },
+        # The other figure this screen validates against, from the row
+        # `initiate_wallet_topup` enforces. Stated by the server for the same
+        # reason the withdrawal terms are.
+        "topup": {"minimum": money_str(topup_min)},
     }
 
 
@@ -788,7 +797,11 @@ class StorefrontTermsRequest(BaseModel):
     """Owner-level terms. Both optional — only what is sent moves."""
 
     accepts_cash: Optional[bool] = None
-    min_order_value: Optional[float] = Field(default=None, ge=0)
+    # `Decimal`. This is the figure `vendor_availability.assert_meets_minimum`
+    # compares against `quote.product_subtotal` — a `Decimal` — on every
+    # checkout at this store, so a float here puts binary error on one side of
+    # a comparison that decides whether a customer may order at all.
+    min_order_value: Optional[Decimal] = Field(default=None, ge=0)
 
 
 class StorefrontPauseRequest(BaseModel):

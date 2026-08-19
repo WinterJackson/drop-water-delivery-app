@@ -116,10 +116,19 @@ export function useOrder(orderId: string | null | undefined) {
     });
 }
 
+/** What the server did, reported back so the app never has to guess at it. */
+export type CancelOrderResult = {
+    message: string;
+    order_id: string;
+    /** Decimal string. `"0.00"` when nothing was charged. */
+    penalty_charged: string;
+    free_cancellations_remaining: number;
+};
+
 export function useCancelOrder() {
     const api = useApiRequest();
     const queryClient = useQueryClient();
-    return useMutation({
+    return useMutation<CancelOrderResult, Error, string>({
         mutationFn: (orderId: string) => api.put(ROUTES.CANCEL_ORDER(orderId)),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['customer', 'orders'] });

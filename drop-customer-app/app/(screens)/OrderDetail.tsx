@@ -106,7 +106,12 @@ export default function OrderDetail() {
         if (!order) return;
         const isAccepted = order.order_status === "accepted";
         const message = isAccepted 
-            ? "Are you sure you want to cancel this order? Since the vendor has already accepted it, a KSH 50 cancellation penalty will apply to your account."
+            // No figure. The penalty is two settings rows — one before pickup, a
+            // larger one after — and it is waived entirely while the customer
+            // still has a free cancellation in the last 30 days. This app knows
+            // none of those three things. What was actually charged comes back
+            // from the server below.
+            ? "Are you sure you want to cancel this order? The vendor has already accepted it, so a cancellation fee may apply."
             : "Are you sure you want to cancel this order? This action cannot be undone.";
             
         // Themed confirmation via the app's own Popup, not a native Alert:
@@ -120,9 +125,14 @@ export default function OrderDetail() {
             onConfirm: () => {
                 Popup.setLoading(true);
                 cancelOrderMutation(order.id, {
-                    onSuccess: () => {
+                    onSuccess: (result) => {
                         Popup.hide();
-                        Toast.success("Order cancelled", "Your order has been cancelled.");
+                        Toast.success(
+                            "Order cancelled",
+                            isZeroMoney(result?.penalty_charged)
+                                ? "Your order has been cancelled."
+                                : `A ${formatMoney(result.penalty_charged)} cancellation fee has been added to your balance and will be collected on your next order.`,
+                        );
                     },
                     onError: (error: Error) => {
                         Popup.hide();

@@ -87,6 +87,8 @@ export interface RiderWalletSummary {
      * `fee_waiver_threshold` is compared against the **amount withdrawn**, never
      * the balance held; see `settlement_service.fee_for`.
      */
+    /** The floor an STK push may be raised for — `min_wallet_topup`. */
+    topup?: { minimum: string };
     withdrawal?: {
       minimum: string;
       fee: string;

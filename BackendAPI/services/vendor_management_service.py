@@ -1,4 +1,6 @@
 import logging
+from decimal import Decimal
+
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -151,9 +153,13 @@ async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict
         "is_online", "deposit_fee"
     ]
 
-    # Validate deposit_fee range before applying
+    # Validate deposit_fee range before applying. Compared as `Decimal`: the
+    # field arrives as one and is written to a `Numeric` column, so the `float()`
+    # that used to sit here was a round trip in the middle of a bounds check on
+    # money — harmless at these magnitudes and exactly the residue that makes
+    # the next person think a float is acceptable on this path.
     if "deposit_fee" in data and data["deposit_fee"] is not None:
-        fee = float(data["deposit_fee"])
+        fee = Decimal(str(data["deposit_fee"]))
         if fee < 0 or fee > 5000:
             raise HTTPException(status_code=400, detail="Deposit fee must be between KSH 0 and KSH 5,000.")
 
@@ -415,8 +421,6 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
     # of exactly the required amount could compare as short. The platform rule is
     # that money is never a float; this was the one place that broke it.
     if new_status == "accepted" and order.payment_method == "cash":
-        from decimal import Decimal
-
         from services.settlement_service import committed_cash_float_for_vendor
 
         required_float = Decimal(str(order.platform_total or 0))

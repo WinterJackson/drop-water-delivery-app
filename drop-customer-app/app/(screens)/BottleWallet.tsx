@@ -18,11 +18,10 @@ import { useBottleDeposit } from "@/hooks/queries/useBottleDeposit";
 import { BottleCollectionCard } from "@/components/common/BottleCollection";
 import { Toast } from "@/lib/toast";
 import { errorMessage } from "@/API/errors";
-import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
+import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
 
-/** Mirrors the server-side minimums so the UI rejects before the round trip. */
-const MIN_TOP_UP_KSH = 10;
-const MIN_WITHDRAWAL_KSH = 500;
+/** What a customer may type into an amount box: shillings, optionally cents. */
+const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
 
 interface WalletData {
   bottle_purchased_at: string | null;
@@ -48,6 +47,16 @@ export default function BottleWallet() {
   // carries the two figures; this carries the collection state and the part of
   // the balance that cannot be withdrawn, neither of which lives on the profile.
   const { data: deposit, refetch: refetchDeposit } = useBottleDeposit();
+  // The terms, from the server, or `null` until the summary lands.
+  //
+  // `null` deliberately skips the client-side check rather than falling back to
+  // a number: a guessed minimum is what this screen used to have. With the
+  // terms unknown the request simply goes, and the server's own sentence comes
+  // back through `errorMessage(err)` — which is the platform's rule for every
+  // other refusal it does not have the facts to pre-empt.
+  const minWithdrawal = deposit?.withdrawal?.minimum ?? null;
+  const minTopUp = deposit?.topup?.minimum ?? null;
+
   const wallet: WalletData | null = user
     ? {
         bottle_purchased_at: user.bottle_purchased_at ?? null,
@@ -93,9 +102,15 @@ export default function BottleWallet() {
   };
 
   const handleTopUp = async () => {
-    const amount = Number(topUpAmount);
-    if (!topUpAmount || isNaN(amount) || amount < MIN_TOP_UP_KSH) {
-      Toast.error("Invalid amount", `Enter at least ${formatMoney(MIN_TOP_UP_KSH)} to top up.`);
+    // The typed text stays text. `Number(...)` here was the last place on this
+    // screen money became a float, and it fed both the comparison and the wire.
+    const amount = topUpAmount.trim();
+    if (!MONEY_INPUT.test(amount)) {
+      Toast.error("Invalid amount", "Enter the amount you want to top up.");
+      return;
+    }
+    if (minTopUp !== null && compareMoney(amount, minTopUp) < 0) {
+      Toast.error("Invalid amount", `Enter at least ${formatMoney(minTopUp)} to top up.`);
       return;
     }
     const msisdn = toMsisdn(phoneNumber);
@@ -120,9 +135,13 @@ export default function BottleWallet() {
   };
 
   const handleWithdraw = async () => {
-    const amount = Number(withdrawAmount);
-    if (!withdrawAmount || isNaN(amount) || amount < MIN_WITHDRAWAL_KSH) {
-      Toast.error("Invalid amount", `Enter at least ${formatMoney(MIN_WITHDRAWAL_KSH)} to withdraw.`);
+    const amount = withdrawAmount.trim();
+    if (!MONEY_INPUT.test(amount)) {
+      Toast.error("Invalid amount", "Enter the amount you want to withdraw.");
+      return;
+    }
+    if (minWithdrawal !== null && compareMoney(amount, minWithdrawal) < 0) {
+      Toast.error("Invalid amount", `Enter at least ${formatMoney(minWithdrawal)} to withdraw.`);
       return;
     }
     const msisdn = toMsisdn(phoneNumber);
@@ -425,7 +444,8 @@ export default function BottleWallet() {
             </View>
 
             <Text className={`text-sm mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-              Enter amount to top up your float via M-Pesa STK Push.
+              Top up your wallet with an M-Pesa STK push.
+              {minTopUp !== null ? ` Minimum ${formatMoney(minTopUp)}.` : ""}
             </Text>
 
             <View className="mb-4">
@@ -485,7 +505,8 @@ export default function BottleWallet() {
             </View>
 
             <Text className={`text-sm mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-              Withdraw your float balance directly to your M-Pesa. Minimum amount is KSH 500.
+              Withdraw your wallet balance straight to M-Pesa.
+              {minWithdrawal !== null ? ` Minimum ${formatMoney(minWithdrawal)}.` : ""}
             </Text>
 
             <View className="mb-4">

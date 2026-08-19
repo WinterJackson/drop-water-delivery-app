@@ -87,8 +87,17 @@ export default function Cashout() {
   };
 
   const handleTopUp = async () => {
-    if (!topUpAmount || isNaN(Number(topUpAmount)) || Number(topUpAmount) < 10) {
-      Alert.alert("Invalid Amount", "Please enter a valid amount of at least KSH 10 to top up.");
+    // The floor is `min_wallet_topup`, a settings row. It was `< 10` here with
+    // "at least KSH 10" beside it — right today, wrong the moment an
+    // administrator moves the row, and refusing client-side so no server log
+    // would ever show it happening.
+    const minTopUp = walletSummary?.topup?.minimum ?? null;
+    if (!topUpAmount || isNaN(Number(topUpAmount))) {
+      Alert.alert("Invalid Amount", "Please enter the amount you want to top up.");
+      return;
+    }
+    if (minTopUp !== null && compareMoney(topUpAmount, minTopUp) < 0) {
+      Alert.alert("Invalid Amount", `Please enter at least ${formatMoney(minTopUp)} to top up.`);
       return;
     }
     if (!phoneNumber) {

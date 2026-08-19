@@ -568,6 +568,11 @@ async def rider_wallet_summary(
     )
     minimum, fee, waiver = await withdrawal_terms(db, provider_type="rider")
 
+    from services import platform_config_service as config
+
+    await config.ensure_fresh(db)
+    topup_min = config.get_decimal("min_wallet_topup")
+
     return {
         "wallet_balance": money_str(balance),
         "committed_cash_float": money_str(committed),
@@ -587,4 +592,8 @@ async def rider_wallet_summary(
             # See `settlement_service.fee_for`.
             "fee_waiver_threshold": money_str(waiver),
         },
+        # The other figure this screen validates against, from the row
+        # `initiate_wallet_topup` enforces. Stated by the server for the same
+        # reason the withdrawal terms are.
+        "topup": {"minimum": money_str(topup_min)},
     }
