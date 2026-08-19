@@ -61,7 +61,7 @@ jobs:
           # connect, so a DSN pointing nowhere is enough and no service is
           # needed — no test touches a database, `conftest.py` yields an
           # `AsyncMock`.
-          NEONDB_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
+          DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
           # `utils/encryption.py` refuses to import without one. Generated for
           # CI alone and deliberately *not* the real key: it decrypts stored
           # data, and nothing here encrypts anything worth keeping.
@@ -77,7 +77,7 @@ jobs:
           FRONTEND_CLERK_API_KEY: pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA
         # `test_admin_e2e.py` joins `test_multi_store_integration.py` in needing
         # a real Postgres. Note *why* it needs excluding rather than skipping
-        # itself: its guard is `skipif(not os.getenv("NEONDB_URL"))`, which reads
+        # itself: its guard is `skipif(not os.getenv("DATABASE_URL"))`, which reads
         # the variable as a proxy for "a database exists". The placeholder above
         # satisfies that proxy and arms all 17 of its tests against a database
         # that is not there. If you ever drop this flag, that is what the SSL

@@ -125,7 +125,7 @@ Pages cannot run any of it. This is not a preference; the app would not function
 7. **Deploy.**
 
 > **Only those four.** Vercel runs the console; it reads no backend variables.
-> `ADMIN_2FA_REQUIRED`, `ALLOWED_ORIGINS`, `NEONDB_URL`, `CLERK_ISSUER` and the
+> `ADMIN_2FA_REQUIRED`, `ALLOWED_ORIGINS`, `DATABASE_URL`, `CLERK_ISSUER` and the
 > rest belong to Render alone. `CLERK_SECRET_KEY` is the one variable that is
 > genuinely needed in **both** places, because both the console's server and the
 > API talk to Clerk — and it must be the same value in both.

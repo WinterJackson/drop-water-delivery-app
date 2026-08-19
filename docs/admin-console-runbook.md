@@ -19,7 +19,7 @@ separate API, so anything you change here is live for the apps immediately.
 | `BACKEND_BASE_URL` | `drop-admin/.env.local` | `http://localhost:8000` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY` | `drop-admin/.env.local` | **empty** — every screen but `/operations/map` works without it (§8) |
 | `CLERK_SECRET_KEY` | `BackendAPI/.env` | **absent** — needed to bind an invited admin, and for vendor staff invites |
-| `NEONDB_URL`, `REDIS_URL` | `BackendAPI/.env` | set |
+| `DATABASE_URL`, `REDIS_URL` | `BackendAPI/.env` | set |
 | `RESEND_API_KEY` | `BackendAPI/.env` | set (`re_…`) |
 
 Two of those must be fixed before anything works:

@@ -36,7 +36,7 @@ Refuses outright if the database already has an `alembic_version` row. This
 script is for empty databases; against a live one it would be `create_all`
 exactly as `db/session.py` warns.
 
-Usage — the target comes from `NEONDB_URL`, whatever provider it names:
+Usage — the target comes from `DATABASE_URL`, whatever provider it names:
 
     python scripts/bootstrap_database.py
     python scripts/bootstrap_database.py --stamp-at f7e3b91c8d24   # skip the gated drop
@@ -160,12 +160,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    database_url = os.getenv("NEONDB_URL")
-    if not database_url:
-        print("NEONDB_URL is not set. Point it at the database to build.")
+    from db.session import database_url as configured_url
+
+    target = configured_url()
+    if not target:
+        print("DATABASE_URL is not set. Point it at the database to build.")
         return 1
 
-    result = asyncio.run(_bootstrap(database_url, args.stamp_at, args.force))
+    result = asyncio.run(_bootstrap(target, args.stamp_at, args.force))
     if result != 0:
         return result
 

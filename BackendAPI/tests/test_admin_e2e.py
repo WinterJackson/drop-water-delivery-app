@@ -23,8 +23,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("NEONDB_URL"),
-    reason="Needs a real database; NEONDB_URL is unset.",
+    not (os.getenv("DATABASE_URL") or os.getenv("NEONDB_URL")),
+    reason="Needs a real database; DATABASE_URL is unset.",
 )
 
 

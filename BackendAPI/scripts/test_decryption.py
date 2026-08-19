@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 
 async def test_decryption():
     load_dotenv()
-    db_url = os.getenv("NEONDB_URL")
+    from db.session import database_url
+
+    db_url = database_url()
     if "?" in db_url:
         db_url = db_url.split("?")[0] + "?ssl=require"
     engine = create_async_engine(db_url)

@@ -41,7 +41,7 @@ would build tables no migration produced — exactly what the note in
 
 ## Local development
 
-`tests/test_admin_e2e.py` connects to whatever `NEONDB_URL` names. It is the one
+`tests/test_admin_e2e.py` connects to whatever `DATABASE_URL` names. It is the one
 file in the suite that touches a real database, which means that pointed at a
 managed provider **every `pytest` run spends metered compute**. That is how the
 original Neon project reached its quota and took the deployed API down with it.
@@ -58,7 +58,7 @@ python -m seed.seed_orders                          # optional: priced orders
 Then in `BackendAPI/.env`:
 
 ```
-NEONDB_URL="postgresql+asyncpg://drop:drop_local_dev@localhost:5434/drop"
+DATABASE_URL="postgresql+asyncpg://drop:drop_local_dev@localhost:5434/drop"
 ```
 
 Port **5434**, because 5432 and 5433 are commonly already taken. It is bound to
@@ -89,7 +89,10 @@ a locally-running API — onboarding writes the row.
 
 ## A deployed database
 
-The application reads exactly one variable, `NEONDB_URL`, in seven places. The
+The application reads exactly one variable, `DATABASE_URL`, resolved in one
+place (`db/session.database_url`). `NEONDB_URL` is still read as a deprecated
+fallback so that renaming the variable and updating a deployment need not happen
+in the same breath; the new name wins when both are set. The
 name is historical; it holds a DSN for whichever provider you use. Changing
 provider is that variable, plus a bootstrap.
 
@@ -169,7 +172,7 @@ Free-tier limits move; check the current pricing page before committing.
    special characters in the password:
 
    ```
-   NEONDB_URL="postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+   DATABASE_URL="postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
    ```
 
 6. Build and check:
@@ -179,7 +182,7 @@ Free-tier limits move; check the current pricing page before committing.
    python -m seed.seed_data
    ```
 
-7. On Render, set **both** `NEONDB_URL` and `DB_SSL_ROOT_CERT` on the API
+7. On Render, set **both** `DATABASE_URL` and `DB_SSL_ROOT_CERT` on the API
    service **and** the worker, then redeploy both. `docs/render-environment.md`
    lists the full variable set.
 
@@ -218,7 +221,7 @@ Free-tier limits move; check the current pricing page before committing.
 ## Verifying a database is healthy
 
 ```bash
-psql "$(grep -m1 '^NEONDB_URL' BackendAPI/.env | cut -d= -f2- | tr -d '"' \
+psql "$(grep -m1 '^DATABASE_URL' BackendAPI/.env | cut -d= -f2- | tr -d '"' \
   | sed 's|postgresql+asyncpg://|postgresql://|')" -c 'select postgis_version()'
 ```
 

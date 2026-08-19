@@ -11,7 +11,32 @@ from dotenv import load_dotenv
 load_dotenv()  # Load variables from .env
 
 
-DATABASE_URL = os.getenv("NEONDB_URL")
+#: The variable this platform's database URL has always been read from, kept
+#: readable so a deployment that has not been updated yet still starts.
+#:
+#: It named a vendor. The platform moved off Neon to Supabase and the name
+#: became a statement that is simply false — the next person reads `NEONDB_URL`
+#: and goes looking for a Neon project. A configuration key that names the wrong
+#: system is the same defect as a comment that describes code it no longer
+#: matches, and this codebase treats those as defects.
+LEGACY_URL_VAR = "NEONDB_URL"
+
+
+def database_url() -> str | None:
+    """The configured database DSN, or `None`.
+
+    `DATABASE_URL` is the name. `NEONDB_URL` is still read, because renaming a
+    variable and updating the deployment are two separate events and whichever
+    happens second must not be an outage: a deploy carrying only the new name
+    must start against an environment still holding the old one.
+
+    The new name wins when both are set, so the migration is finished by adding
+    the new one rather than by removing the old one in the same breath.
+    """
+    return os.getenv("DATABASE_URL") or os.getenv(LEGACY_URL_VAR)
+
+
+DATABASE_URL = database_url()
 
 # Say which variable is missing, rather than letting SQLAlchemy say it is not a
 # URL. Unset, `create_async_engine(None)` raises
@@ -35,7 +60,7 @@ DATABASE_URL = os.getenv("NEONDB_URL")
 # syntactically valid DSN that points nowhere.
 if not DATABASE_URL:
     raise RuntimeError(
-        "NEONDB_URL is not set. The API cannot start without a database URL. "
+        "DATABASE_URL is not set. The API cannot start without a database URL. "
         "Set it in BackendAPI/.env locally, or in the service environment on "
         "Render. For a test or build environment that needs no real database, "
         "any valid DSN will do: postgresql+asyncpg://ci:ci@localhost:5432/ci"

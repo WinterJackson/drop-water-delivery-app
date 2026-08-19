@@ -39,9 +39,11 @@ def _dsn() -> str:
 
     load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-    raw = os.getenv("NEONDB_URL") or os.getenv("DATABASE_URL")
+    from db.session import database_url
+
+    raw = database_url()
     if not raw:
-        print("NEONDB_URL is not set.", file=sys.stderr)
+        print("DATABASE_URL is not set.", file=sys.stderr)
         raise SystemExit(2)
     return re.sub(r"^postgresql\+\w+://", "postgresql://", raw).split("?")[0]
 

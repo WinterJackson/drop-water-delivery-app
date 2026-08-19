@@ -16,10 +16,12 @@ eight scheduled sweeps can run at all — no auto-cancel of unpaid orders, no
 refund processing, no reassignment of undispatched orders, no push-token
 cleanup. Set this before creating the cron-job.org jobs (`docs/cron-jobs.md`).
 
-### Database — `NEONDB_URL`, `DB_SSL_ROOT_CERT`
+### Database — `DATABASE_URL`, `DB_SSL_ROOT_CERT`
 
-`NEONDB_URL` is the DSN, named historically; it holds whichever provider is in
-use. It must carry the `postgresql+asyncpg://` prefix, and `db/session.py`
+`DATABASE_URL` is the DSN. It was `NEONDB_URL`, which named a vendor this
+platform no longer uses — the old name is still read as a deprecated fallback so
+a deploy carrying only the new name starts against an environment still holding
+the old one, and the new name wins when both are set. It must carry the `postgresql+asyncpg://` prefix, and `db/session.py`
 strips any `?sslmode=`/`?channel_binding=` query string, since asyncpg does not
 accept those as URL parameters.
 
@@ -565,7 +567,7 @@ change — see "Set on Render today that should change" above.)
 `DB_ENCRYPTION_KEY`, `EMAIL_FROM`, `ENV`, `FRONTEND_CLERK_API_KEY`,
 `GOOGLE_MAPS_SERVER_API_KEY`, `MPESA_BASE_URL`, `MPESA_CALLBACK_URL`,
 `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_PASSKEY`,
-`MPESA_SHORTCODE`, `NEONDB_URL`, `PLATFORM_NAME`, `REDIS_URL`, `RESEND_API_KEY`,
+`MPESA_SHORTCODE`, `DATABASE_URL`, `PLATFORM_NAME`, `REDIS_URL`, `RESEND_API_KEY`,
 `SENTRY_DSN`, `SQL_ECHO`.
 
 Two worth double-checking rather than assuming:

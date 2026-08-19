@@ -15,7 +15,9 @@ def run():
     print("Connecting to db...")
     from dotenv import load_dotenv
     load_dotenv()
-    engine = create_engine(os.getenv("NEONDB_URL").replace("postgresql+asyncpg", "postgresql+psycopg2"))
+    from db.session import database_url
+
+    engine = create_engine(database_url().replace("postgresql+asyncpg", "postgresql+psycopg2"))
     
     # We will instantiate the encrypter directly to manually encrypt
     enc_type = StringEncryptedType(String, DB_ENCRYPTION_KEY, AesEngine, 'pkcs5')

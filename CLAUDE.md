@@ -51,7 +51,7 @@ arq worker.WorkerSettings          # second terminal
 pytest -q --ignore=tests/test_multi_store_integration.py
 ```
 
-`tests/test_admin_e2e.py` connects to whatever `NEONDB_URL` names — it is the
+`tests/test_admin_e2e.py` connects to whatever `DATABASE_URL` names — it is the
 one file in the suite that touches a real database. Pointed at a managed
 provider, **every `pytest` run spends metered compute**; that is how the Neon
 project reached its quota and took the deployed API down with it. Point it at
