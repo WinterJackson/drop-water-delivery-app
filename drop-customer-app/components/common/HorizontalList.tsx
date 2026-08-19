@@ -103,7 +103,14 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 					</PressableScale>
 				)}
 			</View>
-			<View style={{ height: w * 0.52, width: '100%', marginTop: 5 }}>
+			{/* Tall enough for the card's worst case, not for its best.
+			    The image is `w * 0.38` square and the text block under it can
+			    run to four lines: the name, a price row that wraps when the
+			    original price will not sit beside the discounted one, and the
+			    delivery estimate. At `w * 0.52` that overflowed and the shelf
+			    cropped the bottom of every wrapped card — the container height
+			    had been sized for a two-line block and the block had grown. */}
+			<View style={{ height: w * 0.62, width: '100%', marginTop: 5 }}>
 				<FlatList
 					horizontal
 					data={data}
@@ -133,6 +140,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 								isAdding={isAdding(item.id)}
 								userLat={User?.lat}
 								userLng={User?.lng}
+								fillHeight
 							/>
 						) : (
 							<PressableScale
