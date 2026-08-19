@@ -247,4 +247,35 @@ describe("a product's discount percentage", () => {
     expect(discountPercent("100.00", null)).toBe(0);
     expect(discountPercent("100.00", "-5.00")).toBe(0);
   });
+
+  /**
+   * The badge is a claim about money, so it may understate a saving and must
+   * never overstate one. `discount` is an absolute amount in shillings — the
+   * server prices a line as `price - discount` — and the percentage is derived
+   * from it, so flooring is what keeps the claim safe: 13.95% advertises as
+   * 13%, never 14%.
+   *
+   * Checked over the shape of a real catalogue rather than a handful of
+   * literals, because the failure this guards against is a rounding direction,
+   * and one example either rounds or it does not.
+   */
+  it("never advertises more of a saving than the customer gets", () => {
+    for (let price = 50; price <= 2000; price += 37) {
+      for (let discount = 1; discount < price; discount += 13) {
+        const shown = discountPercent(String(price) + ".00", String(discount) + ".00");
+        const exact = (discount * 100) / price;
+        expect(shown).toBeLessThanOrEqual(exact);
+        // And it must not throw the saving away either — never more than a
+        // whole point light, which is all flooring can cost.
+        expect(shown).toBeGreaterThan(exact - 1);
+      }
+    }
+  });
+
+  it("agrees with discountedPrice about what the discount is", () => {
+    // Both read the same column the same way: an absolute amount, not a rate.
+    // If one is ever changed to treat it as a percentage, this fails.
+    expect(discountedPrice("430.00", "60.00")).toBe("370.00");
+    expect(discountPercent("430.00", "60.00")).toBe(13);
+  });
 });

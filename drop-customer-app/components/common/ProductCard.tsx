@@ -88,10 +88,21 @@ export default function ProductCard({
                           }
                 }
             >
+                {/* Computed from the two figures beside it, never stored.
+                    `discount` is an absolute amount in shillings — the server
+                    prices a line as `price - discount` — so the badge is
+                    `discount / price`, and `discountPercent` floors it. Flooring
+                    is the safe direction: a 13.95% saving advertises as 13%, and
+                    the badge can never claim more than the customer gets.
+
+                    `isZeroMoney(item.price)`, not `item.price`. The string
+                    "0.00" is truthy in JavaScript, so a price of zero took the
+                    percentage branch and rendered a red "0%" ribbon instead of
+                    the "Sale" fallback that exists for exactly that case. */}
                 {!isZeroMoney(item.discount) && (
                     <View className="absolute w-[65px] bg-red-500 z-20 top-0 right-0 items-center justify-center rotate-45 translate-x-5 translate-y-2">
                         <Text className="text-white font-sans-semibold">
-                            {item.price ? `${discountPercent(item.price, item.discount)}%` : 'Sale'}
+                            {isZeroMoney(item.price) ? 'Sale' : `${discountPercent(item.price, item.discount)}%`}
                         </Text>
                     </View>
                 )}
@@ -200,7 +211,15 @@ export default function ProductCard({
                     <PressableScale
                         activeOpacity={0.6}
                         accessibilityLabel={`Add ${item.name} to cart`}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        // Pulled up and out beyond the row's own padding, rather
+                        // than shrinking that padding — the text keeps its
+                        // margins and only the control moves. 4dp of the 8dp
+                        // `pr-2`/`py-2` remains on each side, so the card's
+                        // `overflow-hidden` still cannot clip it, and `hitSlop`
+                        // grows to match so the touch target does not shrink
+                        // with the inset.
+                        style={{ marginTop: -4, marginRight: -4 }}
                         onPress={onAddToCart}
                     >
                         <View

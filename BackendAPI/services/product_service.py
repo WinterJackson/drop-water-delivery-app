@@ -105,9 +105,19 @@ def _orderable_products(user_lat: float | None, user_lng: float | None):
 
 
 async def fetch_products_with_offer(session: AsyncSession, limit: int = 20, offset: int = 0, user_lat: float | None = None, user_lng: float | None = None) -> list[BaseProduct]:
-  # `discount` is a percentage: on any real catalogue dozens of products share
-  # each value, so this ordering ties almost everywhere and the offset window
-  # would land differently on every execution — see `utils/paging`.
+  # `discount` is an absolute amount in shillings, **not** a percentage:
+  # `cart_services` prices a line as `product.price - product.discount`, and
+  # that is the figure frozen onto the cart item and the order. This comment
+  # used to say the opposite, which is the more dangerous kind of wrong — a
+  # reader who believes it renders the column straight into the shelf badge and
+  # a KSH 60 discount becomes "60% off", or "corrects" `discountedPrice` into a
+  # percentage subtraction and every price on the platform moves.
+  #
+  # The tie-breaking below is still needed, just not for the reason that was
+  # given. Discounts are round shilling amounts drawn from a small set, so many
+  # products share one: three of the eight largest on this catalogue are 35.00.
+  # The ordering therefore ties almost everywhere and the offset window would
+  # land differently on every execution — see `utils/paging`.
   query = _orderable_products(user_lat, user_lng).where(Product.discount > 0).order_by(*stable(Product.discount.desc(), key=Product.id)).offset(offset).limit(limit)
   result = await session.execute(query)
   products = result.unique().scalars().all()
