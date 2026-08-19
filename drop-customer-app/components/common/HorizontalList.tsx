@@ -211,8 +211,17 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 								<View className="px-3 py-2">
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
+										/* `pr-9` reserves the gutter the add-to-cart button sits
+										   in. That button is absolutely positioned inside this
+										   same block (bottom-8 right-8, 32px wide), so it is out
+										   of flow and the name knows nothing about it — a long
+										   one runs straight underneath, and `numberOfLines={1}`
+										   ellipsises against the card edge rather than against
+										   the button. On the shelf that read as
+										   "Bale 1L Branded (12-p[cart]ck)". Only the product
+										   branch needs it; the vendor branch has no button. */
 										<Text
-											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
+											className={`font-sans-bold text-sm pr-9 ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
 										>
 											{item.name}
@@ -229,7 +238,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
 										// <---------------------<PRODUCT PRICE>--------------------->
-										<View className={`flex-row gap-2 items-center mt-0.5`}>
+										<View className={`flex-row gap-2 items-center mt-0.5 pr-9`}>
 											<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 												{formatMoney(discountedPrice(item.price, item.discount))}
 											</Text>
