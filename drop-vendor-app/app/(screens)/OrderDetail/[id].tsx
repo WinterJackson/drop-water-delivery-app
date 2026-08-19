@@ -415,9 +415,17 @@ export default function OrderDetail() {
               </View>
               {order.is_welcome_offer && (
                 <View className="mt-3 p-3 bg-green-500/10 rounded-[16px] border border-green-500/20 flex-row items-center gap-2">
-                  <Ionicons name="gift" size={20} color="green-500" />
+                  {/* A colour value, not a Tailwind class. `color` on an
+                      Ionicons is passed to the native glyph, which cannot
+                      resolve "green-500" and silently falls back to black —
+                      the icon had never once rendered green. */}
+                  <Ionicons name="gift" size={20} color="#22c55e" />
+                  {/* The rate is `welcome_discount_rate`, a settings row, and it
+                      applies to one bottle's deposit. Naming a figure the
+                      console can move puts a number on the vendor's screen that
+                      no longer matches the one the customer was charged. */}
                   <Text className="text-green-500 text-xs font-sans-bold flex-1 leading-5">
-                    Welcome Offer (30% off) applied to this order.
+                    Welcome Offer applied to this order.
                   </Text>
                 </View>
               )}

@@ -614,8 +614,15 @@ export default function Cart() {
 													<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
 														Subtotal
 													</Text>
+													{/* The quote's own subtotal, not the cart's stored
+													    `total_amount`. That column is written when the basket
+													    changes; `product_subtotal` is summed from the same items
+													    the total below was built from. Rendering the stored one
+													    puts a figure on this line that the Total does not agree
+													    with, which is the whole defect this screen was rewritten
+													    to remove. */}
 													<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-														{formatMoney(Cart?.total_amount)}
+														{formatMoney(subtotal)}
 													</Text>
 												</View>
 												{!isZeroMoney(bottle_fee_total) && (
@@ -663,10 +670,17 @@ export default function Cart() {
 													<View className="flex-row justify-between items-center pt-2">
 														<View className="flex-col">
 															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
-																First Bottle Discount
+																Welcome Offer
 															</Text>
+															{/* No percentage in this string. `welcome_discount_rate`
+															    is a settings row an administrator edits from the
+															    console, and it applies to **one** bottle's deposit,
+															    not the whole one — so "30% off deposit" was wrong
+															    about the rate the moment anybody moved it, and wrong
+															    about the base on any order of more than one bottle.
+															    The amount beside it is already the truth. */}
 															<Text className={`text-xs italic ${darkTheme ? 'text-green-400/80' : 'text-green-600/80'}`}>
-																30% Welcome Offer Applied
+																Off your first bottle's deposit
 															</Text>
 														</View>
 														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-green-400' : 'text-green-600'}`}>
@@ -719,31 +733,6 @@ export default function Cart() {
 														</Text>
 														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
 															{formatMoney(deliveryMarkup)}
-														</Text>
-													</View>
-												)}
-												{!isZeroMoney(bottle_fee_total) && (
-													<View className="flex-row justify-between items-center pt-2">
-														<View className="flex-col">
-															<Text className={`text-base font-sans-medium ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>
-																Bottle Deposit
-															</Text>
-															<Text className={`text-xs ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
-																Refundable when you return the bottle
-															</Text>
-														</View>
-														<Text className={`text-lg font-sans-semibold ${darkTheme ? 'text-white' : 'text-black'}`}>
-															{formatMoney(bottle_fee_total)}
-														</Text>
-													</View>
-												)}
-												{!isZeroMoney(welcome_discount) && (
-													<View className="flex-row justify-between items-center pt-2">
-														<Text className="text-base font-sans-medium" style={{ color: BRAND.primary }}>
-															Welcome Offer (30% off deposit)
-														</Text>
-														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
-															- {formatMoney(welcome_discount)}
 														</Text>
 													</View>
 												)}
