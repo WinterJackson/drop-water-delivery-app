@@ -315,7 +315,16 @@ async def get_vendor_orders(
         .options(
             joinedload(Order.order_item).joinedload(OrderItem.product),
             joinedload(Order.user),
-            joinedload(Order.deliverer)
+            joinedload(Order.deliverer),
+            # `BaseOrder.vendor` is serialised on every row here and was never
+            # loaded. It survived only because `get_active_store` puts this one
+            # store in the session's identity map and every order on the page
+            # belongs to it, so the attribute resolved without SQL — the same
+            # accident that hid the missing `Order.deliverer` load on the rider
+            # side. Nothing about that is guaranteed: a session that has not
+            # already fetched the store raises `raise_on_sql` mid-serialisation,
+            # which is a 500 on the screen a shop runs its day from.
+            joinedload(Order.vendor)
         )
         .order_by(*stable(Order.created_at.desc(), key=Order.id))
         .offset(skip)

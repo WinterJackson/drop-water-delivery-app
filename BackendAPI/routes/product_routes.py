@@ -1,5 +1,10 @@
 from fastapi import APIRouter, Depends, Query
-from schemas.product_schemas import ProductFull, RequestBodyProductId
+from schemas.product_schemas import (
+    CategoryProductsPage,
+    ProductFull,
+    ProductsPage,
+    RequestBodyProductId,
+)
 from schemas.common_schemas import RequestBodyPage
 from sqlalchemy.ext.asyncio import AsyncSession
 from dependencies.dependencies import get_db
@@ -76,7 +81,7 @@ async def get_categories():
     return result
 
 
-@router.get("/products-by-category")
+@router.get("/products-by-category", response_model=CategoryProductsPage)
 async def get_products_by_category(
     category: str = Query(..., description="Category key from /categories endpoint"),
     limit: int = Query(20, ge=1, le=100),
@@ -91,9 +96,13 @@ async def get_products_by_category(
     if point is None:
         # No delivery address: nothing here can be ordered, so nothing is
         # listed. The app asks for the address instead of rendering a shelf.
-        return []
+        # The *envelope*, not a bare list — this branch used to return `[]`
+        # while the success path returned `{"data": ...}`, so one endpoint had
+        # two wire shapes and the client carried an `Array.isArray(json)` test
+        # to tell them apart. A response_model makes that impossible.
+        return {"data": [], "total_count": 0, "limit": limit, "offset": offset}
 
-    cache_key = f"products_by_cat:{category}:{limit}:{offset}:{_location_key(point)}"
+    cache_key = f"products_by_cat:v2:{category}:{limit}:{offset}:{_location_key(point)}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -109,7 +118,7 @@ async def get_product(request_body: RequestBodyProductId, db : AsyncSession =  D
   product = await get_product_details(session=db, id=request_body.id)
   return product
 
-@router.get("/products_with_discount")
+@router.get("/products_with_discount", response_model=ProductsPage)
 async def get_products_with_offer(db: AsyncSession = Depends(get_db), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), user=Depends(get_current_user)):
   from core.redis_client import cache_get, cache_set
 
@@ -117,7 +126,7 @@ async def get_products_with_offer(db: AsyncSession = Depends(get_db), limit: int
   if point is None:
       return {"data": [], "limit": limit, "offset": offset}
 
-  cache_key = f"products_with_discount:{limit}:{offset}:{_location_key(point)}"
+  cache_key = f"products_with_discount:v2:{limit}:{offset}:{_location_key(point)}"
   cached = await cache_get(cache_key)
   if cached:
       return cached
@@ -129,7 +138,7 @@ async def get_products_with_offer(db: AsyncSession = Depends(get_db), limit: int
   return result
 
 
-@router.post("/random_paginated_products")
+@router.post("/random_paginated_products", response_model=list[ProductFull])
 async def get_paginated_products(request: RequestBodyPage, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
   page_number = request.page
   point = await _delivery_point(db, user["sub"])

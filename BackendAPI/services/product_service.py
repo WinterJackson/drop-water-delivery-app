@@ -73,9 +73,25 @@ def _orderable_products(user_lat: float | None, user_lng: float | None):
     from services.dispatch_policy import within_service_radius
     from services.vendor_service import discoverable_vendor
 
+    # `contains_eager`, not a second `joinedload`: `Vendors` is already joined
+    # above to filter on it, so this reuses that join rather than emitting
+    # another one. Without an eager load the relationship is `raise_on_sql` and
+    # any schema that serialises it fails at the first row.
+    #
+    # It is loaded because these listings quote a delivery estimate, which is
+    # measured from the store's coordinates. **Never eager-load this without a
+    # `response_model`**: with no schema FastAPI serialises the ORM object
+    # through `jsonable_encoder`, which walks `__dict__` and would put the
+    # owner's name, email, phone number and `preferred_payment_method` — the
+    # store's payout destination — into every product listing, and into the
+    # Redis copy of it. `VendorSnippet` is the storefront view and the only
+    # shape these routes may return.
+    from sqlalchemy.orm import contains_eager
+
     query = (
         select(Product)
         .join(Vendor, Product.vendor_id == Vendor.id)
+        .options(contains_eager(Product.vendor))
         .where(Product.is_available == True, live_product(), discoverable_vendor())
     )
 
@@ -121,4 +137,6 @@ async def fetch_products_by_category(session: AsyncSession, category: str, limit
   result = await session.execute(query)
   products = result.unique().scalars().all()
   
-  return {"data": products, "total": total, "limit": limit, "offset": offset}
+  # `total_count`, not `total`: `total` is money everywhere else in this
+  # codebase and is validated as a decimal string.
+  return {"data": products, "total_count": total, "limit": limit, "offset": offset}

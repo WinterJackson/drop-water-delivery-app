@@ -146,15 +146,27 @@ def _schema_relationship_fields() -> dict[str, set[str]]:
                 and re.search(r"[A-Z]", ast.unparse(stmt.annotation))
             }
             bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
-            declared[node.name] = (fields, bases)
+            # Composition counts as well as inheritance. A page envelope
+            # (`data: list[ProductFull]`) serialises everything `ProductFull`
+            # does, but its own field is called `data`, which is not the name of
+            # any relationship — so following bases alone drops it and the route
+            # returning it is never checked at all. That is how three product
+            # listings could name a schema carrying `vendor` and go unexamined.
+            composed = [
+                referenced
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign)
+                for referenced in re.findall(r"\b([A-Z]\w+)\b", ast.unparse(stmt.annotation))
+            ]
+            declared[node.name] = (fields, bases + composed)
 
     def resolved(name: str, seen: frozenset = frozenset()) -> set[str]:
         if name not in declared or name in seen:
             return set()
-        own, bases = declared[name]
+        own, related = declared[name]
         inherited: set[str] = set()
-        for base in bases:
-            inherited |= resolved(base, seen | {name})
+        for other in related:
+            inherited |= resolved(other, seen | {name})
         return own | inherited
 
     return {name: resolved(name) for name in declared if resolved(name)}
@@ -196,16 +208,35 @@ def test_every_serialised_relationship_is_eager_loaded():
             body = ast.get_source_segment(source, node) or ""
             loaded = set(_EAGER_RE.findall(body))
 
-            # The route usually delegates. Follow one level into `services/` —
-            # that is where every one of these queries actually lives.
-            for call in ast.walk(node):
-                if not isinstance(call, ast.Call):
-                    continue
-                name = call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", "")
-                if name in service_sources:
-                    loaded |= set(_EAGER_RE.findall(service_sources[name][1]))
-                elif name in route_sources and name != node.name:
-                    loaded |= set(_EAGER_RE.findall(route_sources[name][1]))
+            # The route delegates, and so does the service. Following a single
+            # level found the load only when the query was written inline in the
+            # service function; the moment three listings shared one query
+            # builder, the `contains_eager` sat one level further down and the
+            # guard reported a route that was correct. Follow the chain instead,
+            # bounded so a cycle cannot hang the suite.
+            def _bodies(source_text: str, depth: int, seen: frozenset) -> set[str]:
+                found = set(_EAGER_RE.findall(source_text))
+                if depth <= 0:
+                    return found
+                try:
+                    inner = ast.parse(source_text)
+                except SyntaxError:
+                    return found
+                for call in ast.walk(inner):
+                    if not isinstance(call, ast.Call):
+                        continue
+                    called = (
+                        call.func.attr if isinstance(call.func, ast.Attribute)
+                        else getattr(call.func, "id", "")
+                    )
+                    if not called or called in seen:
+                        continue
+                    table = service_sources if called in service_sources else route_sources
+                    if called in table:
+                        found |= _bodies(table[called][1], depth - 1, seen | {called})
+                return found
+
+            loaded |= _bodies(body, 3, frozenset({node.name}))
 
             checked += 1
             missing = required - loaded

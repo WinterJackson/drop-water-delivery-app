@@ -97,6 +97,38 @@ class ProductFull(BaseProduct):
   
   model_config = {"from_attributes": True}
 
+class ProductsPage(BaseModel):
+  """The offers envelope: a page of products and the window that produced it.
+
+  These listings had no `response_model` at all, so FastAPI serialised the ORM
+  rows through `jsonable_encoder` — every loaded column, whatever it was. That
+  was survivable only while `Product.vendor` was unloaded. The moment it is
+  eager-loaded (and it must be, because these cards quote a delivery estimate
+  measured from the store) the encoder walks into the `Vendors` row and emits
+  `owners_name`, `email`, `phone_number` and `preferred_payment_method` — the
+  store's payout destination — to every customer, and into the Redis copy.
+
+  Naming the shape is what stops that: `ProductFull.vendor` is a
+  `VendorSnippet`, which is the storefront a customer may see.
+  """
+  data: list[ProductFull]
+  limit: int
+  offset: int
+
+
+class CategoryProductsPage(ProductsPage):
+  """The category envelope, which also reports how many products matched.
+
+  `total_count`, not `total`. On this platform `total` is money — it is the
+  frozen order total on `Orders` and the charged figure on a quote — and
+  `MONEY_FIELDS` in `test_money_serialisation.py` treats a field of that name
+  as a decimal string. A row count called `total` is both a guard failure and,
+  worse, a genuinely ambiguous name sitting two lines from `limit` and
+  `offset`.
+  """
+  total_count: int
+
+
 class RequestBodyProductId(BaseModel):
   id: UUID
   
