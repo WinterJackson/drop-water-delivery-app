@@ -110,7 +110,17 @@ export default function ProductCard({
                     `flex-1` is safe here because the row's width is definite —
                     the card sets it — unlike `flex-1` in an auto-height column,
                     which collapses to nothing and clipped this very text. */}
-                <View className="px-3 py-2 flex-row items-center gap-2">
+                {/* `pr-2` rather than `px-3`: the add control sits nearer the
+                    card's right edge than the text does, which is what stops it
+                    reading as part of the price line. Still inside the padding,
+                    so `overflow-hidden` never clips it.
+                    `items-start` rather than `items-center`: centring measured
+                    the button against the whole text column, so it drifted down
+                    as that column grew — one height beside a single price line,
+                    another once the price wrapped, another again with the
+                    delivery estimate. Aligning to the top pins it to the product
+                    name instead, which is the one row every card has. */}
+                <View className="pl-3 pr-2 py-2 flex-row items-start gap-2">
                     {/* `overflow-hidden` is the hard guarantee, not decoration.
                         A React Native `View` does not clip by default, so a
                         child wider than this column is painted *outside* it —
