@@ -1,5 +1,6 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
+import { useDeliveryScope } from '@/hooks/queries/useDeliveryScope';
 import { flattenPages } from '@/utils/paging';
 import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 
@@ -53,8 +54,9 @@ interface OffersPage {
  */
 export function useProductsWithOffer() {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useInfiniteQuery<OffersPage, Error>({
-        queryKey: ['products', 'offers'],
+        queryKey: ['products', 'offers', scope],
         initialPageParam: 0,
         queryFn: async ({ pageParam }) => {
             const json: any = await api.get(ROUTES.GET_PRODUCTS_WITH_OFFER, {
@@ -91,16 +93,18 @@ export function useCategories() {
 
 export function usePaginatedProducts(page: number) {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery<Product[], Error>({
-        queryKey: ['products', 'paginated', page],
+        queryKey: ['products', 'paginated', scope, page],
         queryFn: () => api.post<Product[]>(ROUTES.GET_PAGINATED_PRODUCTS, { page }),
     });
 }
 
 export function useProductsByCategory(category: string) {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery({
-        queryKey: ['products', 'category', category],
+        queryKey: ['products', 'category', scope, category],
         queryFn: async () => {
             const json: any = await api.get(ROUTES.GET_PRODUCTS_BY_CATEGORY, { params: { category } });
             return Array.isArray(json) ? json : json?.data ?? [];

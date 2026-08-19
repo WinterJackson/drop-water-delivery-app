@@ -1,5 +1,6 @@
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
+import { useDeliveryScope } from '@/hooks/queries/useDeliveryScope';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { nextOffset } from '@/utils/paging';
 
@@ -24,9 +25,10 @@ import { nextOffset } from '@/utils/paging';
 
 export function useSearchProducts(query: string, category: string = 'all', limit: number = 20, mode: string | null = null) {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
 
     return useInfiniteQuery({
-        queryKey: ['search', 'products', query, category, limit, mode],
+        queryKey: ['search', 'products', scope, query, category, limit, mode],
         queryFn: ({ pageParam = 0 }) =>
             api.get<any[]>(ROUTES.SEARCH, {
                 params: {
@@ -50,9 +52,10 @@ export function useSearchProducts(query: string, category: string = 'all', limit
 
 export function useSearchVendors(query: string, limit: number = 20) {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
 
     return useInfiniteQuery({
-        queryKey: ['search', 'vendors', query, limit],
+        queryKey: ['search', 'vendors', scope, query, limit],
         queryFn: ({ pageParam = 0 }) =>
             api.get<any[]>(ROUTES.SEARCH_VENDORS, {
                 params: {

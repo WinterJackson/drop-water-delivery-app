@@ -2,6 +2,7 @@ import type { Vendor } from '@/types/models';
 import { retryTransientOnly } from '@/API/errors';
 import { ROUTES } from '@/API/routes/ApiRoutes';
 import { useApiRequest } from '@/API/useApiClient';
+import { useDeliveryScope } from '@/hooks/queries/useDeliveryScope';
 import { flattenPages, nextOffset } from '@/utils/paging';
 import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 
@@ -31,8 +32,9 @@ export function useAllVendors() {
 
 export function useNearByVendors() {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery({
-        queryKey: ['vendors', 'nearby'],
+        queryKey: ['vendors', 'nearby', scope],
         queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_NEARBY_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
@@ -41,8 +43,9 @@ export function useNearByVendors() {
 
 export function useTopRatedVendors() {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery({
-        queryKey: ['vendors', 'topRated'],
+        queryKey: ['vendors', 'topRated', scope],
         queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_TOP_RATED_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
         retry: retryTransientOnly(2),
@@ -51,8 +54,9 @@ export function useTopRatedVendors() {
 
 export function useVendorsByType(type: string) {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery({
-        queryKey: ['vendors', 'type', type],
+        queryKey: ['vendors', 'type', scope, type],
         queryFn: async () => unwrap(await api.post(ROUTES.GET_VENDORS_BY_TYPE, { vendor_type: type })),
         enabled: !!type,
         staleTime: DISCOVERY_STALE_TIME,
@@ -61,8 +65,9 @@ export function useVendorsByType(type: string) {
 
 export function useTopBrandsVendors() {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useQuery({
-        queryKey: ['vendors', 'topBrands'],
+        queryKey: ['vendors', 'topBrands', scope],
         queryFn: async () => unwrap<Vendor>(await api.get(ROUTES.GET_TOP_BRAND_VENDORS)),
         staleTime: DISCOVERY_STALE_TIME,
     });
@@ -83,8 +88,9 @@ export const DIRECTORY_PAGE_SIZE = 20;
  */
 export function useVendorDirectory(searchQuery: string = '', filter: string = 'all') {
     const api = useApiRequest();
+    const scope = useDeliveryScope();
     return useInfiniteQuery<Vendor[], Error>({
-        queryKey: ['vendors', 'directory', searchQuery, filter],
+        queryKey: ['vendors', 'directory', scope, searchQuery, filter],
         initialPageParam: 0,
         queryFn: async ({ pageParam }) =>
             unwrap<Vendor>(
