@@ -26,6 +26,14 @@ redis_settings = RedisSettings.from_dsn(redis_url)
 # --- Background Task Functions ---
 
 async def startup(ctx):
+    # The same check the API makes. A background process hitting a missing
+    # column fails every sweep it runs, and unlike a request nobody is watching
+    # for the 500 — the queue simply stops being correct.
+    from db.schema_guard import assert_models_match_database
+    from db.session import engine
+
+    await assert_models_match_database(engine)
+
     logger.info("ARQ Worker starting up...")
 
 async def shutdown(ctx):

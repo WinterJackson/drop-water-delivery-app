@@ -613,13 +613,43 @@ step 3 of the sequence in the migration's own docstring has actually happened:
 ALLOW_STAFF_COLUMN_DROP=true alembic upgrade head
 ```
 
-**Nothing runs this for you.** The Dockerfile starts `uvicorn` and there is no
-pre-deploy command, so a push deploys code that may be ahead of the schema. For
-an additive column that means `UndefinedColumn` on every query touching the
-table until somebody runs the upgrade. Either run it before the push, or add a
-Render **Pre-Deploy Command** with the line below so the two can never separate.
+### The Pre-Deploy Command
 
-Until then, routine deploys should run:
+Render → the API service → **Settings → Build & Deploy → Pre-Deploy Command**:
+
+```
+python scripts/predeploy.py
+```
+
+Render runs it after the image is built and before any traffic moves, and a
+non-zero exit aborts the deploy with the previous release still serving. That is
+the ordering this platform needs and did not have: pushes deploy automatically
+while `alembic upgrade` was something a person remembered, so code could reach
+production ahead of its own schema — and one missing column is `UndefinedColumn`
+on *every* query touching that table, not a degraded corner of the product.
+
+The script does two things, because this repository has two kinds of database
+and only one of them is a migration chain:
+
+1. Upgrades to the last revision before the gate, **discovered** from the chain
+   rather than written down, so it does not go stale. Never `head` — the head is
+   the gated drop and reaching for it would fail every deploy.
+2. Compares `Base.metadata` against `information_schema` and refuses on any
+   table or column the models declare and the database lacks.
+
+Step 2 is the one that matters here. The deployed database was built by
+`scripts/bootstrap_database.py` — `create_all`, then `stamp` at the head — so
+`alembic_version` reads `e6b2c8d40f17` while no revision has ever run against
+it. Every `alembic upgrade` is a no-op, which is exactly how `Orders`
+came to be missing two columns while alembic reported itself completely up to
+date. Step 1 alone would have reported success and changed nothing.
+
+The same check runs at startup in `main.py` and `worker.py`, so an instance that
+somehow starts against a stale schema never passes its health check.
+`ALLOW_SCHEMA_DRIFT=true` is the escape hatch for a false positive — one deploy,
+not a permanent variable, exactly like `ALLOW_STAFF_COLUMN_DROP`.
+
+Until the Pre-Deploy Command exists, routine deploys should run:
 
 ```bash
 alembic upgrade c8b4f0d92e17

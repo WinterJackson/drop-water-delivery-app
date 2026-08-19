@@ -231,6 +231,18 @@ round; its `ALTER`s are `IF NOT EXISTS` precisely so the window can be closed by
 hand without the later upgrade colliding, and any new column migration should
 be written the same way.
 
+`scripts/predeploy.py` is the fix, wired to Render's Pre-Deploy Command: it
+upgrades to the last ungated revision (discovered, not hardcoded) and then
+refuses the deploy if the models still declare a table or column the database
+has not got. The second half is the load-bearing one — the deployed database was
+**bootstrapped**, so `alembic_version` reads the head while no revision has ever
+run against it and every upgrade is a no-op. `db/schema_guard.py` runs the same
+check at startup in both `main.py` and `worker.py`, so an instance on a stale
+schema never becomes healthy and the previous release keeps serving. Only the
+dangerous direction is checked: a column the database has spare is fine, and is
+what the safe half of an expand/contract looks like. `ALLOW_SCHEMA_DRIFT=true`
+is the one-deploy escape hatch.
+
 A new revision goes **before** the gated drop, never after it — anything parented
 on `e6b2c8d40f17` could only ever run on a deploy that had already accepted the
 column drop. So a new revision parents on whatever is currently last-before-gate

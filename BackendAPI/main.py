@@ -150,6 +150,17 @@ async def lifespan(app: FastAPI):
     from routes.websocket_routes import manager
     import asyncio
 
+    # Before anything is served: does this database have the columns the mapper
+    # is about to select? A deploy can land ahead of its schema — they are not
+    # carried together — and one missing column is a 500 on every request that
+    # touches the table, not a degraded corner of the product. Raising here means
+    # the instance never passes its health check and the previous release keeps
+    # serving, so the deploy fails instead of the platform.
+    from db.schema_guard import assert_models_match_database
+    from db.session import engine
+
+    await assert_models_match_database(engine)
+
     # Start WebSocket PubSub
     await manager.start_pubsub()
 
