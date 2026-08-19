@@ -214,12 +214,16 @@ export default function ProductCard({
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         // Pulled up and out beyond the row's own padding, rather
                         // than shrinking that padding — the text keeps its
-                        // margins and only the control moves. 4dp of the 8dp
-                        // `pr-2`/`py-2` remains on each side, so the card's
-                        // `overflow-hidden` still cannot clip it, and `hitSlop`
-                        // grows to match so the touch target does not shrink
-                        // with the inset.
-                        style={{ marginTop: -4, marginRight: -4 }}
+                        // margins and only the control moves. The row reserves
+                        // 8dp (`pr-2`/`py-2`); the button takes 6 of them back
+                        // on the right and 4 at the top, leaving a 2dp margin
+                        // from the card's edge. That 2dp is the floor, not a
+                        // preference: the card draws a 1dp border and clips to
+                        // `overflow-hidden`, so a control flush against it reads
+                        // as a rendering fault rather than a design. `hitSlop`
+                        // grows to match, so the touch target does not shrink as
+                        // the control insets.
+                        style={{ marginTop: -4, marginRight: -6 }}
                         onPress={onAddToCart}
                     >
                         <View
