@@ -27,6 +27,17 @@ jest.mock('@react-native-community/netinfo', () => ({
   refresh: jest.fn(() => Promise.resolve({ type: 'wifi', isConnected: true })),
 }));
 
+// AsyncStorage is a native module, so importing it under node throws rather
+// than degrading — and `context/ThemeContext` imports it at module scope to
+// remember the chosen theme. Anything rendering a themed component therefore
+// fails on the import, before a single assertion runs. This is the mock the
+// package itself ships for jest, not a hand-written stand-in: it keeps the real
+// promise-returning API, so a component that awaits a read still behaves like
+// one that awaits a read.
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 // `__DEV__` is a React Native global. Several modules branch on it to decide
 // whether to log; under jest it is already true, but asserting it keeps a
 // change to the harness from silently changing what the code does.

@@ -104,7 +104,14 @@ export default function FavouritesList() {
             
             return (
               <PressableScale
-                key={fav.id}
+                // Keyed on the vendor, not the favourite row. `id` is
+                // `temp-<vendorId>` while an optimistic add is in flight and
+                // the server's id once it settles, so keying on it changes the
+                // key under a chip that is already on screen and React
+                // remounts it. `vendor_id` is stable across that swap, unique
+                // per row (a favourite is one user-vendor pair), and is
+                // already the identity `selectedFavId` is compared against.
+                key={fav.vendor_id}
                 accessibilityLabel={`${vendor?.business_name || "Favourite vendor"}. Long press to remove from favourites.`}
                 onPress={() => handleSelect(fav.vendor_id)}
                 onLongPress={() => confirmRemove(fav.vendor_id, vendor?.business_name || "This vendor")}
