@@ -24,8 +24,12 @@ export interface VendorDashboard {
     pending_orders: number;
     product_count: number;
     rating: number;
-    /** Seven totals, Monday first — what `WeeklyRevenueChart` plots. */
-    weekly_revenue: number[];
+    /**
+     * Seven totals, Monday first, as decimal **strings** — what
+     * `WeeklyRevenueChart` plots. Bucketed by the weekday the order happened
+     * in *Nairobi*, not on the server's clock.
+     */
+    weekly_revenue: string[];
     /** At or below their own threshold. Empty when nothing needs restocking. */
     low_stock_products: LowStockProduct[];
 }

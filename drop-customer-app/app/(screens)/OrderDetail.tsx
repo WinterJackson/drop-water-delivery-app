@@ -706,59 +706,81 @@ export default function OrderDetail() {
                         </Text>
                     </View>
 
-                    {order.service_fee ? (
+                    {!isZeroMoney(order.service_fee) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Service Fee</Text>
                             <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
                                 {formatMoney(order.service_fee)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
-                    {order.surge_fee ? (
+                    {!isZeroMoney(order.surge_fee) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Surge Pricing</Text>
                             <Text className={`font-sans-semibold text-orange-500`}>
                                 {formatMoney(order.surge_fee)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
-                    {order.payload_surcharge ? (
+                    {!isZeroMoney(order.payload_surcharge) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Large Order Surcharge</Text>
                             <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
                                 {formatMoney(order.payload_surcharge)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
-                    {order.staircase_surcharge ? (
+                    {!isZeroMoney(order.staircase_surcharge) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Surcharge</Text>
                             <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
                                 {formatMoney(order.staircase_surcharge)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
-                    {order.welcome_discount ? (
+                    {/* Both are columns on the order and were on neither
+                        response schema, so no screen could show them. The
+                        deposit is the largest line on a `new_bottle` order —
+                        without it this column cannot reach the Total below. */}
+                    {!isZeroMoney(order.bottle_deposit) && (
+                        <View className="flex-row justify-between mb-2">
+                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Bottle Deposit</Text>
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(order.bottle_deposit)}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isZeroMoney(order.debt_settlement) && (
+                        <View className="flex-row justify-between mb-2">
+                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Previous Balance</Text>
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-white" : "text-black"}`}>
+                                {formatMoney(order.debt_settlement)}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isZeroMoney(order.welcome_discount) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Welcome Offer</Text>
                             <Text className={`font-sans-semibold text-green-500`}>
                                 -{formatMoney(order.welcome_discount)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
-                    {order.wallet_discount ? (
+                    {!isZeroMoney(order.wallet_discount) && (
                         <View className="flex-row justify-between mb-2">
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Balance Applied</Text>
                             <Text className={`font-sans-semibold text-green-500`}>
                                 -{formatMoney(order.wallet_discount)}
                             </Text>
                         </View>
-                    ) : null}
+                    )}
 
                     <View className={`border-t pt-2 mt-2 flex-row justify-between ${darkTheme ? "border-gray-700" : "border-gray-200"}`}>
                         <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Total</Text>
@@ -937,7 +959,7 @@ export default function OrderDetail() {
                             style={{ borderWidth: 1, borderColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
                         >
                             <Text className={`text-sm text-center font-sans-medium ${darkTheme ? 'text-gray-300' : 'text-gray-700'}`}>
-                                Please approve the KSh 30 adjustment to receive your water at your door, or tap 'Leave at Ground Floor'.
+                                Please approve the {formatMoney(order.pending_staircase_charge)} adjustment to receive your water at your door, or tap 'Leave at Ground Floor'.
                             </Text>
                         </View>
 
@@ -957,7 +979,7 @@ export default function OrderDetail() {
                                 className="w-full py-4 rounded-full items-center"
                                 style={{ backgroundColor: BRAND.primary, opacity: resolveLoading ? 0.7 : 1 }}
                             >
-                                <Text className="text-white font-sans-bold text-lg">{resolveLoading ? "Processing..." : "Approve Charge (+KSh 30)"}</Text>
+                                <Text className="text-white font-sans-bold text-lg">{resolveLoading ? "Processing..." : `Approve Charge (+${formatMoney(order.pending_staircase_charge)})`}</Text>
                             </PressableScale>
 
                             <PressableScale

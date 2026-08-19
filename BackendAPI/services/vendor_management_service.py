@@ -1,5 +1,7 @@
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+from utils.money import money_str
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -178,18 +180,44 @@ async def update_vendor_profile(session: AsyncSession, clerk_id: str, data: dict
     return vendor
 
 
+def _money_in(value, field: str) -> Decimal:
+    """A money value off a request body, as `Decimal`, or a 400.
+
+    `Decimal(str(...))` rather than `Decimal(value)`: a JSON number arrives as a
+    Python float, and `Decimal(249.5)` is the exact binary value, not 249.50.
+    Going through `str` takes the repr, which is the figure the vendor typed.
+    """
+    try:
+        return Decimal(str(value if value is not None else 0))
+    except (InvalidOperation, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"'{field}' must be a number.")
+
+
 async def create_product(session: AsyncSession, clerk_id: str, data: dict, vendor_id: UUID | None = None):
     vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    # Discount validation: prevent negative pricing
-    price = float(data["price"])
-    discount = float(data.get("discount", 0))
+    # Discount validation: prevent negative pricing.
+    #
+    # `Decimal`, not `float`. `Products.price` and `.discount` are `Numeric(10, 2)`
+    # and they are the base of every cart subtotal, every vendor commission and
+    # every shelf label on the platform — the most-multiplied money on it. They
+    # were coerced with `float()` here and then written straight to the columns,
+    # which is the one thing the whole `Decimal` discipline exists to prevent.
+    # The messages went out with a float's repr too ("KSH 60.0").
+    price = _money_in(data["price"], "price")
+    discount = _money_in(data.get("discount", 0), "discount")
     if discount < 0:
         raise HTTPException(status_code=400, detail="Discount cannot be negative.")
     if discount >= price:
-        raise HTTPException(status_code=400, detail=f"Discount (KSH {discount}) must be less than the product price (KSH {price}).")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Discount (KSH {money_str(discount)}) must be less than the "
+                f"product price (KSH {money_str(price)})."
+            ),
+        )
 
     product = Product(
         vendor_id=vendor.id,
@@ -221,13 +249,28 @@ async def update_product(session: AsyncSession, clerk_id: str, product_id: UUID,
     if not product or product.vendor_id != vendor.id:
         raise HTTPException(status_code=404, detail="Product not found or does not belong to this vendor")
 
-    # Discount validation: prevent negative pricing
-    new_price = float(data.get("price", product.price))
-    new_discount = float(data.get("discount", product.discount))
+    # Discount validation: prevent negative pricing. Same rule as `create_product`.
+    new_price = _money_in(data.get("price", product.price), "price")
+    new_discount = _money_in(data.get("discount", product.discount), "discount")
     if new_discount < 0:
         raise HTTPException(status_code=400, detail="Discount cannot be negative.")
     if new_discount >= new_price:
-        raise HTTPException(status_code=400, detail=f"Discount (KSH {new_discount}) must be less than the product price (KSH {new_price}).")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Discount (KSH {money_str(new_discount)}) must be less than the "
+                f"product price (KSH {money_str(new_price)})."
+            ),
+        )
+
+    # The validated `Decimal`s are what gets written, not whatever shape the
+    # request happened to carry — `setattr` used to put the raw value back on the
+    # column while the float above was only ever used for the comparison.
+    data = {**data}
+    if "price" in data and data["price"] is not None:
+        data["price"] = new_price
+    if "discount" in data and data["discount"] is not None:
+        data["discount"] = new_discount
 
     updatable_fields = [
         "name", "description", "image_url", "price", "discount",
@@ -499,7 +542,9 @@ async def update_order_status(session: AsyncSession, clerk_id: str, order_id: UU
 
 
 async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: UUID | None = None):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
+
+    from services.order_service import NAIROBI_TZ_OFFSET_HOURS
     
     vendor = await get_vendor_by_clerk_id(session, clerk_id, vendor_id)
     if not vendor:
@@ -523,16 +568,23 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: 
     product_count_q = select(func.count(Product.id)).where(Product.vendor_id == vendor.id)
 
     total_orders = (await session.execute(total_orders_q)).scalar() or 0
-    total_revenue = float((await session.execute(total_revenue_q)).scalar() or 0)
+    total_revenue = Decimal(str((await session.execute(total_revenue_q)).scalar() or 0))
     pending_orders = (await session.execute(pending_orders_q)).scalar() or 0
     product_count = (await session.execute(product_count_q)).scalar() or 0
 
-    # Calculate weekly revenue (last 7 days, Mon-Sun or just 7 days leading to today)
-    # Actually, a simple 7-day array for chart data [0, 0, 0, 0, 0, 0, 0] 
-    # based on weekday. 0=Mon, 6=Sun
-    today = datetime.now()
-    start_of_week = today - timedelta(days=today.weekday())
-    start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+    # This week's revenue by weekday, Monday first, for the dashboard chart.
+    #
+    # Bucketed in **East Africa Time**, not the server's. `datetime.now()` with
+    # no timezone is UTC on Render, so "start of week" began at 03:00 Monday
+    # Nairobi and every order placed between midnight and 3am was filed under
+    # the previous day — the last bar of the chart for orders that happened on
+    # the first. `Order.created_at` is `TIMESTAMP(timezone=True)`, so the
+    # comparison was also aware-vs-naive and left Postgres to guess.
+    nairobi = timezone(timedelta(hours=NAIROBI_TZ_OFFSET_HOURS))
+    today = datetime.now(nairobi)
+    start_of_week = (today - timedelta(days=today.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     
     weekly_revenue_q = select(
         Order.created_at,
@@ -548,11 +600,15 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: 
     weekly_res = await session.execute(weekly_revenue_q)
     weekly_orders = weekly_res.all()
     
-    weekly_revenue_arr = [0.0] * 7
+    # Accumulated as `Decimal`. Seven running float totals over a week of orders
+    # is the textbook case for binary error to show up in a figure a vendor
+    # reconciles against their own takings.
+    weekly_revenue_arr = [Decimal("0.00")] * 7
     for order_date, amount in weekly_orders:
         if order_date:
-            day_index = order_date.weekday() # 0 = Monday, 6 = Sunday
-            weekly_revenue_arr[day_index] += float(amount)
+            # The weekday the order happened *in Nairobi*, for the same reason.
+            day_index = order_date.astimezone(nairobi).weekday()  # 0 = Monday
+            weekly_revenue_arr[day_index] += Decimal(str(amount or 0))
 
     # What needs restocking, so the vendor sees it before a customer does.
     low_stock_q = (
@@ -575,11 +631,11 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: 
         "vendor_type": vendor.vendor_type,
         "is_online": vendor.is_online,
         "total_orders": total_orders,
-        "total_revenue": total_revenue,
+        "total_revenue": money_str(total_revenue),
         "pending_orders": pending_orders,
         "product_count": product_count,
         "rating": vendor.rating or 0,
-        "weekly_revenue": weekly_revenue_arr,
+        "weekly_revenue": [money_str(v) for v in weekly_revenue_arr],
         "low_stock_products": [
             {
                 "id": str(pid),

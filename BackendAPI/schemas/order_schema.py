@@ -90,6 +90,24 @@ class BaseOrder(BaseModel):
   welcome_discount: MoneyField = Decimal("0")
   product_subtotal: MoneyField = Decimal("0")
 
+  # ── Deposits and debt ──
+  # Both are columns on `Orders`, written by `create_order` from the quote, and
+  # neither was on this schema — so no screen anywhere could render them. On any
+  # `new_bottle` order the deposit is the largest single line on the bill, and it
+  # was simply absent from the customer's order detail and from the vendor's copy
+  # of the same order: two breakdowns that could not add up to the
+  # `total_amount` printed underneath them, on the record a delivery dispute is
+  # settled from weeks later.
+  bottle_deposit: MoneyField = Decimal("0")
+  debt_settlement: MoneyField = Decimal("0")
+
+  #: What approving an address mismatch would add to this order, from
+  #: `order_service.staircase_shortfall` — the same function that applies it.
+  #: The app quoted a flat "KSh 30" in the explanation and on the approve
+  #: button, which is a consent control naming a figure the platform does not
+  #: necessarily charge.
+  pending_staircase_charge: MoneyField = Decimal("0")
+
   # ── Review state ──
   # The client has always typed `is_rated` on its Order interface, but nothing
   # ever populated it, so the "Rate this order" action was offered forever.

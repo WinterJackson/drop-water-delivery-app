@@ -18,6 +18,8 @@ from services.notification_service import create_notification, push_allowed
 from services.settlement_service import cash_float_required
 import h3
 from decimal import Decimal
+
+from utils.money import money_str
 from services.order_service import apply_status_transition
 from utils.paging import stable
 
@@ -611,19 +613,22 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
 
     total_deliveries = (await session.execute(total_deliveries_q)).scalar() or 0
     deliveries_last_7_days = (await session.execute(last_7_days_deliveries_q)).scalar() or 0
-    total_earnings = float((await session.execute(total_earnings_q)).scalar() or 0)
-    
+    # `Decimal` all the way to `money_str`. These three are what a rider has
+    # earned, and they were `float()`-cast off the `SUM()` and sent as JSON
+    # numbers — the defect `money_str` exists to prevent, on the figure a rider
+    # checks their own takings against. `MONEY_FIELDS` did not list them, so
+    # `test_money_serialisation` walked straight past all three.
+    total_earnings = Decimal(str((await session.execute(total_earnings_q)).scalar() or 0))
+
     surcharges_result = (await session.execute(total_surcharges_q)).first()
-    total_payload_bonus = float(surcharges_result.total_payload_bonus or 0.0) if surcharges_result else 0.0
-    total_staircase_bonus = float(surcharges_result.total_staircase_bonus or 0.0) if surcharges_result else 0.0
+    total_payload_bonus = Decimal(str(getattr(surcharges_result, "total_payload_bonus", None) or 0))
+    total_staircase_bonus = Decimal(str(getattr(surcharges_result, "total_staircase_bonus", None) or 0))
 
     # What Platinum actually takes, from the same two rows the nightly job reads.
     # The app stated "complete 20 more deliveries" from a literal of its own, so
     # a business that raised the bar would have told every rider the old number
-    # while demoting them against the new one.
-    from services import platform_config_service as config
-
-    await config.ensure_fresh(session)
+    # while demoting them against the new one. (`config` is already imported and
+    # refreshed at the top of this function.)
     platinum_target = config.get_int("platinum_min_deliveries")
     platinum_window_days = config.get_int("platinum_window_days")
 
@@ -637,13 +642,13 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
         "deliveries_in_window": deliveries_last_7_days,
         "platinum_target": platinum_target,
         "platinum_window_days": platinum_window_days,
-        "total_earnings": total_earnings,
+        "total_earnings": money_str(total_earnings),
         "is_available": deliverer.is_available,
         "rating": deliverer.rating or 5.0,
         "acceptance_rate": deliverer.acceptance_rate or 100.0,
         "is_platinum": deliverer.is_platinum,
-        "total_staircase_bonus": total_staircase_bonus,
-        "total_payload_bonus": total_payload_bonus,
+        "total_staircase_bonus": money_str(total_staircase_bonus),
+        "total_payload_bonus": money_str(total_payload_bonus),
     }
 
 
@@ -892,7 +897,7 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
         # The order was created assuming 10% commission. If this rider is Platinum, reduce to 7%.
         # FIN-01 FIX: Use Decimal for currency precision
         if deliverer.is_platinum and order.rider_commission and order.rider_commission > 0:
-            from decimal import Decimal, ROUND_HALF_UP
+            from decimal import ROUND_HALF_UP
             from services import platform_config_service as config
 
             await config.ensure_fresh(session)
@@ -903,9 +908,17 @@ async def accept_delivery_radar(session: AsyncSession, clerk_id: str, order_id: 
             old_commission = Decimal(str(order.rider_commission))
             commission_diff = old_commission - new_commission
             if commission_diff > 0:
-                order.rider_commission = float(new_commission)
-                order.rider_net = float(Decimal(str(order.rider_net)) + commission_diff)
-                order.platform_total = float(Decimal(str(order.platform_total)) - commission_diff)
+                # Written as `Decimal`. Everything above is carefully `Decimal`
+                # — the comment two lines up even says so — and then all three
+                # ledger columns were cast back to `float` at the moment of the
+                # write. `Numeric(10, 2)` rounds whatever it is handed, so each
+                # of the three rounded independently and the identity the whole
+                # revenue split is built on (`vendor_net + rider_net +
+                # platform_total == gross`) could come apart by a cent on every
+                # order a Platinum rider accepts.
+                order.rider_commission = new_commission
+                order.rider_net = Decimal(str(order.rider_net)) + commission_diff
+                order.platform_total = Decimal(str(order.platform_total)) - commission_diff
 
         await session.commit()
 

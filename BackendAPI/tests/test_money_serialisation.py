@@ -77,6 +77,15 @@ MONEY_FIELDS = frozenset(
         # was already `Decimal` or `MoneyField`; the two that were not sat in a
         # route file, which this guard did not read.
         "amount",
+        # The rider's own money. All three were `float()`-cast off a `SUM()` and
+        # sent as JSON numbers on the screen a rider checks their takings
+        # against — invisible here purely because the names were not listed.
+        "total_earnings", "total_staircase_bonus", "total_payload_bonus",
+        # The vendor's. `weekly_revenue` is a *list* of money, accumulated in
+        # floats across a week of orders before it was fixed.
+        "total_revenue", "weekly_revenue",
+        # The figure on a rider's offer card, on all three dispatch broadcasts.
+        "fee",
     }
 )
 
@@ -121,6 +130,66 @@ def _source_modules() -> list[pathlib.Path]:
     for directory in SOURCE_DIRS:
         out.extend(sorted((BACKEND / directory).rglob("*.py")))
     return out
+
+
+#: Money-shaped names that genuinely are not money, in one named place each.
+#:
+#: `total` is the honest problem here: it is the quote's grand total *and* the
+#: word every paginated listing reaches for. Dropping it from `MONEY_FIELDS`
+#: would leave the one figure a customer is charged unguarded, so the collisions
+#: are named instead — file by file, key by key, with the reason. A blanket
+#: exemption on the name would be the same mistake in the other direction.
+NOT_MONEY = {
+    # A count of reviews, beside "visible", "hidden" and "low_rated".
+    ("admin_review_service.py", "total"),
+}
+
+
+def _float_bound_names(tree: ast.AST) -> dict[str, ast.AST]:
+    """Every local name whose value came from a `float(...)`, module-wide.
+
+    The dict guard below only ever saw the *inline* shape,
+    `{"wallet_balance": float(balance)}`. The commoner shape by far is a cast
+    into a local and the local into the dict —
+
+        total_earnings = float((await session.execute(q)).scalar() or 0)
+        ...
+        return {"total_earnings": total_earnings}
+
+    — and it is completely invisible to a check that only inspects the dict
+    value. Four of the five live defects this file was extended for had exactly
+    that shape: the rider's earnings and surcharge bonuses, and the vendor's
+    total revenue. One hop is enough to catch every one of them, and stopping
+    at one hop keeps this a readable AST walk rather than a dataflow engine.
+
+    Augmented assignment counts too: `weekly_revenue_arr[i] += float(amount)`
+    accumulated a week of a vendor's takings in binary floating point.
+    """
+    bound: dict[str, ast.AST] = {}
+
+    def is_float_call(value) -> bool:
+        candidates = [value.body, value.orelse] if isinstance(value, ast.IfExp) else [value]
+        return any(
+            isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == "float"
+            for c in candidates
+        )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and is_float_call(node.value):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound[target.id] = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None and is_float_call(node.value):
+            if isinstance(node.target, ast.Name):
+                bound[node.target.id] = node.value
+        elif isinstance(node, ast.AugAssign) and is_float_call(node.value):
+            target = node.target
+            # `arr[i] += float(x)` — the name is the list being accumulated into.
+            if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                bound[target.value.id] = node.value
+            elif isinstance(target, ast.Name):
+                bound[target.id] = node.value
+    return bound
 
 
 def _annotation_text(node: ast.AST | None) -> str:
@@ -192,12 +261,27 @@ def test_no_money_key_is_built_with_float_in_a_response_dict():
 
     for path in _source_modules():
         tree = ast.parse(path.read_text())
+        # Names in this module that hold the result of a `float(...)`, so a
+        # money key whose value is one of them is caught as well.
+        float_bound = _float_bound_names(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
             for key, value in zip(node.keys, node.values):
                 if not isinstance(key, ast.Constant) or key.value not in MONEY_FIELDS:
                     continue
+                if (path.name, key.value) in NOT_MONEY:
+                    continue
+
+                # A bare name that was assigned from a `float(...)` earlier.
+                if isinstance(value, ast.Name) and value.id in float_bound:
+                    offenders.append(
+                        f"{path.relative_to(BACKEND)}:{key.lineno} "
+                        f'"{key.value}": {value.id} = '
+                        f"{ast.unparse(float_bound[value.id])}"
+                    )
+                    continue
+
                 # `float(x)`, and `float(x) if … else …` on either branch.
                 candidates = (
                     [value.body, value.orelse] if isinstance(value, ast.IfExp) else [value]
@@ -322,3 +406,21 @@ def test_the_pydantic_alias_serialises_as_a_string_in_both_modes():
     sample = Sample(total=Decimal("1234.5"))
     assert sample.model_dump() == {"total": "1234.50", "fee": None}
     assert sample.model_dump(mode="json") == {"total": "1234.50", "fee": None}
+
+
+def test_every_not_money_exemption_is_still_needed() -> None:
+    """An exemption outlives the line it was written for, and then it is a hole.
+
+    Each entry must still name a module that exists and still mentions the key —
+    otherwise it is silently excusing something nobody has looked at.
+    """
+    stale = []
+    for module_name, key in NOT_MONEY:
+        matches = [p for p in _source_modules() if p.name == module_name]
+        if not matches:
+            stale.append(f"{module_name} no longer exists")
+            continue
+        if not any(f'"{key}"' in p.read_text(encoding="utf-8") for p in matches):
+            stale.append(f'{module_name} no longer builds a "{key}" key')
+
+    assert not stale, "Stale NOT_MONEY exemptions:\n  " + "\n  ".join(stale)

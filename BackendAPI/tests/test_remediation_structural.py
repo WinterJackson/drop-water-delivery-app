@@ -277,13 +277,32 @@ def test_the_loyalty_cashback_is_a_setting_and_goes_through_the_ledger():
 
 def test_the_mismatch_charge_is_derived_from_the_staircase_setting():
     """It was a flat `charge = 30.0`, unrelated to `staircase_surcharge_per_floor`
-    and applied regardless of how many floors were actually climbed."""
-    resolve = _function(SERVICES / "order_service.py", "resolve_address_mismatch")
-    source = ast.unparse(resolve)
+    and applied regardless of how many floors were actually climbed.
 
-    assert "staircase_surcharge_per_floor" in source
-    assert "staircase_free_floors" in source
-    assert "30.0" not in source and "charge = 30" not in source
+    Asserted on the **rule**, not on where the arithmetic happens to live. The
+    previous version required both setting keys to appear inside
+    `resolve_address_mismatch` itself, so extracting the formula into
+    `staircase_shortfall` — precisely so the figure the customer is *shown*
+    before approving and the figure actually charged come from one place — broke
+    it exactly as loudly as reintroducing the literal would have. A guard that
+    pins a mechanism fails on the fix and on the regression alike, and the next
+    person cannot tell which they are looking at.
+    """
+    module = _code_only(SERVICES / "order_service.py")
+    shortfall = _function(SERVICES / "order_service.py", "staircase_shortfall")
+    formula = ast.unparse(shortfall)
+
+    # The rule: the charge is the configured rate over the configured allowance.
+    assert "staircase_surcharge_per_floor" in formula
+    assert "staircase_free_floors" in formula
+
+    # And the resolver applies *that* figure rather than one of its own.
+    resolve = ast.unparse(_function(SERVICES / "order_service.py", "resolve_address_mismatch"))
+    assert "staircase_shortfall" in resolve
+    assert "30.0" not in resolve and "charge = 30" not in resolve
+
+    # Nothing else in the module re-derives it.
+    assert module.count("staircase_surcharge_per_floor") == 1
 
 
 def test_the_auto_cancel_age_comes_from_the_settings_table():

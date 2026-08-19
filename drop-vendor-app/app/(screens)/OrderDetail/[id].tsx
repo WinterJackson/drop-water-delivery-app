@@ -452,19 +452,34 @@ export default function OrderDetail() {
                 <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>{formatMoney(order.service_fee)}</Text>
               </View>
             )}
+            {/* Both come off the order row and were on no screen anywhere: the
+                deposit is the largest single line on a `new_bottle` order, and
+                without them this column cannot add up to the Total below it. */}
+            {!isZeroMoney(order.bottle_deposit) && (
+              <View className="flex-row justify-between mb-3">
+                <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Bottle Deposit</Text>
+                <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>{formatMoney(order.bottle_deposit)}</Text>
+              </View>
+            )}
+            {!isZeroMoney(order.debt_settlement) && (
+              <View className="flex-row justify-between mb-3">
+                <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Previous Balance</Text>
+                <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>{formatMoney(order.debt_settlement)}</Text>
+              </View>
+            )}
             {!isZeroMoney(order.surge_fee) && (
               <View className="flex-row justify-between mb-3">
                 <Text className={`font-sans-medium text-orange-500`}>Surge Fee</Text>
                 <Text className={`font-sans-bold text-orange-500`}>{formatMoney(order.surge_fee)}</Text>
               </View>
             )}
-            {Number(order.payload_surcharge || 0) > 0 && (
+            {!isZeroMoney(order.payload_surcharge) && (
               <View className="flex-row justify-between mb-3">
                 <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Payload Surcharge</Text>
                 <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>{formatMoney(order.payload_surcharge)}</Text>
               </View>
             )}
-            {Number(order.staircase_surcharge || 0) > 0 && (
+            {!isZeroMoney(order.staircase_surcharge) && (
               <View className="flex-row justify-between mb-3">
                 <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Staircase Surcharge</Text>
                 <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>{formatMoney(order.staircase_surcharge)}</Text>

@@ -1097,7 +1097,10 @@ async def create_order(
       phone=phone,
       delivery_address=user.location_address if user else None,
       total_amount=quote.total,
-      delivery_fee=float(quote.delivery_fee),
+      # `Numeric(10, 2)`, so the `Decimal` goes in as it is. Every other money
+      # column on this row is written straight from the quote; this one was
+      # cast to `float` on the way past, on the order the rider is paid from.
+      delivery_fee=quote.delivery_fee,
 
       # ── Surcharges ──
       staircase_surcharge=quote.staircase_surcharge,
@@ -1432,7 +1435,11 @@ async def update_orders_payment_status_by_checkout_id(
                         customer_id=order.customer_id,
                         lat=order.lat_from,
                         lng=order.lng_from,
-                        delivery_fee=float(order.delivery_fee or 0),
+                        # A decimal string, like every other money value on the
+                        # wire. This is the figure on the rider's offer card —
+                        # what they decide to accept a job on — and it reached
+                        # all three dispatch broadcasts as a JSON float.
+                        delivery_fee=money_str(order.delivery_fee or 0),
                         vehicle_class=order.vehicle_class,
                         vendor_type=vendor_type_str,
                         total_weight_kg=_total_weight,
@@ -1459,6 +1466,35 @@ async def update_orders_payment_status_by_checkout_id(
         "message": "Transaction was completed successfully.",
         "code": "0"
       }
+
+def staircase_shortfall(order) -> Decimal:
+  """What approving an address mismatch will actually add to this order.
+
+  The one definition, used by the figure the customer is *shown* and by the
+  charge that is applied. The app quoted a flat "KSh 30" in the explanation and
+  again on the button — "Approve Charge (+KSh 30)" — which is a consent control
+  naming an amount the platform does not necessarily charge. Thirty is only
+  right for a fifth floor with nothing already billed; the real figure is the
+  configured rate over the free allowance, less whatever the quote already
+  collected.
+
+  Reads the settings synchronously, so the caller has already awaited
+  `ensure_fresh`.
+  """
+  actual = int(_d_int(getattr(order, "actual_floor_level", 0)))
+  free_floors = _config.get_int("staircase_free_floors")
+  per_floor = _config.get_decimal("staircase_surcharge_per_floor")
+  already = Decimal(str(getattr(order, "staircase_surcharge", 0) or 0))
+  owed = Decimal(max(0, actual - free_floors)) * per_floor
+  return max(Decimal("0.00"), (owed - already).quantize(Decimal("0.01")))
+
+
+def _d_int(value) -> int:
+  try:
+      return int(value or 0)
+  except (TypeError, ValueError):
+      return 0
+
 
 async def annotate_is_rated(session: AsyncSession, orders: list) -> list:
   """Populate `is_rated` on a batch of orders with one extra query.
@@ -1495,6 +1531,14 @@ async def annotate_is_rated(session: AsyncSession, orders: list) -> list:
       # A rider is only ratable once one has been assigned.
       expected = {"vendor"} if order.deliverer_id is None else {"vendor", "rider"}
       order.is_rated = expected.issubset(done)
+
+      # What approving the mismatch would cost, for the order that is asking.
+      # Zero everywhere else, so the screen has nothing to render.
+      order.pending_staircase_charge = (
+          staircase_shortfall(order)
+          if order.order_status == "mismatch_pending"
+          else Decimal("0.00")
+      )
   return orders
 
 
@@ -1975,7 +2019,7 @@ async def reassign_unassigned_orders(session: AsyncSession, batch_size: int = 50
                 payload={
                     "action": "TRIP_RADAR_BROADCAST",
                     "order_id": str(order.id),
-                    "fee": float(order.delivery_fee or 0),
+                    "fee": money_str(order.delivery_fee or 0),
                     "tier": 3,  # 3 = re-offer sweep
                     "delivery_type": order.delivery_type or "quick_swap",
                     "distance_km": order.distance_km,
@@ -2020,20 +2064,17 @@ async def resolve_address_mismatch(session: AsyncSession, user_id: UUID, order_i
 
         await _config.ensure_fresh(session)
 
-        actual = int(order.actual_floor_level or 0)
-        free_floors = _config.get_int("staircase_free_floors")
-        per_floor = _config.get_decimal("staircase_surcharge_per_floor")
-        already = Decimal(str(order.staircase_surcharge or 0))
-
         # Only the shortfall: they may already have been charged for some floors
-        # at checkout, and charging the full amount again would bill twice.
-        owed = max(Decimal("0.00"), Decimal(max(0, actual - free_floors)) * per_floor)
-        charge = (owed - already).quantize(Decimal("0.01"))
+        # at checkout, and charging the full amount again would bill twice. The
+        # same function computes the figure the customer was shown before they
+        # tapped approve, so the two cannot disagree.
+        already = Decimal(str(order.staircase_surcharge or 0))
+        charge = staircase_shortfall(order)
 
         if charge <= 0:
             logger.info(
                 "Mismatch on order %s carries no additional charge (floor %s already covered)",
-                order.id, actual,
+                order.id, order.actual_floor_level,
             )
             charge = Decimal("0.00")
         else:
@@ -2099,4 +2140,17 @@ async def resolve_address_mismatch(session: AsyncSession, user_id: UUID, order_i
         except Exception as e:
             logger.error(f"WS Broadcast fail in resolve_mismatch: {e}")
 
-    return {"message": "Mismatch resolved successfully", "order": {"id": str(order.id), "status": order.order_status, "total_amount": order.total_amount}}
+    # `money_str`, not the bare `Decimal`. There is no `response_model` on this
+    # route, so FastAPI's `jsonable_encoder` would turn the column into a JSON
+    # **float** — the same defect as an explicit cast, with nothing to grep for.
+    # This is the total immediately after it has just been increased by the
+    # approved staircase charge, which is the one moment the customer is looking
+    # at it to check what they agreed to.
+    return {
+        "message": "Mismatch resolved successfully",
+        "order": {
+            "id": str(order.id),
+            "status": order.order_status,
+            "total_amount": money_str(order.total_amount),
+        },
+    }

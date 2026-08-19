@@ -149,7 +149,8 @@ export const useWalletWithdraw = () => {
       phoneNumber,
       userType,
     }: {
-      amount: number;
+      /** A decimal string. Money does not become a JS number to cross a wire. */
+      amount: string;
       phoneNumber: string;
       userType: string;
     }) =>

@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.product_service import get_product_for_cart
 from services.dispatch_policy import DispatchPolicy
 from decimal import Decimal
+
+from utils.money import money_str
 # >ADD TO CART 
       # POSSIBILITIES [ CART DOES NOT EXIST, CART EXISTS, ITEM DOES NOT EXIST IN THE CART, ITEM EXISTS IN THE CART]
         # CART DOES NOT EXIST [ >--> CREATE THE CART AND ADD THE ITEM IN THE CART ]
@@ -105,7 +107,7 @@ async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetai
   # was one of the four competing definitions of the service fee.
   from services.pricing_service import service_fee_for, vendor_type_of
 
-  service_fee = 0.0
+  service_fee = "0.00"
   vendor_type_str = None
   total_weight_kg = 0.0
   total_quantity = 0
@@ -113,7 +115,10 @@ async def fetch_detailed_cart(user_id: UUID, session: AsyncSession) -> CartDetai
   if cart.cart_item:
       vendor = await session.get(Vendor, cart.cart_item[0].vendor_id)
       vendor_type_str = vendor_type_of(vendor)
-      service_fee = float(service_fee_for(vendor_type_str))
+      # `money_str`, not `float`. This rides on the cart payload as
+      # `Cart.service_fee` and the screen renders it beside figures that are
+      # decimal strings.
+      service_fee = money_str(service_fee_for(vendor_type_str))
       total_quantity = sum(int(i.quantity or 0) for i in cart.cart_item)
       total_weight_kg = float(sum(
           Decimal(str(getattr(i.product, "weight_kg", 0) or 0)) * int(i.quantity or 0)

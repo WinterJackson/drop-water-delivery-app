@@ -5,14 +5,29 @@ import { Ionicons } from '@expo/vector-icons';
 import { UIThemeContext } from '@/context/ThemeContext';
 import { BRAND } from '@/constants/brandColors';
 import Animated, { useAnimatedStyle, withSpring, useSharedValue } from 'react-native-reanimated';
+import { compareMoney, isZeroMoney, moneyRatio } from '@/utils/money';
 
-export default function WeeklyRevenueChart({ data }: { data?: number[] }) {
+/**
+ * Seven daily totals as **decimal strings** — `weekly_revenue` off the
+ * dashboard. They used to arrive as `number[]`, accumulated on the server in
+ * binary floating point across a week of a vendor's orders.
+ *
+ * The values are only ever turned into bar heights here, which is the one thing
+ * `moneyRatio` is sanctioned for: the output is a percentage for a style, not a
+ * figure anybody reads.
+ */
+export default function WeeklyRevenueChart({ data }: { data?: string[] }) {
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
-  const chartData = data && data.length === 7 ? data : [0, 0, 0, 0, 0, 0, 0]; 
-  const isAllZeros = chartData.every(val => val === 0);
+  const chartData = data && data.length === 7 ? data : ["0", "0", "0", "0", "0", "0", "0"];
+  const isAllZeros = chartData.every(isZeroMoney);
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const maxVal = Math.max(...chartData, 1);
+  // The tallest day, compared in cents. `Math.max` on decimal strings would
+  // coerce every one of them to a float to do it.
+  const maxVal = chartData.reduce(
+    (tallest, value) => (compareMoney(value, tallest) > 0 ? value : tallest),
+    "0",
+  );
   
   return (
       <View 
@@ -34,7 +49,7 @@ export default function WeeklyRevenueChart({ data }: { data?: number[] }) {
         ) : (
           <View className="flex-row items-end justify-between h-32 mt-2">
             {chartData.map((value, i) => {
-               const percentage = (value / maxVal) * 100;
+               const percentage = isZeroMoney(maxVal) ? 0 : moneyRatio(value, maxVal) * 100;
                return (
                  <View key={i} className="items-center flex-1">
                     <AnimatedBar percentage={percentage} />

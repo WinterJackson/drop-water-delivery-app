@@ -226,3 +226,55 @@ async def test_an_ordinary_basket_still_passes_every_gate():
     items = [_item(vendor.id, quantity=2, price=250)]
     quote = await _quote(vendor=vendor, items=items)
     validate_quote(quote, items, user=_user(), vendor=None)
+
+
+# ── The mismatch charge a customer is asked to consent to ─────────────────
+#
+# `resolve_address_mismatch` charges the configured rate over the free
+# allowance, less whatever the quote already collected. The app quoted a flat
+# "KSh 30" in the explanation and again on the button — "Approve Charge
+# (+KSh 30)" — which is a consent control naming a figure the platform does not
+# necessarily charge. `staircase_shortfall` is now the one definition, read by
+# the figure shown and by the charge applied.
+
+def _mismatch_order(*, actual_floor, already_charged="0.00", status="mismatch_pending"):
+    order = MagicMock()
+    order.actual_floor_level = actual_floor
+    order.staircase_surcharge = Decimal(already_charged)
+    order.order_status = status
+    return order
+
+
+@pytest.mark.parametrize(
+    "floor,already,expected",
+    [
+        (5, "0.00", "30.00"),    # (5 - 2) x 10 — the figure the app hardcoded
+        (3, "0.00", "10.00"),    # …and the figure it got wrong
+        (12, "0.00", "100.00"),  # …and this one
+        (5, "30.00", "0.00"),    # already collected at checkout: nothing owed
+        (5, "10.00", "20.00"),   # only the shortfall
+        (2, "0.00", "0.00"),     # inside the free allowance
+        (0, "0.00", "0.00"),
+    ],
+)
+def test_the_mismatch_charge_is_the_shortfall(floor, already, expected):
+    from services.order_service import staircase_shortfall
+
+    with patch("services.platform_config_service.get_int", return_value=2), \
+         patch("services.platform_config_service.get_decimal", return_value=Decimal("10")):
+        assert staircase_shortfall(
+            _mismatch_order(actual_floor=floor, already_charged=already)
+        ) == Decimal(expected)
+
+
+def test_an_unreadable_floor_is_not_a_charge():
+    """A missing or malformed floor bills nothing rather than raising on the
+    screen that is asking somebody to approve a payment."""
+    from services.order_service import staircase_shortfall
+
+    with patch("services.platform_config_service.get_int", return_value=2), \
+         patch("services.platform_config_service.get_decimal", return_value=Decimal("10")):
+        for value in (None, "", "abc"):
+            order = _mismatch_order(actual_floor=0)
+            order.actual_floor_level = value
+            assert staircase_shortfall(order) == Decimal("0.00")

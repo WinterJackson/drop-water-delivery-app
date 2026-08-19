@@ -98,11 +98,17 @@ export interface RiderOrder {
 }
 
 export interface RiderEarnings {
-    total_earned: number;
+    /**
+     * Lifetime earnings, as a decimal **string**.
+     *
+     * `total_earned`, `today_earned` and `week_earned` used to sit beside this
+     * one. The server has never sent any of the three and no screen has ever
+     * read them — nor has `deliveries_count`. They were an interface describing
+     * a wire shape that does not exist, which typechecks perfectly and is
+     * exactly how the customer app ended up with two `Order`s eighteen fields
+     * apart.
+     */
     total_earnings: string;
-    today_earned: number;
-    week_earned: number;
-    deliveries_count: number;
     total_deliveries: number;
     /** @deprecated Counted over `platinum_window_days`, which defaults to 7. Use `deliveries_in_window`. */
     deliveries_last_7_days?: number;
@@ -119,8 +125,13 @@ export interface RiderEarnings {
     rating?: number;
     acceptance_rate?: number;
     is_platinum?: boolean;
-    total_staircase_bonus?: number;
-    total_payload_bonus?: number;
+    /**
+     * Decimal strings. Both were `float()`-cast off a `SUM()` on the server and
+     * typed `number` here — the two halves agreeing with each other and both
+     * disagreeing with the rule.
+     */
+    total_staircase_bonus?: string;
+    total_payload_bonus?: string;
 }
 
 /**

@@ -320,7 +320,7 @@ const OrderCard = React.memo(({ order }: Props) => {
                   </Text>
                   <View className="flex-row justify-between items-end mt-1">
                     <Text className={`text-[10px] font-sans-semibold uppercase tracking-wider ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                      Qty: {item.quantity}  •  Ksh {item.price}
+                      Qty: {item.quantity}  •  {formatMoney(item.price, "Ksh")}
                     </Text>
                     <Text className={`text-xs font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
                       {formatMoney(multiplyMoney(item.price, item.quantity ?? 0), "Ksh")}
@@ -337,44 +337,56 @@ const OrderCard = React.memo(({ order }: Props) => {
               </View>
               <View className="flex-row justify-between items-center">
                 <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Delivery Fee</Text>
-                <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.delivery_fee ?? 0}</Text>
+                <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.delivery_fee, "Ksh")}</Text>
               </View>
-              {order.service_fee ? (
+              {!isZeroMoney(order.service_fee) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Service Fee</Text>
-                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.service_fee}</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.service_fee, "Ksh")}</Text>
                 </View>
-              ) : null}
-              {order.surge_fee ? (
+              )}
+              {!isZeroMoney(order.surge_fee) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Surge Pricing</Text>
-                  <Text className={`text-xs font-sans-bold text-orange-500`}>Ksh {order.surge_fee}</Text>
+                  <Text className={`text-xs font-sans-bold text-orange-500`}>{formatMoney(order.surge_fee, "Ksh")}</Text>
                 </View>
-              ) : null}
-              {order.payload_surcharge ? (
+              )}
+              {!isZeroMoney(order.payload_surcharge) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Large Order Surcharge</Text>
-                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.payload_surcharge}</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.payload_surcharge, "Ksh")}</Text>
                 </View>
-              ) : null}
-              {order.staircase_surcharge ? (
+              )}
+              {!isZeroMoney(order.staircase_surcharge) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Staircase Surcharge</Text>
-                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>Ksh {order.staircase_surcharge}</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.staircase_surcharge, "Ksh")}</Text>
                 </View>
-              ) : null}
-              {order.welcome_discount ? (
+              )}
+              {!isZeroMoney(order.bottle_deposit) && (
+                <View className="flex-row justify-between items-center">
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Bottle Deposit</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.bottle_deposit, "Ksh")}</Text>
+                </View>
+              )}
+              {!isZeroMoney(order.debt_settlement) && (
+                <View className="flex-row justify-between items-center">
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Previous Balance</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-200" : "text-gray-700"}`}>{formatMoney(order.debt_settlement, "Ksh")}</Text>
+                </View>
+              )}
+              {!isZeroMoney(order.welcome_discount) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Welcome Offer</Text>
-                  <Text className={`text-xs font-sans-bold text-green-500`}>-Ksh {order.welcome_discount}</Text>
+                  <Text className={`text-xs font-sans-bold text-green-500`}>-{formatMoney(order.welcome_discount, "Ksh")}</Text>
                 </View>
-              ) : null}
-              {order.wallet_discount ? (
+              )}
+              {!isZeroMoney(order.wallet_discount) && (
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Applied</Text>
                   <Text className={`text-xs font-sans-bold text-green-500`}>-{formatMoney(order.wallet_discount, "Ksh")}</Text>
                 </View>
-              ) : null}
+              )}
               <View className="flex-row justify-between items-center mt-1 pt-2 border-t border-gray-800/50 dark:border-gray-100/10">
                 <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>Total Amount</Text>
                 <Text className={`text-sm font-sans-bold text-sky-500`}>

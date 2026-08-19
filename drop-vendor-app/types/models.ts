@@ -144,6 +144,13 @@ export interface VendorOrder {
     staircase_surcharge: string;
     wallet_discount: string;
     welcome_discount: string;
+    /**
+     * Refundable deposit charged on this order — the largest single line on a
+     * `new_bottle` order, and it was on the response schema of neither app.
+     */
+    bottle_deposit?: string;
+    /** An earlier unpaid balance collected on this order. */
+    debt_settlement?: string;
 
     bottle_source?: string | null;
     is_welcome_offer?: boolean | null;

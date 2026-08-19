@@ -76,7 +76,7 @@ _ROUND_TRIP = re.compile(r"\*\s*100\s*\)\s*/\s*100")
 
 #: A currency literal written directly in front of an interpolation, in JSX
 #: (`KSH {…}`) or a template literal (`KSH ${…}`).
-_HAND_PREFIX = re.compile(r"KSH\s+\$?\{")
+_HAND_PREFIX = re.compile(r"KSH\s+\$?\{", re.I)
 
 #: A constant whose *name* says it holds a business money figure, assigned a
 #: number. Deliberately keyed on money words rather than on `MIN`/`MAX` alone:
@@ -89,7 +89,7 @@ _MONEY_WORDS = (
 #: A shilling figure written into a sentence — "Minimum amount is KSH 500",
 #: "a KSH 50 cancellation penalty". The constant rule below cannot see these,
 #: because there is no constant: the number is inside the copy.
-_MONEY_IN_COPY = re.compile(r"KSH\s*[0-9]")
+_MONEY_IN_COPY = re.compile(r"KSH\s*[0-9]", re.I)
 
 _MONEY_LITERAL = re.compile(
     r"\b(?:const|let|var)\s+(\w*(?:" + "|".join(_MONEY_WORDS) + r")\w*)\s*"
@@ -155,6 +155,43 @@ def test_no_hand_written_currency_prefix(path: pathlib.Path) -> None:
         f"{path.relative_to(REPO)} writes 'KSH' in front of an interpolation:\n  "
         + "\n  ".join(offenders)
         + "\nUse formatMoney(), which supplies the currency, the grouping and the cents."
+    )
+
+
+#: A money field used as a boolean. `"0.00"` is truthy in JS, so this always
+#: passes and the guarded block always renders.
+_MONEY_TRUTHY = re.compile(
+    r"\{\s*[A-Za-z_][\w.?\[\]]*\.(?:"
+    r"total_amount|delivery_fee|service_fee|surge_fee|payload_surcharge|"
+    r"staircase_surcharge|welcome_discount|wallet_discount|bottle_deposit|"
+    r"debt_settlement|mpesa_discount|product_subtotal|wallet_balance|"
+    r"vendor_net|platform_total|rider_net|amount_refunded|deposit_balance"
+    r")\s*(?:\?|&&)"
+)
+
+
+@pytest.mark.parametrize("path", SOURCES, ids=lambda p: str(p.relative_to(REPO)))
+def test_no_money_field_is_used_as_a_boolean(path: pathlib.Path) -> None:
+    """`{order.surge_fee ? … : null}` renders on every order.
+
+    Money arrives as a decimal string, and `"0.00"` is truthy — so a conditional
+    written this way is not a conditional at all. `OrderDetail.tsx` and
+    `OrderCard.tsx` each had six, which is why every order in the customer's
+    history showed a "Surge Pricing KSH 0.00" line, a "Large Order Surcharge
+    KSH 0.00" line and a "Welcome Offer -KSH 0.00" line whether or not any of
+    them applied. The same shape put a red "0%" on a product card.
+
+    `isZeroMoney()` is the check — it compares in cents.
+    """
+    code = _code_only(path.read_text(encoding="utf-8"))
+    offenders = [
+        line.strip() for line in code.splitlines() if _MONEY_TRUTHY.search(line)
+    ]
+    assert not offenders, (
+        f"{path.relative_to(REPO)} tests a money field for truthiness — "
+        f'"0.00" is truthy:\n  '
+        + "\n  ".join(offenders)
+        + "\nUse !isZeroMoney(...)."
     )
 
 

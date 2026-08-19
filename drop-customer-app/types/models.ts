@@ -289,6 +289,21 @@ export interface Order {
   welcome_discount?: string;
   payload_surcharge?: string;
   staircase_surcharge?: string;
+  /**
+   * Refundable deposit charged on this order, and an earlier unpaid balance
+   * collected on it. Both are columns on `Orders` and were on neither app's
+   * response schema, so the order breakdown could not add up to `total_amount`
+   * on any order that carried one.
+   */
+  bottle_deposit?: string;
+  debt_settlement?: string;
+  /**
+   * What approving an address mismatch would add to this order, computed by the
+   * same server function that applies it. The screen quoted a flat "KSh 30" —
+   * on the explanation *and* on the approve button — which is right only for a
+   * fifth floor with nothing already billed.
+   */
+  pending_staircase_charge?: string;
 
   delivery_address?: string | null;
   delivery_time?: number;

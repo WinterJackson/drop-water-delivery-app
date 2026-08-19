@@ -19,6 +19,10 @@ import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
 import { compareMoney, formatMoney, formatMoneyShort, isNegativeMoney, isZeroMoney, moneyRatio, subtractMoney } from "@/utils/money";
 
+/** What a user may type into an amount box: shillings, optionally cents. */
+const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
+
+
 export default function WalletScreen() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -94,7 +98,7 @@ export default function WalletScreen() {
     // administrator moves the row, and refusing client-side so no server log
     // would ever show it happening.
     const minTopUp = summary?.topup?.minimum ?? null;
-    if (!topUpAmount || isNaN(Number(topUpAmount))) {
+    if (!MONEY_INPUT.test(topUpAmount.trim())) {
       Alert.alert("Invalid Amount", "Please enter the amount you want to top up.");
       return;
     }
@@ -111,7 +115,7 @@ export default function WalletScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsProcessingTopUp(true);
       await post(VendorApiRoutes.WalletTopUp.path, {
-        amount: Number(topUpAmount),
+        amount: topUpAmount.trim(),
         phone_number: phoneNumber,
         user_type: "vendor",
       });
@@ -128,7 +132,7 @@ export default function WalletScreen() {
   };
 
   const handleWithdraw = async () => {
-    if (!withdrawAmount || isNaN(Number(withdrawAmount)) || compareMoney(withdrawAmount, minWithdrawal) < 0) {
+    if (!MONEY_INPUT.test(withdrawAmount.trim()) || compareMoney(withdrawAmount, minWithdrawal) < 0) {
       Alert.alert(
         "Invalid Amount",
         `Please enter a valid amount of at least ${formatMoney(minWithdrawal)} to withdraw.`,
@@ -143,7 +147,7 @@ export default function WalletScreen() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await withdrawMutation.mutateAsync({
-        amount: Number(withdrawAmount),
+        amount: withdrawAmount.trim(),
         phoneNumber: phoneNumber,
         userType: "vendor",
       });

@@ -284,7 +284,7 @@ const VendorDetails = (props: Props) => {
 									<View className="flex-row items-center gap-3">
 										<Ionicons name="bicycle" size={20} color={BRAND.primary} />
 										<Text className={`font-sans-medium ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
-											{deliveryPreview?.estimated_minutes ? `Est. ${deliveryPreview.estimated_minutes} min` : "Est. Delivery available"} • {deliveryPreview?.delivery_fee ? `Fee: ${formatMoney(deliveryPreview.delivery_fee)}` : "Delivery fee varies"}
+											{deliveryPreview?.estimated_minutes ? `Est. ${deliveryPreview.estimated_minutes} min` : "Est. Delivery available"} • {!isZeroMoney(deliveryPreview?.delivery_fee) ? `Fee: ${formatMoney(deliveryPreview!.delivery_fee)}` : "Delivery fee varies"}
 										</Text>
 									</View>
 									{/* This store's own minimum order.

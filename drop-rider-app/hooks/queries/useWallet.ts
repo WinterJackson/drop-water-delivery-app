@@ -46,7 +46,9 @@ export const useWalletWithdraw = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ amount, phoneNumber, userType }: { amount: number, phoneNumber: string, userType: string }) =>
+    // `amount` is a decimal string — money does not become a JS number to
+    // cross a wire, on the way out any more than on the way in.
+    mutationFn: ({ amount, phoneNumber, userType }: { amount: string, phoneNumber: string, userType: string }) =>
       post(RiderApiRoutes.WalletWithdraw.path, {
         amount,
         phone_number: phoneNumber,

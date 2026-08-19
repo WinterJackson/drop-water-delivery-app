@@ -19,6 +19,10 @@ import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { useWalletSummary } from "@/hooks/queries/useWallet";
 import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney, moneyRatio, subtractMoney } from "@/utils/money";
 
+/** What a user may type into an amount box: shillings, optionally cents. */
+const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
+
+
 export default function Cashout() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -92,7 +96,7 @@ export default function Cashout() {
     // administrator moves the row, and refusing client-side so no server log
     // would ever show it happening.
     const minTopUp = walletSummary?.topup?.minimum ?? null;
-    if (!topUpAmount || isNaN(Number(topUpAmount))) {
+    if (!MONEY_INPUT.test(topUpAmount.trim())) {
       Alert.alert("Invalid Amount", "Please enter the amount you want to top up.");
       return;
     }
@@ -109,7 +113,7 @@ export default function Cashout() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsProcessingTopUp(true);
       const data = await post<{ error?: string }>(RiderApiRoutes.WalletTopUp.path, {
-        amount: Number(topUpAmount),
+        amount: topUpAmount.trim(),
         phone_number: phoneNumber,
         user_type: "rider",
       });
@@ -148,7 +152,7 @@ export default function Cashout() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await withdrawMutation.mutateAsync({
-        amount: Number(withdrawAmount),
+        amount: withdrawAmount.trim(),
         phoneNumber: phoneNumber,
         userType: "rider",
       });

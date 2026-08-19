@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { formatMoney } from "@/utils/money";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
@@ -256,7 +257,10 @@ export default function StoreProfile() {
             };
 
             if (depositFee.trim()) {
-                payload.deposit_fee = Number(depositFee.trim());
+                // A decimal string. `deposit_fee` is `Numeric(10, 2)` and the
+                // endpoint takes a `Decimal`; `Number()` here was the one step
+                // that made it a float on the way.
+                payload.deposit_fee = depositFee.trim();
             }
 
             if (locationData) {
@@ -375,7 +379,7 @@ export default function StoreProfile() {
                                     <>
                                         <InfoRow {...infoRowProps} label="Business License" value={vendorProfile?.business_license || "Not Provided"} editable={false} />
                                         <InfoRow {...infoRowProps} label="Vendor Type" value={vendorProfile?.vendor_type === "wholesale_b2b" ? "Wholesale (B2B)" : (vendorProfile?.vendor_type === "retail_refill" ? "Retail Refill" : "N/A")} editable={false} />
-                                        <InfoRow {...infoRowProps} label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? `Ksh ${vendorProfile?.deposit_fee}` : "N/A"} editable={false} />
+                                        <InfoRow {...infoRowProps} label="Deposit Fee" value={vendorProfile?.deposit_fee != null ? formatMoney(vendorProfile.deposit_fee, "Ksh") : "N/A"} editable={false} />
                                         <InfoRow {...infoRowProps} label="Operating Hours" value={vendorProfile?.shift_start && vendorProfile?.shift_end ? `${vendorProfile.shift_start.slice(0, 5)} - ${vendorProfile.shift_end.slice(0, 5)}` : "Not Set"} editable={false} />
                                         <View className="flex-row justify-between pt-3">
                                             <Text className={`w-1/3 mt-3 text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-gray-500"}`}>Location</Text>
