@@ -151,6 +151,10 @@ export interface VendorOrder {
     bottle_deposit?: string;
     /** An earlier unpaid balance collected on this order. */
     debt_settlement?: string;
+    /** Taken off for paying by M-Pesa rather than cash. */
+    mpesa_discount?: string;
+    /** Signed — what quantizing to a whole shilling moved. */
+    rounding_adjustment?: string;
 
     bottle_source?: string | null;
     is_welcome_offer?: boolean | null;

@@ -616,9 +616,13 @@ ALLOW_STAFF_COLUMN_DROP=true alembic upgrade head
 Until then, routine deploys should run:
 
 ```bash
-alembic upgrade a9f4b2c71d63
+alembic upgrade c8b4f0d92e17
 ```
 
-which is the last ungated revision. Leaving the variable set permanently on
+which is the last ungated revision. It moves every time a revision is added —
+the new one is always parented on the previous last-ungated and the gate
+re-parented onto it — so read it off `alembic history | head -2` rather than
+trusting this line, and `test_migration_chain.py` fails the build if the gate
+stops being the head. Leaving the variable set permanently on
 Render defeats the guard entirely — the next deploy would apply the drop
 unattended.

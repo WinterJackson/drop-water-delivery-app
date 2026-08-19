@@ -13,7 +13,7 @@ import { errorMessage } from "@/API/errors";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Ionicons } from "@expo/vector-icons";
-import { formatMoney, isZeroMoney, multiplyMoney, sumMoney } from "@/utils/money";
+import { formatMoney, isNegativeMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 type Props = {
   order: any;
@@ -385,6 +385,22 @@ const OrderCard = React.memo(({ order }: Props) => {
                 <View className="flex-row justify-between items-center">
                   <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Applied</Text>
                   <Text className={`text-xs font-sans-bold text-green-500`}>-{formatMoney(order.wallet_discount, "Ksh")}</Text>
+                </View>
+              )}
+              {!isZeroMoney(order.mpesa_discount) && (
+                <View className="flex-row justify-between items-center">
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>M-Pesa Discount</Text>
+                  <Text className={`text-xs font-sans-bold text-green-500`}>-{formatMoney(order.mpesa_discount, "Ksh")}</Text>
+                </View>
+              )}
+              {!isZeroMoney(order.rounding_adjustment) && (
+                <View className="flex-row justify-between items-center">
+                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Rounding</Text>
+                  <Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                    {isNegativeMoney(order.rounding_adjustment)
+                      ? `- ${formatMoney(subtractMoney("0", order.rounding_adjustment), "Ksh")}`
+                      : `+ ${formatMoney(order.rounding_adjustment, "Ksh")}`}
+                  </Text>
                 </View>
               )}
               <View className="flex-row justify-between items-center mt-1 pt-2 border-t border-gray-800/50 dark:border-gray-100/10">

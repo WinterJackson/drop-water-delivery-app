@@ -1128,9 +1128,14 @@ async def create_order(
       payment_method=payment_method,
 
       # ── Discount Audit Trail ──
+      # Every money figure the quote published, without exception. These last
+      # two were applied to what the customer paid and frozen onto nothing, so
+      # the order could not be reconciled against its own total.
       wallet_discount=quote.wallet_discount,
       welcome_discount=quote.welcome_discount,
       product_subtotal=quote.product_subtotal,
+      mpesa_discount=quote.mpesa_discount,
+      rounding_adjustment=quote.rounding_adjustment,
 
       # ── Deposits and debt ──
       bottle_deposit=quote.bottle_deposit,

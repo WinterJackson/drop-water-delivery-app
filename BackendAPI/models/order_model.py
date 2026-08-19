@@ -80,6 +80,14 @@ class Order(Base):
   wallet_discount = Column(Numeric(10, 2), nullable=False, default=0.0)
   welcome_discount = Column(Numeric(10, 2), nullable=False, default=0.0)
   product_subtotal = Column(Numeric(10, 2), nullable=False, default=0.0)
+  #: Taken off for paying by M-Pesa rather than cash. Applied to the total from
+  #: the day it existed and recorded nowhere, so every prepaid order's stored
+  #: breakdown came out ten shillings above the `total_amount` beside it.
+  mpesa_discount = Column(Numeric(10, 2), nullable=False, server_default="0", default=0.0)
+  #: What quantizing to a whole shilling moved. Signed, under fifty cents, and
+  #: the last thing standing between the ten lines above and the figure charged.
+  #: Not a fee — see `pricing_service.compute_order_quote`.
+  rounding_adjustment = Column(Numeric(10, 2), nullable=False, server_default="0", default=0.0)
 
   # ── Deposits and debt ──────────────────────────────────────────────────
   #: The refundable deposit charged on this order. Folded into `vendor_net`,

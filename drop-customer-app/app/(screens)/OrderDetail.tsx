@@ -23,7 +23,7 @@ import {
 } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
-import { formatMoney, isZeroMoney, multiplyMoney, sumMoney } from "@/utils/money";
+import { formatMoney, isNegativeMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 /**
  * `react-native-maps` has no web build, so it is `require`d behind a platform
@@ -778,6 +778,26 @@ export default function OrderDetail() {
                             <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Wallet Balance Applied</Text>
                             <Text className={`font-sans-semibold text-green-500`}>
                                 -{formatMoney(order.wallet_discount)}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isZeroMoney(order.mpesa_discount) && (
+                        <View className="flex-row justify-between mb-2">
+                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>M-Pesa Payment Discount</Text>
+                            <Text className={`font-sans-semibold text-green-500`}>
+                                -{formatMoney(order.mpesa_discount)}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isZeroMoney(order.rounding_adjustment) && (
+                        <View className="flex-row justify-between mb-2">
+                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Rounding</Text>
+                            <Text className={`font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-600"}`}>
+                                {isNegativeMoney(order.rounding_adjustment)
+                                    ? `- ${formatMoney(subtractMoney("0", order.rounding_adjustment))}`
+                                    : `+ ${formatMoney(order.rounding_adjustment)}`}
                             </Text>
                         </View>
                     )}

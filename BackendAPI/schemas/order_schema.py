@@ -89,6 +89,11 @@ class BaseOrder(BaseModel):
   wallet_discount: MoneyField = Decimal("0")
   welcome_discount: MoneyField = Decimal("0")
   product_subtotal: MoneyField = Decimal("0")
+  mpesa_discount: MoneyField = Decimal("0")
+  #: Signed. With this and `mpesa_discount` present, an order's own lines add up
+  #: to the `total_amount` beside them — which is what makes the stored record
+  #: something a dispute can actually be argued from.
+  rounding_adjustment: MoneyField = Decimal("0")
 
   # ── Deposits and debt ──
   # Both are columns on `Orders`, written by `create_order` from the quote, and

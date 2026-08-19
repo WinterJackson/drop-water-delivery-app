@@ -26,7 +26,7 @@ import { useOrderContacts, ContactInfo } from "@/hooks/queries/useOrderContacts"
 import { PERMISSIONS, useCan } from "@/hooks/queries/useVendorProfile";
 import { useWalletSummary } from "@/hooks/queries/useWallet";
 import { useRef, useMemo, useCallback } from "react";
-import { compareMoney, formatMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
+import { compareMoney, formatMoney, isNegativeMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 export default function OrderDetail() {
   const { id } = useLocalSearchParams();
@@ -495,6 +495,22 @@ export default function OrderDetail() {
               <View className="flex-row justify-between mb-3">
                 <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Wallet Applied</Text>
                 <Text className="font-sans-bold text-green-500">-{formatMoney(order.wallet_discount)}</Text>
+              </View>
+            )}
+            {!isZeroMoney(order.mpesa_discount) && (
+              <View className="flex-row justify-between mb-3">
+                <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>M-Pesa Discount</Text>
+                <Text className="font-sans-bold text-green-500">-{formatMoney(order.mpesa_discount)}</Text>
+              </View>
+            )}
+            {!isZeroMoney(order.rounding_adjustment) && (
+              <View className="flex-row justify-between mb-3">
+                <Text className={`font-sans-medium ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Rounding</Text>
+                <Text className={`font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
+                  {isNegativeMoney(order.rounding_adjustment)
+                    ? `- ${formatMoney(subtractMoney("0", order.rounding_adjustment))}`
+                    : `+ ${formatMoney(order.rounding_adjustment)}`}
+                </Text>
               </View>
             )}
             <View className={`h-[1px] my-3 ${darkTheme ? "bg-slate-800" : "bg-slate-100"}`} />

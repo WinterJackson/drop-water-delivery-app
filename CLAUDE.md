@@ -216,14 +216,25 @@ now, which is where the vendor app has always kept its own.
 
 The repository head, `e6b2c8d40f17`, is **gated on purpose**: it drops the legacy
 single-staff columns and refuses to run without `ALLOW_STAFF_COLUMN_DROP=true`.
-Routine deploys should target `f7e3b91c8d24`, the last revision before it. The
+Routine deploys should target `c8b4f0d92e17`, the last revision before it. The
 expand/contract sequence is in the gated migration's own docstring.
 
 A new revision goes **before** the gated drop, never after it — anything parented
 on `e6b2c8d40f17` could only ever run on a deploy that had already accepted the
-column drop.
+column drop. So a new revision parents on whatever is currently last-before-gate
+and the gate is re-parented onto it, which also keeps the routine-deploy target
+above accurate: it is always the new revision's own id.
 
-**The chain cannot build this database.** Sixty-five revisions, two bases, and
+`test_migration_chain.py` enforces both halves — exactly one head, and that head
+being the gated revision — plus one base and no `down_revision` naming a
+revision that does not exist. It reads the files, because there is no database
+in this suite. The graph has forked before (`f9a3b7c2d1e0` branched off
+`a1b2c3d4e5f6` and needed the mergepoint `3f40437790a9` to come back), and a
+second head is not a subtle failure: `alembic upgrade head` and
+`scripts/bootstrap_database.py`, which stamps at `head` by default, both refuse
+to run at all.
+
+**The chain cannot build this database.** Sixty-eight revisions, one base, and
 not one creates `Vendors`, `Users`, `Orders` or `Products` — those tables
 predate Alembic, so every revision *alters* a schema no revision *creates* and
 `alembic upgrade head` against an empty database dies on the first `ALTER

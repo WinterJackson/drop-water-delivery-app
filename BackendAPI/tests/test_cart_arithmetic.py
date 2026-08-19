@@ -29,7 +29,9 @@ location, is not a checkout anybody should reach.
 """
 from __future__ import annotations
 
+import ast
 import itertools
+import re
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -38,6 +40,10 @@ import pytest
 from fastapi import HTTPException
 
 from services.pricing_service import compute_order_quote, validate_quote
+
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 #: Everything the customer is charged, and everything taken off. The two lists
 #: together are the complete itemisation — `delivery_markup` is deliberately in
@@ -278,3 +284,68 @@ def test_an_unreadable_floor_is_not_a_charge():
             order = _mismatch_order(actual_floor=0)
             order.actual_floor_level = value
             assert staircase_shortfall(order) == Decimal("0.00")
+
+
+# ── The order keeps every figure the quote published ──────────────────────
+#
+# `compute_order_quote` is the one place a total is computed and `create_order`
+# freezes it onto the row. It froze nine of eleven money figures: `mpesa_discount`
+# and `rounding_adjustment` were applied to what the customer paid and recorded
+# nowhere, so no order's own lines could be added up to its `total_amount`.
+#
+# That matters on the *stored* record specifically. `order_snapshot` is what a
+# delivery dispute is settled from weeks later, and a breakdown that does not
+# reach its own total is one nobody can argue from — the same defect the cart
+# had, one screen and several weeks further on.
+
+def _quote_money_fields_for_order() -> set[str]:
+    """Money the quote publishes that an order should carry.
+
+    Discovered from `OrderQuote.as_dict`, so a figure added to the quote later
+    is covered without anybody remembering this file.
+    """
+    source = (ROOT / "BackendAPI" / "services" / "pricing_service.py").read_text(encoding="utf-8")
+    body = source.split("def as_dict(self)")[1].split("\n    def ")[0]
+    fields = set(re.findall(r'"([a-z_]+)":\s*money_str', body))
+    # `total` is the sum, stored as `total_amount`; `delivery_markup` is margin
+    # inside `delivery_fee` and is stored under its own name already.
+    return fields - {"total"}
+
+
+def _create_order_columns() -> set[str]:
+    """Keyword arguments the `Order(...)` construction in `create_order` passes."""
+    source = (ROOT / "BackendAPI" / "services" / "order_service.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "Order"
+        ):
+            return {kw.arg for kw in node.keywords if kw.arg}
+    raise AssertionError("no `Order(...)` construction found in order_service")
+
+
+def test_the_order_construction_was_found() -> None:
+    """Non-vacuity — an empty set satisfies any subset assertion."""
+    assert len(_create_order_columns()) > 20
+    assert len(_quote_money_fields_for_order()) >= 11
+
+
+@pytest.mark.parametrize("field", sorted(_quote_money_fields_for_order()))
+def test_every_quote_figure_is_frozen_onto_the_order(field: str) -> None:
+    columns = _create_order_columns()
+    assert field in columns, (
+        f"`{field}` is published by the quote and never written to the order. "
+        "Every figure that moves the total has to be on the row, or the stored "
+        "breakdown cannot be reconciled against the amount charged."
+    )
+
+
+def test_the_order_model_has_a_column_for_each() -> None:
+    """…and the column exists, so the keyword is not silently ignored."""
+    from models.order_model import Order
+
+    columns = {c.name for c in Order.__table__.columns}
+    missing = sorted(f for f in _quote_money_fields_for_order() if f not in columns)
+    assert not missing, f"quote figures with no column on Orders: {missing}"

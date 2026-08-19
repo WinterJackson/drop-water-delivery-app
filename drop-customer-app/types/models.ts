@@ -297,6 +297,13 @@ export interface Order {
    */
   bottle_deposit?: string;
   debt_settlement?: string;
+  /** Taken off for paying by M-Pesa rather than cash. */
+  mpesa_discount?: string;
+  /**
+   * Signed. What quantizing to a whole shilling moved. With this and
+   * `mpesa_discount` recorded, an order's own lines add up to `total_amount`.
+   */
+  rounding_adjustment?: string;
   /**
    * What approving an address mismatch would add to this order, computed by the
    * same server function that applies it. The screen quoted a flat "KSh 30" —
