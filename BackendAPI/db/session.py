@@ -1,5 +1,6 @@
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
+import ssl
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 from sqlalchemy.engine import make_url
@@ -94,9 +95,55 @@ def _requires_tls(url: str) -> bool:
     return host not in {"localhost", "127.0.0.1", "::1", ""}
 
 
+def _tls_context():
+    """The TLS setting for a remote database: verified, and verified against what.
+
+    `ssl=True` means "encrypt and verify against the system trust store", which
+    is correct for a provider whose certificate chains to a public CA — Neon
+    does. Supabase's connection pooler does not: it serves a leaf issued by
+    `Supabase Intermediate 2021 CA` under a private `Supabase Root 2021 CA`,
+    which no system trust store carries, so verification fails outright with
+    `self-signed certificate in certificate chain`.
+
+    The tempting fix is to stop verifying — `ssl="require"` encrypts and asks no
+    questions, and it is what most write-ups reach for. It is the wrong trade
+    on this database. Encryption without verification stops somebody reading the
+    connection and does nothing about somebody *being* the other end of it, and
+    what travels over this one is every customer record, every rider's national
+    ID reference and every wallet movement on the platform.
+
+    So `DB_SSL_ROOT_CERT` names a CA bundle to verify against instead of the
+    system store. Set it for Supabase (`certs/supabase-root-2021.crt`, committed
+    — a CA certificate is public by design), leave it unset for a provider with
+    a publicly-rooted chain. Either way the connection is verified; the variable
+    only chooses the trust anchor, and there is deliberately no value of it that
+    turns verification off.
+    """
+    root_cert = os.getenv("DB_SSL_ROOT_CERT")
+    if not root_cert:
+        return True
+
+    path = root_cert if os.path.isabs(root_cert) else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), root_cert
+    )
+    if not os.path.exists(path):
+        # Failing here beats falling back to the system store: a silent fallback
+        # would connect fine against Neon and fail only on the provider the
+        # variable was set for, at whatever hour that deploy happened.
+        raise RuntimeError(
+            f"DB_SSL_ROOT_CERT points at {path}, which does not exist. "
+            "It must name a CA bundle readable by the process."
+        )
+
+    context = ssl.create_default_context(cafile=path)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    return context
+
+
 _CONNECT_ARGS: dict = {"server_settings": _SERVER_SETTINGS}
 if _requires_tls(DATABASE_URL):
-    _CONNECT_ARGS["ssl"] = True
+    _CONNECT_ARGS["ssl"] = _tls_context()
 
 engine = create_async_engine(
     DATABASE_URL,

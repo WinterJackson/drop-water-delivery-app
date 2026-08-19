@@ -16,6 +16,24 @@ eight scheduled sweeps can run at all — no auto-cancel of unpaid orders, no
 refund processing, no reassignment of undispatched orders, no push-token
 cleanup. Set this before creating the cron-job.org jobs (`docs/cron-jobs.md`).
 
+### Database — `NEONDB_URL`, `DB_SSL_ROOT_CERT`
+
+`NEONDB_URL` is the DSN, named historically; it holds whichever provider is in
+use. It must carry the `postgresql+asyncpg://` prefix, and `db/session.py`
+strips any `?sslmode=`/`?channel_binding=` query string, since asyncpg does not
+accept those as URL parameters.
+
+`DB_SSL_ROOT_CERT` names a CA bundle to verify the server against, relative to
+`BackendAPI/`. Set it to `certs/supabase-root-2021.crt` for Supabase, whose
+pooler is issued by a private CA no system trust store carries. Leave it unset
+for a provider with a publicly-rooted chain — the connection then verifies
+against the system store. Unset does **not** mean unverified; there is no value
+that disables verification.
+
+Both must be set on the API service **and** the ARQ worker. The worker is a
+separate process with its own environment, and a worker that cannot reach the
+database fails silently — the cron schedule simply stops producing anything.
+
 ### AWS / S3 — `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME`
 
 `utils/s3_utils.py` branches on `AWS_ACCESS_KEY_ID`. With it unset it takes the

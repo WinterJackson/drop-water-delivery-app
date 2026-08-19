@@ -15,10 +15,11 @@
 # `bootstrap_database.py` does.
 services:
   postgres:
-    # PostGIS 3.4 on Postgres 16. Match the major version to whatever the
-    # deployed database reports (`SELECT version()`), so the planner and type
-    # behaviour a test exercises here is the behaviour production has.
-    image: postgis/postgis:16-3.4
+    # PostGIS 3.5 on Postgres 17, matching the deployed database — Supabase
+    # reports PostgreSQL 17.6. Kept in step on purpose: the planner and type
+    # behaviour a test exercises here should be the behaviour production has,
+    # and this suite exists partly to catch errors only Postgres raises.
+    image: postgis/postgis:17-3.5
     container_name: drop-postgres
     restart: unless-stopped
     environment:

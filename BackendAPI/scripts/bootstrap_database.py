@@ -81,9 +81,18 @@ async def _bootstrap(database_url: str, stamp_at: str, force: bool) -> int:
     url = make_url(database_url)
     print(f"target   : {url.host}:{url.port or 5432}/{url.database}")
 
+    # The same TLS decision the application makes, imported rather than repeated.
+    # This script had its own copy — `ssl=True` for any non-loopback host — which
+    # verified against the system trust store and therefore could not reach a
+    # provider with a private CA. It failed on Supabase while the application,
+    # correctly configured, would have connected: a bootstrap that cannot reach
+    # the database it is meant to build, for a reason that lives in a second
+    # implementation of a rule that already had one.
+    from db.session import _requires_tls, _tls_context
+
     connect_args = {}
-    if (url.host or "").lower() not in {"localhost", "127.0.0.1", "::1", ""}:
-        connect_args["ssl"] = True
+    if _requires_tls(database_url):
+        connect_args["ssl"] = _tls_context()
 
     engine = create_async_engine(database_url, connect_args=connect_args)
 

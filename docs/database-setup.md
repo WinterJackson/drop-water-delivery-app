@@ -127,25 +127,81 @@ Free-tier limits move; check the current pricing page before committing.
    yours; every query pays that round trip, not the user.
 2. **Database → Extensions**, enable **`postgis`**. Nothing else is needed;
    `bootstrap_database.py` creates `pg_trgm` itself.
-3. **Project Settings → Database → Connection string → URI**. Take the
-   **session** pooler string (port 5432) rather than the transaction pooler
-   (6543): `asyncpg` uses prepared statements, and a transaction-mode pooler
-   does not support them.
-4. Put it in `BackendAPI/.env` with the driver prefix:
+3. **Connect** (top of the dashboard) **→ Direct → Session pooler → URI**.
+   Identify it by the string rather than the label: host contains
+   `pooler.supabase.com`, port **5432**, user `postgres.<ref>`.
+
+   Not the **transaction** pooler on 6543 — `asyncpg` uses prepared statements
+   and transaction-mode pooling does not support them, which fails intermittently
+   under load rather than immediately. Not the **direct** connection either,
+   despite also being 5432: it is IPv6-only on the free plan, so it works from a
+   laptop and fails from Render.
+
+4. **TLS.** Supabase's pooler serves a leaf issued by `Supabase Intermediate
+   2021 CA` under a private `Supabase Root 2021 CA`. No system trust store
+   carries that root, so a verifying client fails with
 
    ```
-   NEONDB_URL="postgresql+asyncpg://postgres.<ref>:<password>@<host>:5432/postgres"
+   ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED]
+   self-signed certificate in certificate chain
    ```
 
-5. Build and check:
+   The usual advice is to stop verifying (`ssl="require"`, or `sslmode=require`,
+   which encrypts and asks no questions). **Do not.** Encryption without
+   verification stops somebody *reading* the connection and does nothing about
+   somebody *being* the far end of it, and what crosses this one is every
+   customer record, every rider's identity document reference and every wallet
+   movement.
+
+   Verify against Supabase's CA instead. It is committed at
+   `BackendAPI/certs/supabase-root-2021.crt` — a CA certificate is public by
+   design — and selected with:
+
+   ```
+   DB_SSL_ROOT_CERT=certs/supabase-root-2021.crt
+   ```
+
+   Unset, the connection verifies against the system trust store, which is right
+   for a provider with a publicly-rooted chain. There is deliberately no value
+   that turns verification off.
+
+5. Put the URI in `BackendAPI/.env` with the driver prefix, percent-encoding any
+   special characters in the password:
+
+   ```
+   NEONDB_URL="postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+   ```
+
+6. Build and check:
 
    ```bash
    python scripts/bootstrap_database.py
    python -m seed.seed_data
    ```
 
-6. Set the same `NEONDB_URL` on Render, in the API service **and** the worker,
-   then redeploy both. `docs/render-environment.md` lists the full variable set.
+7. On Render, set **both** `NEONDB_URL` and `DB_SSL_ROOT_CERT` on the API
+   service **and** the worker, then redeploy both. `docs/render-environment.md`
+   lists the full variable set.
+
+### Settings to refuse when creating the project
+
+* **GitHub integration — leave it disconnected.** It is for Supabase's
+  declarative schema workflow. This schema is owned by Alembic, there is no
+  `supabase/` directory, and connecting it means two systems believing they own
+  the schema plus a preview database per pull request drawing on the same
+  allowance.
+* **Data API — off.** It publishes a PostgREST API over the whole `public`
+  schema for browser clients using `supabase-js`. Nothing here uses one: the
+  three apps and the console all talk to FastAPI, which owns every authorisation
+  decision on this platform. Leaving it on is a second door into the same 32
+  tables with none of those checks in front of it.
+* **Automatic RLS — off.** With no Data API there is nothing for it to protect,
+  and RLS with no policies is a way for queries to start returning zero rows for
+  reasons nobody can see.
+* **Postgres type — Default, not OrioleDB.** It is alpha, it cannot be changed
+  after creation, and it is a different storage engine — not something to gamble
+  PostGIS on when 44 spatial calls decide which stores a customer can order
+  from.
 
 ### After switching
 
