@@ -208,20 +208,29 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 								    height under the card's `overflow-hidden`. Same
 								    defect as the home grid: the name and the price
 								    are there, laid out, and clipped to nothing. */}
-								<View className="px-3 py-2">
+								{/* Name, price and the add control share one row, and the row
+								    owns the geometry. The button used to be absolutely
+								    positioned inside this block (bottom-8 right-8), which took
+								    it out of flow — the name knew nothing about it, ran
+								    underneath, and `numberOfLines={1}` ellipsised against the
+								    card edge instead of against the button, so the shelf label
+								    read "Bale 1L Branded (12-p[cart]ck)". Reserving a `pr-9`
+								    gutter hid that, but only by hard-coding the button's width
+								    and offsets in a second place, where the next change to
+								    either silently reopens the overlap.
+								    Here the text column flexes and the button keeps its own
+								    width, so the two cannot collide whatever either becomes.
+								    `flex-1` is safe on this axis and is *not* the defect the
+								    comment above warns about: that one was `flex-1` in an
+								    auto-height **column**, where there is no free space to
+								    grow into. This row's width is definite — the card sets
+								    it — so the main axis has space to distribute. */}
+								<View className="px-3 py-2 flex-row items-center gap-2">
+									<View className="flex-1">
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
-										/* `pr-9` reserves the gutter the add-to-cart button sits
-										   in. That button is absolutely positioned inside this
-										   same block (bottom-8 right-8, 32px wide), so it is out
-										   of flow and the name knows nothing about it — a long
-										   one runs straight underneath, and `numberOfLines={1}`
-										   ellipsises against the card edge rather than against
-										   the button. On the shelf that read as
-										   "Bale 1L Branded (12-p[cart]ck)". Only the product
-										   branch needs it; the vendor branch has no button. */
 										<Text
-											className={`font-sans-bold text-sm pr-9 ${darkTheme ? "text-white" : "text-gray-900"}`}
+											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
 										>
 											{item.name}
@@ -238,7 +247,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 									{/* <-----------------<RENDER ACCORDING TO TYPE OF LIST>-----------------> */}
 									{type === "product" ? (
 										// <---------------------<PRODUCT PRICE>--------------------->
-										<View className={`flex-row gap-2 items-center mt-0.5 pr-9`}>
+										<View className={`flex-row gap-2 items-center mt-0.5`}>
 											<Text className={`font-sans-semibold text-sm ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
 												{formatMoney(discountedPrice(item.price, item.discount))}
 											</Text>
@@ -277,21 +286,39 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 										)
 									)}
 
+									</View>
 									{/* <--------------------<ADD TO CART BUTTON>--------------------> */}
+									{/* A sibling of the text column rather than an overlay of it,
+									    and filled in the brand colour. It used to be `bg-white`
+									    on the light theme — on a card that is itself `bg-white`,
+									    so the one action on the card was an invisible square
+									    that people found by accident. It is also the only
+									    control here with no words in it, which is why it carries
+									    a label naming the product: React Native builds a
+									    touchable's accessible name from its `<Text>` children,
+									    and this one has none, so a screen reader announced
+									    twenty identical "button"s down the shelf.
+									    `hitSlop` buys the 44pt target the 36pt circle does not
+									    have, without making the circle heavy enough to compete
+									    with the price beside it. */}
 									{type === "product" && (
 										<PressableScale
 											activeOpacity={0.6}
-											style={{ position: "absolute", bottom: 8, right: 8 }}
+											accessibilityLabel={`Add ${item.name} to cart`}
+											hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
 											onPress={() => AddToCart(item.id)}
 										>
-											<View className={`${darkTheme ? 'bg-white/10' : 'bg-white'} p-2 w-[32px] h-[32px] items-center justify-center rounded-xl`}>
+											<View
+												className="w-9 h-9 items-center justify-center rounded-full"
+												style={{ backgroundColor: BRAND.primary }}
+											>
 												{AddToCartLoading && clickedItemId === item.id ? (
 													<SkeletonAvatar size={16} />
 												) : (
 													<Image
 														source={require("../../assets/icons/addtocart-black.png")}
 														style={{ width: 16, height: 16 }}
-														tintColor={darkTheme ? "white" : "black"}
+														tintColor="white"
 													/>
 												)}
 											</View>

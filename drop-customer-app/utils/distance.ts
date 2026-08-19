@@ -24,11 +24,33 @@ function formatDuration(minutes: number): string {
 }
 
 /**
+ * Whether an estimate can be computed at all — all four coordinates present.
+ *
+ * Exported so a screen can decide *not to render the row* rather than print
+ * "Est. Delivery available", which occupies the same space as a real answer
+ * while carrying none. `products_with_discount` does not serialise the vendor
+ * relationship, so on Deals & Offers that placeholder was every card.
+ */
+export function hasEstimate(
+    vendorLat?: number | null,
+    vendorLng?: number | null,
+    userLat?: number | null,
+    userLng?: number | null,
+): boolean {
+    return vendorLat != null && vendorLng != null && userLat != null && userLng != null;
+}
+
+/**
  * Robustly calculates an estimated delivery time string.
  * Base preparation time is 15 minutes + 5 minutes per kilometer.
  */
 export function estimateDeliveryTime(vendorLat?: number, vendorLng?: number, userLat?: number, userLng?: number): string {
-    if (!vendorLat || !vendorLng || !userLat || !userLng) {
+    // `== null`, not truthiness. Kenya straddles the equator and the prime
+    // meridian is only ~4,000 km west, so latitude 0 is a real place a customer
+    // can live — and `!0` is true, which would report a coordinate we have as a
+    // coordinate we lack. The same defect was fixed in four backend endpoints
+    // and in `useDeliveryLocation`; this was the copy left in a client util.
+    if (vendorLat == null || vendorLng == null || userLat == null || userLng == null) {
         return "Est. Delivery available";
     }
 
