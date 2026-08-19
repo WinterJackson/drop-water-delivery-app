@@ -613,6 +613,12 @@ step 3 of the sequence in the migration's own docstring has actually happened:
 ALLOW_STAFF_COLUMN_DROP=true alembic upgrade head
 ```
 
+**Nothing runs this for you.** The Dockerfile starts `uvicorn` and there is no
+pre-deploy command, so a push deploys code that may be ahead of the schema. For
+an additive column that means `UndefinedColumn` on every query touching the
+table until somebody runs the upgrade. Either run it before the push, or add a
+Render **Pre-Deploy Command** with the line below so the two can never separate.
+
 Until then, routine deploys should run:
 
 ```bash

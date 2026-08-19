@@ -55,13 +55,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'Orders',
-        sa.Column('mpesa_discount', sa.Numeric(10, 2), nullable=False, server_default='0'),
+    # `IF NOT EXISTS`, deliberately, rather than `op.add_column`.
+    #
+    # Deploys here are automatic on push and migrations are a manual step, so
+    # the code always lands before the schema. That window is the whole reason
+    # this note exists: the running model names every mapped column in its
+    # SELECT, so between the deploy and the upgrade *every* query that selects
+    # an Order raises `UndefinedColumn`. Closing it means being able to add the
+    # two columns by hand immediately and let alembic catch up afterwards
+    # without colliding — which a plain `add_column` cannot do, because it would
+    # then fail on a column that is already there and block the upgrade.
+    #
+    # Adding a `NOT NULL` column with a constant default is metadata-only on
+    # PostgreSQL 11+; it does not rewrite the table and does not take a long
+    # lock, so it is safe to run on a live database.
+    op.execute(
+        'ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS '
+        "mpesa_discount numeric(10, 2) NOT NULL DEFAULT 0"
     )
-    op.add_column(
-        'Orders',
-        sa.Column('rounding_adjustment', sa.Numeric(10, 2), nullable=False, server_default='0'),
+    op.execute(
+        'ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS '
+        "rounding_adjustment numeric(10, 2) NOT NULL DEFAULT 0"
     )
 
     # Derive the rounding only. It is `total_amount` less the ten components,
@@ -108,5 +122,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('Orders', 'rounding_adjustment')
-    op.drop_column('Orders', 'mpesa_discount')
+    op.execute('ALTER TABLE "Orders" DROP COLUMN IF EXISTS rounding_adjustment')
+    op.execute('ALTER TABLE "Orders" DROP COLUMN IF EXISTS mpesa_discount')

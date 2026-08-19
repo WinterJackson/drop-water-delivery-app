@@ -219,6 +219,18 @@ single-staff columns and refuses to run without `ALLOW_STAFF_COLUMN_DROP=true`.
 Routine deploys should target `c8b4f0d92e17`, the last revision before it. The
 expand/contract sequence is in the gated migration's own docstring.
 
+**The deploy is automatic and the migration is not.** Render redeploys on every
+push to `main`; `BackendAPI/Dockerfile` ends at `uvicorn` and there is no
+pre-deploy hook, so `alembic upgrade` is a manual step somebody runs. That
+ordering is backwards for an additive column: SQLAlchemy names every mapped
+column in its `SELECT`, so between the deploy and the upgrade *every* query that
+selects that entity raises `UndefinedColumn` — the whole platform, not one
+screen. Run the migration **before** pushing the model change, or push a model
+that does not yet declare the column. `c8b4f0d92e17` was pushed the wrong way
+round; its `ALTER`s are `IF NOT EXISTS` precisely so the window can be closed by
+hand without the later upgrade colliding, and any new column migration should
+be written the same way.
+
 A new revision goes **before** the gated drop, never after it — anything parented
 on `e6b2c8d40f17` could only ever run on a deploy that had already accepted the
 column drop. So a new revision parents on whatever is currently last-before-gate
