@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 import ProductCard from "@/components/common/ProductCard";
 import { useAddToCartAction } from "@/hooks/useAddToCartAction";
+import { ratingLabel } from "@/utils/rating";
 
 type Props = {
 	title: string;
@@ -188,7 +189,7 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 													</Text>
 												</View>
 												<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
-													⭐ {Number(item.rating ?? 0).toFixed(1)}
+													{ratingLabel(item.rating, item.rating_count)}
 												</Text>
 											</View>
 										)}

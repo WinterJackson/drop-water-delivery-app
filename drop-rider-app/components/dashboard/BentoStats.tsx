@@ -8,6 +8,7 @@ import { RiderEarnings, RiderProfile } from '@/hooks/queries/useRiderData';
 import PressableScale from '@/components/ui/PressableScale';
 import { useRouter } from 'expo-router';
 import { formatMoneyShort } from "@/utils/money";
+import { ratingScore, UNRATED_LABEL } from "@/utils/rating";
 
 interface BentoStatsProps {
   earnings: RiderEarnings | undefined;
@@ -74,7 +75,7 @@ export default function BentoStats({ earnings, profile }: BentoStatsProps) {
             <View className="z-10 flex-1 pr-2">
               <View className="flex-row items-center gap-1">
                 <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
-                  {profile?.rating?.toFixed(1) || "5.0"}
+                  {ratingScore(profile?.rating, profile?.rating_count) ?? UNRATED_LABEL}
                 </Text>
                 <Ionicons name="star" size={16} color="#F59E0B" />
               </View>

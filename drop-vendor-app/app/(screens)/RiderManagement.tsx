@@ -22,6 +22,7 @@ import { BRAND } from "@/constants/brandColors";
 import { Image } from "expo-image";
 import { useVendorProfile } from "@/hooks/queries/useVendorProfile";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ratingScore } from "@/utils/rating";
 
 const RiderCard = memo(({ 
   item, 
@@ -64,7 +65,7 @@ const RiderCard = memo(({
           <View className="flex-row items-center gap-1.5">
             <Ionicons name="star" size={14} color={BRAND.primary} />
             <Text className={`text-xs font-sans-bold ${darkTheme ? "text-slate-300" : "text-slate-700"}`}>
-              {item.rating?.toFixed(1) || "N/A"}
+              {ratingScore(item.rating)}
             </Text>
           </View>
         )}

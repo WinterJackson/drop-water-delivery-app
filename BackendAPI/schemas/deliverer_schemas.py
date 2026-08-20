@@ -43,6 +43,11 @@ class DelivererProfileResponse(BaseModel):
     is_verified: bool | None = None
     is_platinum: bool | None = None
     rating: float | None = None
+    #: `Deliverer.rating` defaults to **5.0**, so an unrated rider is
+    #: indistinguishable from a rider with a perfect record unless the
+    #: count comes with it. Four rider screens rendered `?? "5.0"` on top
+    #: of that default, which is a fabricated figure standing on another.
+    rating_count: int = 0
     acceptance_rate: float | None = None
     employer_vendor_id: UUID | None = None
     wallet_balance: MoneyField = Decimal("0")

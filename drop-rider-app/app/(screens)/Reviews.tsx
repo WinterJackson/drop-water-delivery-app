@@ -9,6 +9,7 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import { useRiderReviews } from "@/hooks/queries/useRiderData";
 import { RiderReviewsSkeleton } from "@/components/skeletons/ContextualSkeletons";
+import { ratingScore, filledStars, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Reviews() {
   const { currentTheme } = useContext(UIThemeContext);
@@ -80,13 +81,13 @@ export default function Reviews() {
             <View className={`w-full rounded-2xl p-5 border flex-row items-center justify-between mb-6 ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
                 <View className="items-center mr-6">
                     <Text className={`text-5xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                        {reviewsData?.average_rating?.toFixed(1) || "5.0"}
+                        {ratingScore(reviewsData?.average_rating, reviewsData?.total_reviews) ?? UNRATED_LABEL}
                     </Text>
                     <View className="flex-row my-1">
                         {[1, 2, 3, 4, 5].map((i) => (
                             <Ionicons 
                                 key={i} 
-                                name={i <= Math.round(reviewsData?.average_rating || 5) ? "star" : "star-outline"} 
+                                name={i <= filledStars(reviewsData?.average_rating, reviewsData?.total_reviews) ? "star" : "star-outline"} 
                                 size={16} 
                                 color="#F59E0B" 
                             />

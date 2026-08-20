@@ -72,6 +72,8 @@ export interface CartProduct {
     lat: number | null;
     lng: number | null;
     rating: number | null;
+    /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+    rating_count?: number;
     profile_pic: string | null;
   } | null;
 }
@@ -128,6 +130,8 @@ export interface Vendor {
   shift_start: string;
   shift_end: string;
   rating: number | null;
+  /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+  rating_count?: number;
 
   // ── Is this store taking orders? ────────────────────────────────────────
   //
@@ -157,6 +161,8 @@ export interface ProductVendorSnippet {
   lat?: number | null;
   lng?: number | null;
   rating?: number | null;
+  /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+  rating_count?: number;
   profile_pic?: string | null;
 }
 
@@ -246,6 +252,8 @@ export interface OrderVendorSnippet {
   lat?: number | null;
   lng?: number | null;
   rating?: number | null;
+  /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+  rating_count?: number;
   phone_number?: string | null;
 }
 
@@ -382,6 +390,8 @@ export interface GeoJSONVendorProperties {
   /** The store's `business_name`. */
   title: string;
   rating: number | null;
+  /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+  rating_count?: number;
   /** The store's `profile_pic`. */
   image: string | null;
   /**
@@ -417,6 +427,8 @@ export interface Rider {
   lng: number | null;
   is_available: boolean;
   rating: number | null;
+  /** How many ratings the average is made of. `0` means nobody has rated it — see `utils/rating.ts`. */
+  rating_count?: number;
 }
 
 export interface Coordinates {

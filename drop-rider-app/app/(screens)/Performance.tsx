@@ -9,6 +9,7 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
 import { useRiderProfile, useRiderEarnings } from "@/hooks/queries/useRiderData";
 import { RiderPerformanceSkeleton } from "@/components/skeletons/ContextualSkeletons";
+import { ratingScore, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Performance() {
   const { currentTheme } = useContext(UIThemeContext);
@@ -105,7 +106,7 @@ export default function Performance() {
                   className={`flex-1 p-4 rounded-2xl items-center border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-100"}`}
               >
                 <View className="w-16 h-16 rounded-full border-4 border-blue-500 items-center justify-center mb-2">
-                  <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{earnings?.rating?.toFixed(1) || "5.0"}</Text>
+                  <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>{ratingScore(earnings?.rating, earnings?.rating_count) ?? UNRATED_LABEL}</Text>
                 </View>
                 <Text className={`text-sm text-center font-sans-semibold ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Customer Rating</Text>
                 <Text className={`text-xs mt-1 text-blue-500 font-sans-bold`}>View Reviews →</Text>

@@ -635,6 +635,9 @@ async def get_vendor_dashboard(session: AsyncSession, clerk_id: str, vendor_id: 
         "pending_orders": pending_orders,
         "product_count": product_count,
         "rating": vendor.rating or 0,
+        # 0 is what an unrated store scores by policy, which reads on the
+        # dashboard exactly like a store everybody rated badly.
+        "rating_count": int(vendor.rating_count or 0),
         "weekly_revenue": [money_str(v) for v in weekly_revenue_arr],
         "low_stock_products": [
             {

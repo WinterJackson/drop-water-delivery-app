@@ -20,6 +20,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { flattenPages } from "@/utils/paging";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 import { discountedPrice, formatMoney, isZeroMoney } from "@/utils/money";
+import { ratingLabel } from "@/utils/rating";
 
 const PRODUCT_CATEGORIES = [
 	{ id: 'all', label: 'All Products' },
@@ -481,7 +482,7 @@ export default function Search() {
 															</View>
 														</View>
 														<View className="items-end">
-															<Text className="font-sans-bold text-yellow-500">⭐ {vendor.rating?.toFixed(1) || "5.0"}</Text>
+															<Text className="font-sans-bold text-yellow-500">{ratingLabel(vendor.rating, vendor.rating_count)}</Text>
 														</View>
 													</View>
 												</PressableScale>

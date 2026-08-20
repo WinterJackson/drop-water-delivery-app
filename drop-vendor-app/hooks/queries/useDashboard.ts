@@ -24,6 +24,8 @@ export interface VendorDashboard {
     pending_orders: number;
     product_count: number;
     rating: number;
+    /** How many ratings the average is made of. `0` means nobody has rated this store. */
+    rating_count?: number;
     /**
      * Seven totals, Monday first, as decimal **strings** — what
      * `WeeklyRevenueChart` plots. Bucketed by the weekday the order happened

@@ -123,6 +123,8 @@ export interface RiderEarnings {
     platinum_target?: number;
     platinum_window_days?: number;
     rating?: number;
+    /** How many ratings the average is made of. `0` means nobody has rated this rider — `Deliverer.rating` starts at 5.0 by policy, so the average alone cannot say. */
+    rating_count?: number;
     acceptance_rate?: number;
     is_platinum?: boolean;
     /**
@@ -166,6 +168,8 @@ export interface RiderProfile {
     plate_number?: string;
     vehicle_type?: string;
     rating?: number;
+    /** How many ratings the average is made of. `0` means nobody has rated this rider — `Deliverer.rating` starts at 5.0 by policy, so the average alone cannot say. */
+    rating_count?: number;
     acceptance_rate?: number;
     zone_changes_this_month?: number;
     last_zone_change?: string;

@@ -50,7 +50,11 @@ async def get_vendor_favorites(session: AsyncSession, clerk_id: str):
                 "business_name": fav.vendor.business_name,
                 "profile_pic": fav.vendor.profile_pic,
                 "location_address": fav.vendor.location_address,
-                "rating": float(fav.vendor.rating) if fav.vendor.rating else 0,
+                "rating": float(fav.vendor.rating) if fav.vendor.rating is not None else None,
+                # Without the count the app cannot tell an unrated shop from a
+                # badly rated one, and the favourites card used to answer that
+                # by rendering a hardcoded "4.5 • Verified".
+                "rating_count": fav.vendor.rating_count or 0,
                 "is_online": fav.vendor.is_online,
                 "is_accepting_orders": fav.vendor.is_accepting_orders,
                 "store_state": fav.vendor.store_state,

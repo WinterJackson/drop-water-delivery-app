@@ -29,6 +29,7 @@ import LowStockCard from "@/components/dashboard/LowStockCard";
 import StorePauseCard from "@/components/dashboard/StorePauseCard";
 import { useActiveStore } from "@/stores/activeStoreStore";
 import { formatMoney } from "@/utils/money";
+import { ratingScore, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -233,7 +234,7 @@ export default function Dashboard() {
                 icon="cash-outline" color={BRAND.primary}
               />
               <StatCard title="Products" value={dashboard?.product_count || 0} icon="pricetags-outline" color={BRAND.primary} />
-              <StatCard title="Rating" value={dashboard?.rating?.toFixed(1) || "0.0"} icon="star-outline" color={BRAND.primary} />
+              <StatCard title="Rating" value={ratingScore(dashboard?.rating, dashboard?.rating_count) ?? UNRATED_LABEL} icon="star-outline" color={BRAND.primary} />
             </ScrollView>
           )}
         </View>

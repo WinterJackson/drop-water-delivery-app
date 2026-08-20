@@ -29,6 +29,7 @@ import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
+import { ratingLabel } from "@/utils/rating";
 
 type Props = {};
 
@@ -245,7 +246,7 @@ const VendorDetails = (props: Props) => {
 								</Text>
 								<View className="flex-row items-center gap-1">
 									<Text className="text-[#3498db] font-sans-bold text-lg flex-row items-center">
-										⭐ {Number(VendorDetails?.rating) || "4.8"}
+										{ratingLabel(VendorDetails?.rating, VendorDetails?.rating_count)}
 									</Text>
 								</View>
 							</View>

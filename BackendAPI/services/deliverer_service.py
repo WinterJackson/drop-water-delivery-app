@@ -645,6 +645,11 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
         "total_earnings": money_str(total_earnings),
         "is_available": deliverer.is_available,
         "rating": deliverer.rating or 5.0,
+        # `_DEFAULT_RATING["rider"]` is 5.0 on purpose, so a new rider is not
+        # buried — but the app cannot tell that starting figure from an earned
+        # one without the count, and four rider screens wrote `?? "5.0"` to
+        # paper over the gap, which is the server's policy copied into a client.
+        "rating_count": int(deliverer.rating_count or 0),
         "acceptance_rate": deliverer.acceptance_rate or 100.0,
         "is_platinum": deliverer.is_platinum,
         "total_staircase_bonus": money_str(total_staircase_bonus),

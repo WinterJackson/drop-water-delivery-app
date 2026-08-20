@@ -71,6 +71,10 @@ class VendorSnippet(BaseModel):
   lat: float | None = None
   lng: float | None = None
   rating: float | None = None
+  #: See `BaseVendor.rating_count` — the storefront embedded in a product
+  #: response has to be able to say "new" for the same reason the
+  #: storefront itself does.
+  rating_count: int = 0
   profile_pic: str | None = None
 
   @field_validator('profile_pic', mode='after')

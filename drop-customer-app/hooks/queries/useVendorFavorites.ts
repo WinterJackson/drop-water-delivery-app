@@ -3,32 +3,41 @@ import { useApiRequest } from '@/API/useApiClient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toast } from '@/lib/toast';
 import { errorMessage } from '@/API/errors';
-import type { Order } from '@/types/models';
+import type { Order, Vendor } from '@/types/models';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+/**
+ * The `vendor` here is the shared {@link Vendor}, narrowed to the fields this
+ * endpoint actually sends — not a second declaration of the same wire shape.
+ * It used to be one, and it was missing `rating_count`, which is why the
+ * favourites card had nothing to go on and rendered a hardcoded "4.5".
+ */
 export interface VendorFavoriteItem {
     id: string;
     vendor_id: string;
-    vendor?: {
-        id: string;
-        business_name: string;
-        profile_pic: string;
-        rating: number;
-        location_address: string;
+    created_at?: string | null;
+    vendor?: Pick<
+        Vendor,
+        | 'id'
+        | 'business_name'
+        | 'profile_pic'
+        | 'location_address'
+        | 'rating'
+        | 'rating_count'
+        | 'vendor_type'
+        | 'shift_start'
+        | 'shift_end'
+        | 'is_accepting_orders'
+        | 'store_state'
+        | 'store_reason'
+        | 'reopens_at'
+    > & {
         /**
-         * Whether the store is taking orders, and why not.
-         *
-         * Favourites is the surface where this matters most — the customer
-         * already knows which shop they want. `is_online` is also returned and
-         * is deliberately *not* what to branch on: it answers one of the five
-         * reasons a store may be shut, so a paused or suspended shop reads as
-         * open through it.
+         * Returned, and deliberately *not* what to branch on: it answers one of
+         * the five reasons a store may be shut, so a paused or suspended shop
+         * reads as open through it. Use `is_accepting_orders`.
          */
         is_online?: boolean;
-        is_accepting_orders?: boolean;
-        store_state?: string;
-        store_reason?: string | null;
-        reopens_at?: string | null;
     };
 }
 

@@ -13,6 +13,7 @@ import { BRAND, TOAST } from "@/constants/brandColors";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { FavoriteVendorSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { ratingLabel } from "@/utils/rating";
 export default function FavouritesList() {
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -163,7 +164,7 @@ export default function FavouritesList() {
                     </Text>
                     {isSelected && (
                       <Text className={`text-[10px] font-sans-medium ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                        ⭐ {vendor?.rating || "4.5"} • Verified
+                        {ratingLabel(vendor?.rating, vendor?.rating_count)}
                       </Text>
                     )}
                   </View>

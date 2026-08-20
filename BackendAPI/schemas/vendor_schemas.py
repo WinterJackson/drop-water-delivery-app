@@ -61,6 +61,12 @@ class BaseVendor(StorefrontState):
   lat: float | None = None
   lng: float | None = None
   rating : float | None = None
+  #: How many ratings the average is made of. Without it an app cannot tell an
+  #: unrated store from one rated badly — and every screen that tried invented
+  #: its own answer: the directory showed `0.0`, the storefront `4.8`, search
+  #: `5.0` and favourites `4.5`, for the same shop at the same moment. A rating
+  #: is a trust signal, so a fabricated one is worse than none.
+  rating_count : int = 0
 
   @field_validator('profile_pic', mode='after')
   @classmethod

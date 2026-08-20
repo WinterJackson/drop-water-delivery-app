@@ -20,6 +20,7 @@ import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, UrlTile, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from "@expo/vector-icons";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
+import { ratingLabel } from "@/utils/rating";
 
 const VENDOR_FILTERS = [
     { id: 'all', label: 'All Vendors' },
@@ -89,7 +90,7 @@ export default function VendorDirectory() {
                             the page cannot say different things. */}
                         <View className="flex-row items-center gap-2">
                             <Text className={`${darkTheme ? 'text-gray-400' : 'text-gray-600'} font-sans-medium`}>
-                                ⭐ {Number(item.rating).toFixed(1)}
+                                {ratingLabel(item.rating, item.rating_count)}
                             </Text>
                             <Text className={`${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>•</Text>
                             {item.is_accepting_orders === false ? (
