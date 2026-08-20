@@ -304,7 +304,13 @@ export default function Cart() {
 				fetchCart()
 				setPaymentLoading(false)
 				setCheckoutVisible(false)
-				router.push("/(screens)/order-confirmation")
+				// The order id goes with it. Without it the confirmation screen
+				// has nothing to track and its "Track Order" button could only
+				// fall back to the whole list.
+				router.push({
+					pathname: "/(screens)/order-confirmation",
+					params: { orderId: response.order_id },
+				})
 				return;
 			}
 
@@ -370,10 +376,17 @@ export default function Cart() {
 				setIdempotencyKey(randomUUID());
 				setConfirmPaymentLoading(false)
 				setCheckoutRequestID(null)
+				// Read before it is cleared: `setPendingOrderId(null)` below used
+				// to run immediately before the push, so the one screen that
+				// needs the id was the one place it had already been discarded.
+				const confirmedOrderId = pendingOrderId
 				setPendingOrderId(null)
 				await refetchCart()
 				fetchCart()
-				router.push("/(screens)/order-confirmation")
+				router.push({
+					pathname: "/(screens)/order-confirmation",
+					params: confirmedOrderId ? { orderId: confirmedOrderId } : {},
+				})
 				return;
 			}
 

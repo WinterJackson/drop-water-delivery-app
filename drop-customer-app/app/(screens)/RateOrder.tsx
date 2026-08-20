@@ -103,6 +103,37 @@ const RateOrder = () => {
 
     const ratingStarsProps = { darkTheme };
 
+    // Nothing to rate. Reached by a stale notification, a shared link, or the
+    // screen being opened without its parameters — and the form rendered
+    // regardless: a heading, a comment box and an enabled "Submit Ratings"
+    // whose only response was "Please select a rating before submitting",
+    // which is not what went wrong. Both star blocks are already gated on
+    // these ids, so without them the form had no rating to collect at all.
+    //
+    // Every hook above this line has already run; the early return is the last
+    // thing in the component for that reason.
+    if (!orderId || (!vendorId && !riderId)) {
+        return (
+            <SafeAreaView className={`flex-1 items-center justify-center px-8 ${darkTheme ? "bg-black" : "bg-white"}`}>
+                <StatusBar translucent barStyle={darkTheme ? "light-content" : "dark-content"} />
+                <Text className={`font-sans-bold text-xl text-center ${darkTheme ? "text-white" : "text-black"}`}>
+                    Nothing to rate here
+                </Text>
+                <Text className={`mt-2 text-center ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                    Open the delivery from your orders to rate it.
+                </Text>
+                <PressableScale
+                    className="mt-6 px-6 py-3 rounded-xl bg-sky-500"
+                    activeOpacity={0.8}
+                    onPress={() => router.replace("/(screens)/Orders")}
+                >
+                    <Text className="text-white font-sans-bold">Go to my orders</Text>
+                </PressableScale>
+            </SafeAreaView>
+        );
+    }
+
+
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
