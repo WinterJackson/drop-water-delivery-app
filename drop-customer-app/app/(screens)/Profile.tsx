@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import UserAvatar from '@/components/ui/UserAvatar';
 import { useTabBarClearance } from '@/constants/layout';
 import Button from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -232,12 +233,19 @@ const Profile = () => {
 							)}
 
 							{/* PROFILE_PIC */}
-							<View className="h-[150px] w-[150px]">
-								<Image
-									source={{uri :  User?.profile_pic || image}}
-									className={`w-full h-full rounded-full `}
-								/>
-							</View>
+							{/* `UserAvatar`, not a bare `<Image>`.
+								A customer with no photo has `profile_pic` null and `image`
+								is `useState<string|undefined>()`, so the source resolved to
+								`{ uri: undefined }` — which renders nothing at all, leaving a
+								150px transparent hole above their own name. The same is true
+								whenever the URL simply fails to load. `UserAvatar` falls back
+								to their initials on a colour derived from the name, and is
+								already what `SettingsMain` uses two taps away. */}
+							<UserAvatar
+								profilePicUrl={User?.profile_pic || image}
+								fullName={User?.full_name || clerkUser?.fullName}
+								size={150}
+							/>
 							{/* USERNAME , EMAIL */}
 							<View className="w-full items-center py-2 ">
 								<Text className={
@@ -333,7 +341,12 @@ const Profile = () => {
 							activeOpacity={0.7}
 							onPress={() => {
 								Haptics.selectionAsync();
-								setBottomSheetData("privacy");
+								// Privacy opened a bottom sheet keyed `"privacy"` that nothing renders.
+								// Only "edit-profile" and "favourites" have a body, so this
+								// row raised an empty sheet and left the customer with a
+								// control that does nothing. The destination already exists
+								// and is reached from Settings, so it is routed to directly.
+								router.push("/(screens)/settings/PrivacySecurity");
 							}}
 						>
 							<View
@@ -361,7 +374,12 @@ const Profile = () => {
 							activeOpacity={0.7}
 							onPress={() => {
 								Haptics.selectionAsync();
-								setBottomSheetData("settings");
+								// Settings opened a bottom sheet keyed `"settings"` that nothing renders.
+								// Only "edit-profile" and "favourites" have a body, so this
+								// row raised an empty sheet and left the customer with a
+								// control that does nothing. The destination already exists
+								// and is reached from Settings, so it is routed to directly.
+								router.push("/(screens)/SettingsMain");
 							}}
 						>
 							<View
@@ -443,7 +461,12 @@ const Profile = () => {
 							activeOpacity={0.7}
 							onPress={() => {
 								Haptics.selectionAsync();
-								setBottomSheetData("help");
+								// Help opened a bottom sheet keyed `"help"` that nothing renders.
+								// Only "edit-profile" and "favourites" have a body, so this
+								// row raised an empty sheet and left the customer with a
+								// control that does nothing. The destination already exists
+								// and is reached from Settings, so it is routed to directly.
+								router.push("/(screens)/Support");
 							}}
 						>
 							<View
@@ -564,9 +587,10 @@ const Profile = () => {
 								<View className="w-full flex-1 items-center pt-3 pb-5 gap-2">
 									{/* PROFILE_PIC */}
 									<View className="h-[170px] w-[170px] ">
-										<Image
-											source={{uri: User?.profile_pic || image }} 
-											className="w-full h-full z-0 rounded-full"
+										<UserAvatar
+											profilePicUrl={User?.profile_pic || image}
+											fullName={User?.full_name || clerkUser?.fullName}
+											size={170}
 										/>
 										{/* <------EDIT BUTTON------> */}
 										<PressableScale accessibilityLabel="Change your profile photo"
