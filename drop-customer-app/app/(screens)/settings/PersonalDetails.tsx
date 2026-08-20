@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { isValidKenyanMobile } from '@/utils/phone';
 import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -116,10 +117,14 @@ export default function PersonalDetails() {
         }
         
         const phoneTrimmed = phone.trim();
-        // Regex validates Kenyan formats: 07XX, 01XX, +2547XX, +2541XX or generic E.164 up to 15 digits
-        const phoneRegex = /^(\+254|0)[17]\d{8}$|^\+?[1-9]\d{1,14}$/;
-        if (phoneTrimmed && !phoneRegex.test(phoneTrimmed)) {
-            Toast.error("Invalid Phone", "Please enter a valid phone number.");
+        // `utils/phone`, not a local regex. The copy that lived here had a
+        // second alternative — `^\+?[1-9]\d{1,14}$` — that accepts any 2-to-15
+        // digit string, so "12" saved cleanly as this account's phone number.
+        if (phoneTrimmed && !isValidKenyanMobile(phoneTrimmed)) {
+            Toast.error(
+                "Check that number",
+                "Enter a Safaricom or Airtel line, like 0712 345 678."
+            );
             return;
         }
 

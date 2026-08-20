@@ -1,56 +1,120 @@
 import React, { useContext, useState } from "react";
-import { useTabBarClearance } from '@/constants/layout';
+import { useTabBarClearance } from "@/constants/layout";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 
 import { View, ScrollView, ActivityIndicator } from "react-native";
-import { Text, TextInput } from '@/components/ui/Text';
+import { Text, TextInput } from "@/components/ui/Text";
 import { Stack, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { BRAND } from "@/constants/brandColors";
 import { UIThemeContext } from "@/context/ThemeContext";
-import Button from "@/components/ui/Button";
 import { useUserDetails, useUpdateUser } from "@/hooks/queries/useUser";
+import { errorMessage } from "@/API/errors";
 import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 import { PressableScale } from "@/components/ui/PressableScale";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { isValidKenyanMobile, toE164, formatPhone, normalisePhone } from "@/utils/phone";
+import type { PaymentMethodEntry } from "@/types/models";
 
 /**
  * At module scope, not inside the screen.
  *
  * A component declared in a render body is a new function object — and so a new
  * component *type* — on every render, which makes React unmount its subtree and
- * mount a fresh one instead of updating it. Even with no input and no state of
- * its own that is not free: every child is torn down and rebuilt, `PressableScale`
- * restarts its animation, and the reconciler does the most expensive kind of work
- * on the most ordinary re-render.
- *
- * What it closed over is passed in instead.
+ * mount a fresh one instead of updating it.
  */
-const PaymentCard = ({ item, index, darkTheme, handleRemove }: any) => (
-    <View className={`p-5 mb-4 rounded-2xl border flex-row items-center justify-between ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
-        <View className="flex-row items-center gap-4">
-            <View className={`w-12 h-12 rounded-full items-center justify-center ${item.type === "mpesa" ? "" : "bg-blue-500/10"}`} style={item.type === "mpesa" ? { backgroundColor: `${BRAND.primary}1A` } : {}}>
-                <Text style={{ fontSize: 24 }}>{item.type === "mpesa" ? "📱" : "💳"}</Text>
-            </View>
-            <View>
-                <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                    {item.type === "mpesa" ? "M-Pesa" : "Card"}
-                </Text>
-                <Text className={`text-sm ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>{item.phone}</Text>
-            </View>
-        </View>
-        <View className="flex-row items-center gap-2">
-            {item.isDefault && (
-                <View className="bg-blue-500/10 px-2 py-1 rounded-md">
-                    <Text className="text-blue-500 font-sans-bold text-xs">DEFAULT</Text>
+const MethodCard = ({
+    item,
+    darkTheme,
+    onRemove,
+    onMakeDefault,
+    busy,
+}: {
+    item: PaymentMethodEntry;
+    darkTheme: boolean;
+    onRemove: (phone: string) => void;
+    onMakeDefault: (phone: string) => void;
+    busy: boolean;
+}) => {
+    const isDefault = !!item.isDefault;
+    const phone = item.phone ?? "";
+    return (
+        <View
+            className={`mb-3 rounded-2xl border overflow-hidden ${
+                isDefault
+                    ? darkTheme
+                        ? "bg-primary/10 border-primary"
+                        : "bg-blue-50 border-primary"
+                    : darkTheme
+                      ? "bg-surface-container border-gray-800"
+                      : "bg-white border-gray-200"
+            }`}
+        >
+            <View className="flex-row items-center gap-4 p-4">
+                <View
+                    className="w-12 h-12 rounded-2xl items-center justify-center"
+                    style={{ backgroundColor: `${BRAND.primary}1A` }}
+                >
+                    <Ionicons name="phone-portrait-outline" size={22} color={BRAND.primary} />
                 </View>
-            )}
-            <PressableScale onPress={() => handleRemove(index)} className="ml-2">
-                <Text className="text-red-500 text-lg">🗑️</Text>
-            </PressableScale>
+
+                <View className="flex-1">
+                    <Text
+                        className={`font-mono text-base ${darkTheme ? "text-white" : "text-black"}`}
+                    >
+                        {formatPhone(phone)}
+                    </Text>
+                    <Text className={`text-xs mt-0.5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                        M-Pesa
+                    </Text>
+                </View>
+
+                {isDefault ? (
+                    <View className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ backgroundColor: BRAND.primary }}>
+                        <Ionicons name="checkmark-circle" size={13} color={BRAND.white} />
+                        <Text className="text-white font-sans-bold text-[11px] tracking-wide">DEFAULT</Text>
+                    </View>
+                ) : null}
+            </View>
+
+            {/* The actions sit on their own row so the number above always has the
+                full width. A 12-digit number and two controls do not share a line
+                on a 360dp handset without one of them being truncated. */}
+            <View
+                className={`flex-row border-t ${
+                    darkTheme ? "border-white/10" : "border-gray-100"
+                }`}
+            >
+                {!isDefault && (
+                    <PressableScale
+                        accessibilityLabel={`Bill ${formatPhone(phone)} by default`}
+                        onPress={() => onMakeDefault(phone)}
+                        disabled={busy}
+                        className="flex-1 flex-row items-center justify-center gap-2 py-3"
+                    >
+                        <Ionicons name="checkmark-circle-outline" size={17} color={BRAND.primary} />
+                        <Text className="font-sans-semibold text-sm" style={{ color: BRAND.primary }}>
+                            Set as default
+                        </Text>
+                    </PressableScale>
+                )}
+                <PressableScale
+                    accessibilityLabel={`Remove ${formatPhone(phone)}`}
+                    onPress={() => onRemove(phone)}
+                    disabled={busy}
+                    className={`${isDefault ? "flex-1" : ""} flex-row items-center justify-center gap-2 py-3 px-6 ${
+                        isDefault ? "" : darkTheme ? "border-l border-white/10" : "border-l border-gray-100"
+                    }`}
+                >
+                    <Ionicons name="trash-outline" size={17} color="#ef4444" />
+                    <Text className="font-sans-semibold text-sm text-red-500">Remove</Text>
+                </PressableScale>
+            </View>
         </View>
-    </View>
-);
+    );
+};
 
 export default function PaymentMethods() {
     const tabBarClearance = useTabBarClearance();
@@ -58,131 +122,263 @@ export default function PaymentMethods() {
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
 
-    const { data: User } = useUserDetails();
+    const { data: User, isLoading } = useUserDetails();
     const updateUserMutation = useUpdateUser();
-    const paymentMethods = User?.payment_methods || [];
+    const paymentMethods: PaymentMethodEntry[] = User?.payment_methods ?? [];
 
     const [isAdding, setIsAdding] = useState(false);
     const [newPhone, setNewPhone] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
+    const busy = isSaving || updateUserMutation.isPending;
+
+    /** Persist a whole list, keeping exactly one default. */
+    const commit = async (methods: PaymentMethodEntry[], success: string) => {
+        const withDefault =
+            methods.length > 0 && !methods.some((m) => m.isDefault)
+                ? methods.map((m, i) => ({ ...m, isDefault: i === 0 }))
+                : methods;
+        await updateUserMutation.mutateAsync({ payment_methods: withDefault });
+        Toast.success("Saved", success);
+    };
+
     const handleSaveNew = async () => {
-        const phoneTrimmed = newPhone.trim();
-        const phoneRegex = /^(\+254|0)[17]\d{8}$|^\+?[1-9]\d{1,14}$/;
-        if (!phoneRegex.test(phoneTrimmed)) {
-            Toast.error("Invalid Phone", "Please enter a valid phone number.");
+        // Validated against what can actually receive an M-Pesa prompt, not
+        // against "looks like digits" — a number that cannot be pushed to is not
+        // a payment method, and accepting one defers the failure to checkout.
+        if (!isValidKenyanMobile(newPhone)) {
+            Toast.error(
+                "Check that number",
+                "Enter the Safaricom or Airtel line you pay with, like 0712 345 678."
+            );
             return;
         }
 
-        const isDuplicate = paymentMethods.some((pm: any) => pm.phone === phoneTrimmed);
-        if (isDuplicate) {
-            Toast.error("Duplicate", "This payment method is already added.");
+        const canonical = toE164(newPhone)!;
+        // Compare on the normalised value: 0712345678, +254712345678 and
+        // 254712345678 are one number, and a raw string compare let the same
+        // line be saved three times.
+        if (paymentMethods.some((m) => normalisePhone(m.phone) === normalisePhone(canonical))) {
+            Toast.error("Already saved", "That number is already on your list.");
             return;
         }
 
         setIsSaving(true);
         try {
-            const newMethods = [...paymentMethods, {
-                type: "mpesa",
-                phone: phoneTrimmed,
-                isDefault: paymentMethods.length === 0
-            }];
-            await updateUserMutation.mutateAsync({ payment_methods: newMethods });
-            Toast.success("Added", "Payment method added.");
+            await commit(
+                [...paymentMethods, { type: "mpesa", phone: canonical, isDefault: paymentMethods.length === 0 }],
+                "Payment method added."
+            );
             setIsAdding(false);
             setNewPhone("");
         } catch (error: unknown) {
-            Toast.error("Error", (error as Error).message || "Failed to add.");
+            Toast.error("Couldn't add that", errorMessage(error, "Please try again."));
         } finally {
             setIsSaving(false);
         }
     };
 
-    const handleRemove = (index: number) => {
+    const handleMakeDefault = async (phone: string) => {
+        try {
+            await commit(
+                paymentMethods.map((m) => ({ ...m, isDefault: m.phone === phone })),
+                `${formatPhone(phone)} will be billed at checkout.`
+            );
+        } catch (error: unknown) {
+            Toast.error("Couldn't update", errorMessage(error, "Please try again."));
+        }
+    };
+
+    const handleRemove = (phone: string) => {
+        const removing = paymentMethods.find((m) => m.phone === phone);
         Popup.show({
-            title: "Remove Payment Method",
-            message: "Are you sure you want to remove this payment method?",
+            title: "Remove this number?",
+            message: removing?.isDefault
+                ? `${formatPhone(phone)} is your default. Removing it means the next number on your list is billed instead.`
+                : `${formatPhone(phone)} will no longer appear at checkout.`,
             cancelText: "Cancel",
             confirmText: "Remove",
             isDestructive: true,
             onConfirm: async () => {
                 Popup.setLoading(true);
-                const newMethods: any[] = [...paymentMethods];
-                newMethods.splice(index, 1);
-                // If we removed the default, make the first one default
-                if (paymentMethods[index].isDefault && newMethods.length > 0) {
-                    newMethods[0].isDefault = true;
-                }
                 try {
-                    await updateUserMutation.mutateAsync({ payment_methods: newMethods });
-                    Toast.success("Removed", "Payment method removed.");
+                    await commit(
+                        paymentMethods.filter((m) => m.phone !== phone),
+                        "Payment method removed."
+                    );
                 } catch (error: unknown) {
-                    Toast.error("Error", (error as Error).message || "Failed to remove.");
+                    Toast.error("Couldn't remove", errorMessage(error, "Please try again."));
                 } finally {
                     Popup.hide();
                 }
-            }
+            },
         });
     };
-
-    const paymentCardProps = { darkTheme, handleRemove };
 
     return (
         <SafeAreaView className={`flex-1 ${darkTheme ? "bg-black" : ""}`}>
             <Stack.Screen options={{ headerShown: false }} />
             <View style={{ overflow: "hidden", paddingBottom: 4 }}>
-            <View 
-                className="flex-row items-center px-4 py-3 pb-4 mb-2"
-                style={{ 
-                    backgroundColor: darkTheme ? "#000" : "#fff",
-                    borderBottomWidth: 1, 
-                    borderBottomColor: darkTheme ? BRAND.gray800 : BRAND.gray200,
-                    ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 })
-                }}
+                <View
+                    className="flex-row items-center px-4 py-3 pb-4 mb-2"
+                    style={{
+                        backgroundColor: darkTheme ? "#000" : "#fff",
+                        borderBottomWidth: 1,
+                        borderBottomColor: darkTheme ? BRAND.gray800 : BRAND.gray200,
+                        ...(darkTheme
+                            ? { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 }
+                            : { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }),
+                    }}
+                >
+                    <PressableScale onPress={() => router.back()} className="mr-4">
+                        <BackButtonMinimal />
+                    </PressableScale>
+                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                        Payment Methods
+                    </Text>
+                </View>
+            </View>
+
+            <ScrollView
+                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: tabBarClearance }}
+                showsVerticalScrollIndicator={false}
             >
-                <PressableScale onPress={() => router.back()} className="mr-4">
-                    <BackButtonMinimal />
-                </PressableScale>
-                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
-                    Payment Methods
-                </Text>
-            </View>
-            </View>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: tabBarClearance }}>
-                {paymentMethods.map((item: any, idx: number) => (
-                    <PaymentCard {...paymentCardProps} key={idx} item={item} index={idx} />
-                ))}
+                {/* What the screen is for. Without this the list of numbers does
+                    not say which one matters or when it is used. */}
+                <View
+                    className={`flex-row gap-3 p-4 mb-5 rounded-2xl ${
+                        darkTheme ? "bg-surface-container" : "bg-blue-50"
+                    }`}
+                >
+                    <Ionicons name="information-circle-outline" size={20} color={BRAND.primary} />
+                    <Text className={`flex-1 text-sm leading-5 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
+                        Your <Text className="font-sans-bold">default</Text> number is the one we send
+                        the M-Pesa prompt to at checkout. You can still change it on the payment screen.
+                    </Text>
+                </View>
+
+                {isLoading && paymentMethods.length === 0 ? (
+                    // Empty and loading are different answers. Rendering the
+                    // empty state while the profile is in flight tells a customer
+                    // their saved numbers are gone.
+                    <View className="gap-3">
+                        {[0, 1].map((i) => (
+                            <Skeleton key={i} width="100%" height={116} borderRadius={16} />
+                        ))}
+                    </View>
+                ) : (
+                    paymentMethods.map((item) => (
+                        <MethodCard
+                            key={item.phone ?? JSON.stringify(item)}
+                            item={item}
+                            darkTheme={darkTheme}
+                            busy={busy}
+                            onRemove={handleRemove}
+                            onMakeDefault={handleMakeDefault}
+                        />
+                    ))
+                )}
+
+                {!isLoading && paymentMethods.length === 0 && !isAdding && (
+                    <View
+                        className={`items-center px-6 py-10 rounded-2xl border border-dashed ${
+                            darkTheme ? "border-gray-800" : "border-gray-300"
+                        }`}
+                    >
+                        <View
+                            className="w-16 h-16 rounded-full items-center justify-center mb-4"
+                            style={{ backgroundColor: `${BRAND.primary}1A` }}
+                        >
+                            <Ionicons name="phone-portrait-outline" size={28} color={BRAND.primary} />
+                        </View>
+                        <Text className={`text-lg font-sans-bold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+                            No saved numbers yet
+                        </Text>
+                        <Text className={`text-sm text-center leading-5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                            Save the M-Pesa line you pay with and we'll fill it in for you at checkout.
+                        </Text>
+                    </View>
+                )}
 
                 {isAdding ? (
-                    <View className={`p-5 mb-4 rounded-2xl border ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
-                        <Text className={`font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>Enter M-Pesa Number</Text>
+                    <View
+                        className={`p-5 mt-2 rounded-2xl border ${
+                            darkTheme ? "border-gray-800 bg-surface-container" : "border-gray-200 bg-white"
+                        }`}
+                    >
+                        <Text className={`font-sans-bold text-base mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
+                            Add an M-Pesa number
+                        </Text>
+                        <Text className={`text-xs mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                            Safaricom or Airtel, in any format — 0712 345 678 or +254 712 345 678.
+                        </Text>
                         <TextInput
                             value={newPhone}
                             onChangeText={setNewPhone}
                             keyboardType="phone-pad"
                             maxLength={15}
                             autoFocus
-                            placeholder="e.g. +254712345678"
+                            placeholder="0712 345 678"
                             placeholderTextColor={darkTheme ? "#6b7280" : "#9ca3af"}
-                            className={`p-3 rounded-xl border mb-4 ${darkTheme ? "border-gray-700 bg-black text-white" : "border-gray-300 bg-white text-black"}`}
+                            className={`px-4 py-3 rounded-xl border font-mono text-base ${
+                                darkTheme ? "border-gray-700 bg-black text-white" : "border-gray-300 bg-white text-black"
+                            }`}
                         />
-                        <View className="flex-row gap-3">
-                            <PressableScale onPress={() => setIsAdding(false)} className="flex-1 py-3 items-center rounded-xl border border-gray-400">
-                                <Text className={darkTheme ? "text-white font-sans-bold" : "text-black font-sans-bold"}>Cancel</Text>
+                        {/* Confirm what will be stored before it is stored. The
+                            number is the whole point of the screen. */}
+                        <Text
+                            className={`text-xs mt-2 h-4 ${
+                                newPhone && !isValidKenyanMobile(newPhone) ? "text-red-500" : darkTheme ? "text-gray-500" : "text-gray-400"
+                            }`}
+                        >
+                            {!newPhone
+                                ? ""
+                                : isValidKenyanMobile(newPhone)
+                                  ? `Saving as ${formatPhone(newPhone)}`
+                                  : "That is not a Safaricom or Airtel line."}
+                        </Text>
+
+                        <View className="flex-row gap-3 mt-4">
+                            <PressableScale
+                                onPress={() => {
+                                    setIsAdding(false);
+                                    setNewPhone("");
+                                }}
+                                className={`flex-1 py-3 items-center rounded-xl border ${
+                                    darkTheme ? "border-gray-700" : "border-gray-300"
+                                }`}
+                            >
+                                <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-black"}`}>
+                                    Cancel
+                                </Text>
                             </PressableScale>
-                            <PressableScale onPress={handleSaveNew} disabled={isSaving} className="flex-1 py-3 items-center rounded-xl" style={{ backgroundColor: BRAND.primary }}>
-                                {isSaving ? <ActivityIndicator color={BRAND.white} /> : <Text className="text-white font-sans-bold">Save</Text>}
+                            <PressableScale
+                                onPress={handleSaveNew}
+                                disabled={busy || !isValidKenyanMobile(newPhone)}
+                                className="flex-1 py-3 items-center rounded-xl"
+                                style={{
+                                    backgroundColor: BRAND.primary,
+                                    opacity: busy || !isValidKenyanMobile(newPhone) ? 0.5 : 1,
+                                }}
+                            >
+                                {isSaving ? (
+                                    <ActivityIndicator color={BRAND.white} />
+                                ) : (
+                                    <Text className="text-white font-sans-bold">Save number</Text>
+                                )}
                             </PressableScale>
                         </View>
                     </View>
                 ) : (
-                    <PressableScale 
+                    <PressableScale
                         onPress={() => setIsAdding(true)}
                         activeOpacity={0.7}
-                        className="mt-6 py-4 rounded-xl items-center border-2 bg-transparent"
-                        style={{ borderColor: BRAND.primary }}
+                        disabled={busy}
+                        className="mt-4 py-4 rounded-2xl flex-row items-center justify-center gap-2"
+                        style={{ backgroundColor: BRAND.primary, opacity: busy ? 0.6 : 1 }}
                     >
-                        <Text className="text-lg font-sans-bold" style={{ color: BRAND.primary }}>+ Add M-Pesa Number</Text>
+                        <Ionicons name="add" size={20} color={BRAND.white} />
+                        <Text className="text-white text-base font-sans-bold">Add M-Pesa number</Text>
                     </PressableScale>
                 )}
             </ScrollView>

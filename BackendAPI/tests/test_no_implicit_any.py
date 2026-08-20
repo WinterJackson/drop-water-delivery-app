@@ -86,7 +86,13 @@ CEILING = {
     # 100) / 100` survived there after the other six were removed, and it hid a
     # nullable `vendor.lat` being passed to a `number`-typed parameter. Both
     # failed `tsc` the moment the screen rendered from the typed query instead.
-    "drop-customer-app": 109,
+    #
+    # 109 -> 103: `settings/PaymentMethods.tsx` typed its card component, its
+    # list and all three handlers as `any`. Typing them from `PaymentMethodEntry`
+    # is what surfaced that the screen renders an `isDefault` badge with no way
+    # to *change* which method is default — on the field that decides which line
+    # the M-Pesa prompt is sent to at checkout.
+    "drop-customer-app": 103,
     "drop-rider-app": 82,
     "drop-vendor-app": 81,
     # Written without a single one from the start, and it stays that way.

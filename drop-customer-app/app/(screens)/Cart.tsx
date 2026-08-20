@@ -13,6 +13,7 @@ import {
     StyleSheet,
     ActivityIndicator,
 } from "react-native";
+import { normalisePhone } from '@/utils/phone';
 import { useTabBarClearance } from '@/constants/layout';
 import { Text, TextInput } from '@/components/ui/Text';
 import React, { useContext, useEffect, useState, useRef, useCallback, useMemo } from "react";
@@ -137,13 +138,6 @@ export default function Cart() {
 	const [CheckoutVisible, setCheckoutVisible] = useState(false)
 	const [CheckoutRequestID, setCheckoutRequestID] = useState<string | null>(null)
 
-	const normalisePhone = (raw?: string | null) => {
-		if (!raw) return null;
-		let cleaned = raw.replace(/[^0-9]/g, '');
-		if (cleaned.startsWith('254')) cleaned = cleaned.substring(3);
-		if (cleaned.startsWith('0')) cleaned = cleaned.substring(1);
-		return cleaned;
-	};
 
 	/**
 	 * The number to bill, in preference order: the payment method the customer
