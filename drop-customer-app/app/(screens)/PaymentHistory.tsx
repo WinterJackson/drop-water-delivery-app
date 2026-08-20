@@ -47,6 +47,9 @@ export default function PaymentHistory() {
             case "failed":
             case "refund_failed": return "text-red-500";
             case "refunded": return "text-blue-400";
+            // Nothing was ever collected and nothing ever will be. It is not a
+            // pending charge, and it must not wear the pending colour.
+            case "not_charged": return darkTheme ? "text-gray-500" : "text-gray-400";
             default: return "text-yellow-500";
         }
     };
@@ -57,10 +60,21 @@ export default function PaymentHistory() {
             case "failed":
             case "refund_failed": return "❌";
             case "refunded": return "↩️";
+            case "not_charged": return "⊘";
             case "pending": return "⏳";
             default: return "🔄";
         }
     };
+
+    // Only money that actually left the customer is written in the colour of
+    // money. A failed, reversed or never-collected charge rendered in the same
+    // bold green as a successful one is the amount reading as taken.
+    const getAmountColor = (status: string) =>
+        status === "paid"
+            ? "text-green-500"
+            : status === "not_charged"
+              ? (darkTheme ? "text-gray-500" : "text-gray-400")
+              : (darkTheme ? "text-white" : "text-black");
 
     return (
         <View className={`flex-1 ${darkTheme ? "bg-black" : ""}`} style={{ paddingTop: StatusBar.currentHeight }}>
@@ -164,7 +178,7 @@ export default function PaymentHistory() {
                                                 {payment.vendor_name || "Vendor"}
                                             </Text>
                                         </View>
-                                        <Text className={`font-sans-bold text-lg text-green-500`}>
+                                        <Text className={`font-sans-bold text-lg ${getAmountColor(payment.status)}`}>
                                             {formatMoney(payment.amount)}
                                         </Text>
                                     </View>

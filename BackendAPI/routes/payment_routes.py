@@ -11,7 +11,7 @@ withdrawals, credit applied), this is the record of what was charged for orders.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, case, cast, func, literal, select, union_all
+from sqlalchemy import String, and_, case, cast, func, literal, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies.auth_dependencies import get_current_customer
@@ -26,6 +26,46 @@ from utils.paging import stable
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+#: Order statuses that end an order without anyone ever collecting for it. A
+#: cash order in one of these was never charged and never will be, however long
+#: its `payment_status` sits at the default it was created with.
+_TERMINAL_UNCOLLECTED = ("cancelled", "rejected")
+
+
+def cash_payment_status():
+    """What a cash order's payment history row says about it.
+
+    `Order.payment_status` is the authority and it *is* maintained for cash:
+    `deliverer_service` writes "paid" when the rider settles at the door, and
+    the reversal paths write the `refund_*` states. This used to be re-derived
+    from `order_status` — "paid" if delivered, "pending" otherwise — which got
+    two things wrong in the same expression. A refunded cash order read back as
+    "pending", so the customer who is owed money saw a charge still in flight.
+    And a cancelled or rejected cash order read "pending" **for ever**: the
+    order is terminal, nothing was collected and nothing ever will be, yet the
+    one screen a customer opens to check what they have been charged showed an
+    outstanding payment against it.
+
+    The one thing the column cannot say on its own is that an order ended
+    before anybody collected. There `payment_status` is still the "pending"
+    default — not because a charge is outstanding, but because a charge was
+    never attempted, which is a different statement and the one worth showing.
+
+    A function rather than an inline expression so the rule can be compiled and
+    asserted on its own; see `test_payment_history_status.py`.
+    """
+    return case(
+        (
+            and_(
+                Order.payment_status == "pending",
+                Order.order_status.in_(_TERMINAL_UNCOLLECTED),
+            ),
+            literal("not_charged"),
+        ),
+        else_=Order.payment_status,
+    )
 
 
 @router.get("/history")
@@ -77,10 +117,7 @@ async def payment_history(
             ("cash-" + cast(Order.id, String)).label("row_id"),
             Order.id.label("order_id"),
             Order.total_amount.label("amount"),
-            case(
-                (Order.order_status == "delivered", literal("paid")),
-                else_=literal("pending"),
-            ).label("status"),
+            cash_payment_status().label("status"),
             literal("cash").label("payment_method"),
             literal(None, type_=String).label("mpesa_receipt"),
             literal(None, type_=String).label("failure_reason"),
