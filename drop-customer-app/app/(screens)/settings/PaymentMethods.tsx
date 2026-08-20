@@ -15,7 +15,7 @@ import { Toast } from "@/lib/toast";
 import { Popup } from "@/lib/popup";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { isValidKenyanMobile, toE164, formatPhone, normalisePhone } from "@/utils/phone";
+import { isSafaricomNumber, toE164, formatPhone, normalisePhone, MAX_PAYMENT_METHODS } from "@/utils/phone";
 import type { PaymentMethodEntry } from "@/types/models";
 
 /**
@@ -142,14 +142,23 @@ export default function PaymentMethods() {
         Toast.success("Saved", success);
     };
 
+    const atCapacity = paymentMethods.length >= MAX_PAYMENT_METHODS;
+
     const handleSaveNew = async () => {
-        // Validated against what can actually receive an M-Pesa prompt, not
-        // against "looks like digits" — a number that cannot be pushed to is not
-        // a payment method, and accepting one defers the failure to checkout.
-        if (!isValidKenyanMobile(newPhone)) {
+        if (atCapacity) {
             Toast.error(
-                "Check that number",
-                "Enter the Safaricom or Airtel line you pay with, like 0712 345 678."
+                "That's the limit",
+                `You can save up to ${MAX_PAYMENT_METHODS} numbers. Remove one to add another.`
+            );
+            return;
+        }
+        // Safaricom only. M-Pesa is Safaricom's, so an STK push to an Airtel or
+        // Telkom line never arrives — saving one is not a payment method, it is
+        // a failure deferred to the moment the customer is trying to pay.
+        if (!isSafaricomNumber(newPhone)) {
+            Toast.error(
+                "Safaricom numbers only",
+                "M-Pesa only sends the payment prompt to Safaricom lines."
             );
             return;
         }
@@ -253,7 +262,9 @@ export default function PaymentMethods() {
                     <Ionicons name="information-circle-outline" size={20} color={BRAND.primary} />
                     <Text className={`flex-1 text-sm leading-5 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                         Your <Text className="font-sans-bold">default</Text> number is the one we send
-                        the M-Pesa prompt to at checkout. You can still change it on the payment screen.
+                        the M-Pesa prompt to at checkout. Save up to{" "}
+                        <Text className="font-sans-bold">{MAX_PAYMENT_METHODS}</Text> Safaricom
+                        numbers — you can still change it on the payment screen.
                     </Text>
                 </View>
 
@@ -295,7 +306,7 @@ export default function PaymentMethods() {
                             No saved numbers yet
                         </Text>
                         <Text className={`text-sm text-center leading-5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                            Save the M-Pesa line you pay with and we'll fill it in for you at checkout.
+                            Save the Safaricom line you pay with and we'll fill it in for you at checkout.
                         </Text>
                     </View>
                 )}
@@ -310,7 +321,7 @@ export default function PaymentMethods() {
                             Add an M-Pesa number
                         </Text>
                         <Text className={`text-xs mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                            Safaricom or Airtel, in any format — 0712 345 678 or +254 712 345 678.
+                            Safaricom only, in any format — 0712 345 678 or +254 712 345 678.
                         </Text>
                         <TextInput
                             value={newPhone}
@@ -328,14 +339,14 @@ export default function PaymentMethods() {
                             number is the whole point of the screen. */}
                         <Text
                             className={`text-xs mt-2 h-4 ${
-                                newPhone && !isValidKenyanMobile(newPhone) ? "text-red-500" : darkTheme ? "text-gray-500" : "text-gray-400"
+                                newPhone && !isSafaricomNumber(newPhone) ? "text-red-500" : darkTheme ? "text-gray-500" : "text-gray-400"
                             }`}
                         >
                             {!newPhone
                                 ? ""
-                                : isValidKenyanMobile(newPhone)
+                                : isSafaricomNumber(newPhone)
                                   ? `Saving as ${formatPhone(newPhone)}`
-                                  : "That is not a Safaricom or Airtel line."}
+                                  : "M-Pesa only reaches Safaricom lines."}
                         </Text>
 
                         <View className="flex-row gap-3 mt-4">
@@ -354,11 +365,11 @@ export default function PaymentMethods() {
                             </PressableScale>
                             <PressableScale
                                 onPress={handleSaveNew}
-                                disabled={busy || !isValidKenyanMobile(newPhone)}
+                                disabled={busy || !isSafaricomNumber(newPhone)}
                                 className="flex-1 py-3 items-center rounded-xl"
                                 style={{
                                     backgroundColor: BRAND.primary,
-                                    opacity: busy || !isValidKenyanMobile(newPhone) ? 0.5 : 1,
+                                    opacity: busy || !isSafaricomNumber(newPhone) ? 0.5 : 1,
                                 }}
                             >
                                 {isSaving ? (
@@ -368,6 +379,25 @@ export default function PaymentMethods() {
                                 )}
                             </PressableScale>
                         </View>
+                    </View>
+                ) : atCapacity ? (
+                    /* At the limit the control is replaced, not disabled. A greyed
+                       button invites a tap and then explains nothing; this says
+                       what the state is and what to do about it. */
+                    <View
+                        className={`mt-4 flex-row items-center gap-3 p-4 rounded-2xl border border-dashed ${
+                            darkTheme ? "border-gray-800" : "border-gray-300"
+                        }`}
+                    >
+                        <Ionicons
+                            name="information-circle-outline"
+                            size={20}
+                            color={darkTheme ? "#6b7280" : "#9ca3af"}
+                        />
+                        <Text className={`flex-1 text-sm leading-5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
+                            You've saved the maximum of {MAX_PAYMENT_METHODS} numbers. Remove one to
+                            add a different line.
+                        </Text>
                     </View>
                 ) : (
                     <PressableScale

@@ -392,6 +392,79 @@ async def register_rider(request: Request, rider_data: CreateDeliverer, session:
   }
 
 # ─── Customer Profile Update ────────────────────────────────────────────────
+
+#: How many M-Pesa numbers one customer may keep. Small on purpose: the list
+#: exists so somebody can switch between the line they carry and the one the
+#: household pays from, not to become an address book. A third is added by
+#: removing one of the two.
+MAX_PAYMENT_METHODS = 2
+
+
+def _validate_payment_methods(submitted: list, existing: list | None) -> list:
+    """Normalise and check a customer's saved M-Pesa numbers.
+
+    The client checks all of this too, and that check is for the person typing;
+    this one is the rule. `payment_methods` is a JSONB column that was written
+    straight from the request body, so anything at all could be stored — fifty
+    entries, arbitrary keys, three defaults, or a number no STK push can reach.
+
+    Both limits are applied **only to what the payload adds**. Validating the
+    whole list outright would trap anyone who already has a non-Safaricom number
+    or a third entry: every save they attempted, including the save that removed
+    the offending row, would be refused for containing it.
+    """
+    from utils.phone import is_safaricom, to_e164
+
+    existing_numbers = {
+        to_e164(m.get("phone"))
+        for m in (existing or [])
+        if isinstance(m, dict) and m.get("phone")
+    }
+
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for entry in submitted:
+        if not isinstance(entry, dict):
+            raise HTTPException(status_code=422, detail="Each payment method must be an object.")
+        canonical = to_e164(entry.get("phone"))
+        if not canonical:
+            raise HTTPException(status_code=422, detail="Every payment method needs a phone number.")
+        if canonical not in existing_numbers and not is_safaricom(canonical):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "M-Pesa only sends the payment prompt to Safaricom lines, so "
+                    "that number cannot be used to pay."
+                ),
+            )
+        if canonical in seen:
+            continue  # the same line written two ways is one line
+        seen.add(canonical)
+        cleaned.append({
+            "type": "mpesa",
+            "phone": canonical,
+            "isDefault": bool(entry.get("isDefault")),
+        })
+
+    if len(cleaned) > MAX_PAYMENT_METHODS and len(cleaned) > len(existing_numbers):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"You can save up to {MAX_PAYMENT_METHODS} M-Pesa numbers. "
+                "Remove one to add another."
+            ),
+        )
+
+    # Exactly one default, or the checkout screen has no answer to which number
+    # to bill and picks whichever the database happened to return first.
+    defaults = [m for m in cleaned if m["isDefault"]]
+    if cleaned and len(defaults) != 1:
+        for index, method in enumerate(cleaned):
+            method["isDefault"] = index == 0
+
+    return cleaned
+
+
 class UpdateUserRequest(BaseModel):
     full_name: str | None = None
     phone_number: str | None = None
@@ -419,7 +492,9 @@ async def update_user(
     if body.preferences is not None:
         db_user.preferences = body.preferences
     if body.payment_methods is not None:
-        db_user.payment_methods = body.payment_methods
+        db_user.payment_methods = _validate_payment_methods(
+            body.payment_methods, db_user.payment_methods
+        )
     if body.floor_level is not None:
         db_user.floor_level = body.floor_level
     if body.has_elevator is not None:

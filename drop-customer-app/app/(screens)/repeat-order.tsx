@@ -3,7 +3,6 @@ import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext } from 'react';
 import { View, ScrollView, StatusBar } from 'react-native';
 import { Text } from '@/components/ui/Text';
-import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { UIThemeContext } from '@/context/ThemeContext';
@@ -14,14 +13,14 @@ import DropButton from '@/components/ui/DropButton';
 import GlassCard from '@/components/ui/GlassCard';
 import { useLastOrderFromVendor } from '@/hooks/queries/useVendorFavorites';
 import { useVendorDetails } from '@/hooks/queries/useProducts';
-import { useAddToCart } from '@/hooks/queries/useCart';
+import { useAddToCart, isVendorConflict, vendorConflictInfo } from '@/hooks/queries/useCart';
 import { useUserDetails } from '@/hooks/queries/useUser';
 import { Toast } from '@/lib/toast';
 import { BRAND, TOAST } from "@/constants/brandColors";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { RepeatOrderSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
-import { formatMoney, sumMoney } from "@/utils/money";
+import { formatMoney, sumMoney, isZeroMoney, isNegativeMoney, subtractMoney } from "@/utils/money";
 
 export default function RepeatOrderScreen() {
     const tabBarClearance = useTabBarClearance();
@@ -32,7 +31,7 @@ export default function RepeatOrderScreen() {
   const { fetchCart } = useContext(Context);
   const { data: User } = useUserDetails();
 
-  const { data: lastOrder, isLoading, isError } = useLastOrderFromVendor(vendorId || '');
+  const { data: lastOrder, isLoading, isError, refetch } = useLastOrderFromVendor(vendorId || '');
 
   /**
    * The store's live trading state, for the closed notice below.
@@ -47,30 +46,64 @@ export default function RepeatOrderScreen() {
   const { data: vendorDetails } = useVendorDetails(vendorId || '');
   const { mutateAsync: addToCartMutation, isPending: isOrdering } = useAddToCart();
 
+  /**
+   * A shut shop cannot take this basket, and this screen's whole purpose is to
+   * build one in a single tap — so letting it run is the most wasted version of
+   * the trip: every item added, then refused at checkout. `is_accepting_orders`
+   * is the annotated answer from `vendor_availability`, which is the only thing
+   * that decides whether a store is trading; `undefined` means the details have
+   * not arrived yet and is deliberately not treated as closed.
+   */
+  const storeClosed = vendorDetails?.is_accepting_orders === false;
+
   const handleRepeatOrder = async () => {
     if (!lastOrder?.order_item?.length) return;
     try {
-      // Add each item from the last order to the cart in parallel
       const results = await Promise.allSettled(
-        lastOrder.order_item.map((item) => 
+        lastOrder.order_item.map((item) =>
           addToCartMutation({
             id: item.product_id,
             quantity: item.quantity
           })
         )
       );
-      
-      const failed = results.filter((r) => r.status === "rejected").length;
+
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected"
+      );
       fetchCart(); // reflect whatever DID succeed
-      
+
+      // A cart already holding another store's items refuses *every* line here
+      // with a 409, which the old message reported as "none of these items are
+      // available right now" — the one explanation that is certainly wrong, and
+      // it sent the customer looking for a stock problem that does not exist.
+      const conflict = rejected.find((r) => isVendorConflict(r.reason));
+      if (conflict) {
+        const { existingVendor } = vendorConflictInfo(conflict.reason);
+        Toast.error(
+          'Your cart has another store in it',
+          `Empty your cart of ${existingVendor}'s items first, then repeat this order.`
+        );
+        return;
+      }
+
+      const failed = rejected.length;
       if (failed === 0) {
-        Toast.success('Order Added', 'All items added to your cart!');
+        Toast.success('Added to cart', 'Everything from that order is in your cart.');
         router.push('/(screens)/Cart');
       } else if (failed < results.length) {
-        Toast.error('Partially Added', `${results.length - failed} of ${results.length} items were added. Some may no longer be available.`);
+        Toast.error(
+          'Some items could not be added',
+          `${results.length - failed} of ${results.length} went in. The rest are out of stock or no longer sold.`
+        );
         router.push('/(screens)/Cart');
       } else {
-        Toast.error('Error', 'None of these items are available right now. Please try ordering them individually.');
+        // Every line failed for a reason that is not a vendor conflict, so the
+        // backend's own words are the most useful thing to show.
+        Toast.error(
+          'Could not repeat that order',
+          errorMessage(rejected[0]?.reason, 'None of these items are available right now.')
+        );
       }
     } catch (e: unknown) {
       if (__DEV__) console.error('Repeat order failed:', e);
@@ -115,6 +148,22 @@ export default function RepeatOrderScreen() {
 
         {isLoading ? (
           <RepeatOrderSkeleton />
+        ) : isError ? (
+          /* `isError` was destructured and never read, so a failed request fell
+             through to "No Previous Orders" — telling a customer who orders here
+             every week that they never have, with no way to retry. */
+          <View className="flex-1 items-center justify-center px-8">
+            <Ionicons name="cloud-offline-outline" size={64} color={BRAND.primary} />
+            <Text className={`font-sans-bold text-lg mt-4 text-center ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+              Couldn't load your last order
+            </Text>
+            <Text className={`text-sm text-center mt-2 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+              Check your connection and try again.
+            </Text>
+            <View className="mt-6 w-full">
+              <DropButton title="Try again" onPress={() => refetch()} />
+            </View>
+          </View>
         ) : !lastOrder ? (
           <View className="flex-1 items-center justify-center px-8">
             <Ionicons name="receipt-outline" size={64} color={BRAND.primary} />
@@ -183,38 +232,101 @@ export default function RepeatOrderScreen() {
                 </GlassCard>
               </View>
 
-              {/* Summary */}
+              {/* What that order cost.
+
+                  Two lines and a total used to be drawn here — subtotal,
+                  delivery fee, then `total_amount` — and they cannot add up:
+                  the service fee, surcharges, deposit, settled balance and every
+                  discount were all missing. On a seeded order it read
+                  Subtotal 235, Delivery 101.80, Total 1.00, which is the same
+                  unexplained difference the cart's `debt_settlement` line was
+                  added to prevent. Every charge on the order is now its own
+                  line, in the order `OrderDetail` renders them. */}
               <View>
-                <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Summary</Text>
+                <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>
+                  What you paid last time
+                </Text>
                 <GlassCard darkTheme={darkTheme} className="p-4 gap-2">
-                  <View className="flex-row justify-between">
-                    <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Subtotal</Text>
-                    <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
-                      {formatMoney(sumMoney((lastOrder.order_item ?? []).map((i) => i.Subtotal)))}
-                    </Text>
-                  </View>
-                  <View className="flex-row justify-between">
-                    <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Delivery Fee</Text>
-                    <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
-                      {formatMoney(lastOrder.delivery_fee)}
-                    </Text>
-                  </View>
+                  {([
+                    ['Subtotal', !isZeroMoney(lastOrder.product_subtotal)
+                      ? lastOrder.product_subtotal
+                      : sumMoney((lastOrder.order_item ?? []).map((i) => i.Subtotal)), false],
+                    ['Delivery Fee', lastOrder.delivery_fee, false],
+                    ['Service Fee', lastOrder.service_fee, false],
+                    ['Surge Fee', lastOrder.surge_fee, false],
+                    ['Staircase Surcharge', lastOrder.staircase_surcharge, false],
+                    ['Heavy Load Surcharge', lastOrder.payload_surcharge, false],
+                    ['Bottle Deposit', lastOrder.bottle_deposit, false],
+                    ['Previous Balance Settled', lastOrder.debt_settlement, false],
+                    ['Welcome Discount', lastOrder.welcome_discount, true],
+                    ['Drop Cashback Applied', lastOrder.wallet_discount, true],
+                    ['M-Pesa Payment Discount', lastOrder.mpesa_discount, true],
+                  ] as const)
+                    .filter(([, value]) => !isZeroMoney(value))
+                    .map(([label, value, isDiscount]) => (
+                      <View key={label} className="flex-row justify-between">
+                        <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>{label}</Text>
+                        <Text
+                          className={isDiscount ? "font-sans-medium" : (darkTheme ? "text-on-surface" : "text-gray-800")}
+                          style={isDiscount ? { color: BRAND.primary } : undefined}
+                        >
+                          {isDiscount ? '- ' : ''}{formatMoney(value)}
+                        </Text>
+                      </View>
+                    ))}
+
+                  {!isZeroMoney(lastOrder.rounding_adjustment) && (
+                    <View className="flex-row justify-between">
+                      <Text className={`${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>Rounding</Text>
+                      <Text className={`${darkTheme ? "text-on-surface" : "text-gray-800"}`}>
+                        {isNegativeMoney(lastOrder.rounding_adjustment)
+                          ? `- ${formatMoney(subtractMoney("0", lastOrder.rounding_adjustment))}`
+                          : `+ ${formatMoney(lastOrder.rounding_adjustment)}`}
+                      </Text>
+                    </View>
+                  )}
+
                   <View className={`flex-row justify-between pt-2 mt-2 border-t ${darkTheme ? "border-outline-variant/20" : "border-gray-100"}`}>
-                    <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Total</Text>
+                    <Text className={`font-sans-bold text-lg ${darkTheme ? "text-on-surface" : "text-gray-900"}`}>Total Paid</Text>
                     <Text className={`font-sans-bold text-lg text-primary`}>
                       {formatMoney(lastOrder.total_amount)}
                     </Text>
                   </View>
                 </GlassCard>
+
+                {/* Today's price is not last week's. Prices move, the delivery
+                    fee is computed from where the customer is now, and the
+                    discounts above were spent — the wallet credit especially.
+                    Quoting the old total on the button promised a price the new
+                    order will not be. */}
+                <Text className={`text-xs mt-2 px-1 ${darkTheme ? "text-on-surface-variant" : "text-gray-500"}`}>
+                  Today's total is worked out at checkout, so it may differ.
+                </Text>
               </View>
             </ScrollView>
 
-            {/* Bottom Actions */}
-            <View className={`px-5 py-4 border-t ${darkTheme ? "bg-surface border-outline-variant/10" : "bg-white border-gray-100"}`}>
+            {/* Bottom Actions.
+
+                The bar is the last child of a flex column inside `SafeAreaView`,
+                so it ended at `insets.bottom` — directly underneath the floating
+                tab bar, which occupies the 72px above that. The only control on
+                the screen was behind it. Padding the bar rather than lifting it
+                keeps one continuous surface under the pill instead of a stripe
+                of page background between the two. */}
+            <View
+              className={`px-5 pt-4 border-t ${darkTheme ? "bg-surface border-outline-variant/10" : "bg-white border-gray-100"}`}
+              style={{ paddingBottom: tabBarClearance }}
+            >
               <DropButton
-                title={isOrdering ? "Adding to Cart..." : `Repeat Order • ${formatMoney(lastOrder.total_amount)}`}
+                title={
+                  isOrdering
+                    ? "Adding to cart…"
+                    : storeClosed
+                      ? "Store is closed"
+                      : "Add these items to cart"
+                }
                 onPress={handleRepeatOrder}
-                disabled={isOrdering}
+                disabled={isOrdering || storeClosed}
               />
             </View>
           </>

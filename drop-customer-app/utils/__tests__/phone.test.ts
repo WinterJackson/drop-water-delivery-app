@@ -1,4 +1,4 @@
-import { normalisePhone, isValidKenyanMobile, toE164, formatPhone } from "../phone";
+import { normalisePhone, isValidKenyanMobile, isSafaricomNumber, toE164, formatPhone, MAX_PAYMENT_METHODS } from "../phone";
 
 describe("normalisePhone", () => {
     it("reduces every way of writing one number to the same nine digits", () => {
@@ -75,5 +75,59 @@ describe("formatPhone", () => {
     it("shows an unexpected value back rather than mangling it", () => {
         expect(formatPhone("12")).toBe("12");
         expect(formatPhone(null)).toBe("");
+    });
+});
+
+describe("isSafaricomNumber", () => {
+    it("accepts every Safaricom range", () => {
+        for (const ok of [
+            "0110123456", "0115123456",   // 110-115
+            "0700123456", "0712345678", "0729123456", // 700-729
+            "0740123456", "0743123456", "0745123456", "0746123456", "0748123456",
+            "0757123456", "0759123456",
+            "0768123456", "0769123456",
+            "0790123456", "0799123456",
+            "+254712345678", "254712345678",
+        ]) {
+            expect(isSafaricomNumber(ok)).toBe(true);
+        }
+    });
+
+    it("rejects Airtel, which cannot receive an M-Pesa prompt", () => {
+        // M-Pesa is Safaricom's. An STK push to one of these never arrives, so
+        // saving it is a failure deferred to the moment the customer pays.
+        for (const airtel of ["0730111222", "0739123456", "0750123456", "0756123456", "0762123456", "0780123456", "0789123456"]) {
+            expect(isSafaricomNumber(airtel)).toBe(false);
+        }
+    });
+
+    it("rejects Telkom", () => {
+        for (const telkom of ["0770123456", "0775123456", "0779123456"]) {
+            expect(isSafaricomNumber(telkom)).toBe(false);
+        }
+    });
+
+    it("rejects the gaps inside the 74x block", () => {
+        // 744 and 747 are not Safaricom, and a naive 740-749 range would take
+        // them. The ranges are deliberately not contiguous.
+        expect(isSafaricomNumber("0744123456")).toBe(false);
+        expect(isSafaricomNumber("0747123456")).toBe(false);
+    });
+
+    it("is stricter than the any-network check", () => {
+        expect(isValidKenyanMobile("0733111222")).toBe(true);
+        expect(isSafaricomNumber("0733111222")).toBe(false);
+    });
+
+    it("rejects malformed input", () => {
+        for (const bad of ["12", "", null, undefined, "0202345678", "071234567"]) {
+            expect(isSafaricomNumber(bad)).toBe(false);
+        }
+    });
+});
+
+describe("MAX_PAYMENT_METHODS", () => {
+    it("is two, and is the figure the screen and the server both use", () => {
+        expect(MAX_PAYMENT_METHODS).toBe(2);
     });
 });

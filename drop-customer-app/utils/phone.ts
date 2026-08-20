@@ -23,17 +23,53 @@ export function normalisePhone(raw?: string | null): string | null {
     return cleaned;
 }
 
-/**
- * True for a number that can actually receive an M-Pesa prompt.
- *
- * Deliberately strict. This is not a contact field: a number that cannot be
- * pushed to is not a payment method, and accepting one means the customer finds
- * out at checkout rather than here.
- */
+/** A well-formed Kenyan mobile number, on any network. */
 export function isValidKenyanMobile(raw?: string | null): boolean {
     const national = normalisePhone(raw);
     return !!national && /^[17]\d{8}$/.test(national);
 }
+
+/**
+ * National prefixes allocated to Safaricom, as inclusive ranges over the first
+ * three digits of the nine-digit national number.
+ *
+ * Airtel (730-739, 750-756, 762, 780-789, 100-106) and Telkom (770-779) are
+ * deliberately absent. Mirrors `BackendAPI/utils/phone.py`, which is the rule;
+ * this copy exists so the person typing is told before they submit.
+ */
+const SAFARICOM_PREFIX_RANGES: ReadonlyArray<readonly [number, number]> = [
+    [110, 115],
+    [700, 729],
+    [740, 743],
+    [745, 746],
+    [748, 748],
+    [757, 759],
+    [768, 769],
+    [790, 799],
+];
+
+/**
+ * True only for a Safaricom line.
+ *
+ * M-Pesa is Safaricom's. An STK push to an Airtel or Telkom number never
+ * arrives, so saving one is not a payment method — it is a failure deferred to
+ * the moment the customer is trying to pay.
+ */
+export function isSafaricomNumber(raw?: string | null): boolean {
+    const national = normalisePhone(raw);
+    if (!national || !/^[17]\d{8}$/.test(national)) return false;
+    const prefix = Number(national.slice(0, 3));
+    return SAFARICOM_PREFIX_RANGES.some(([low, high]) => prefix >= low && prefix <= high);
+}
+
+/**
+ * How many M-Pesa numbers a customer may keep.
+ *
+ * Enforced here for the person typing and in `routes/auth_routes.py` as the
+ * actual rule — `payment_methods` is a JSONB column that used to be written
+ * straight from the request body.
+ */
+export const MAX_PAYMENT_METHODS = 2;
 
 /** The canonical stored form, matching the backend's `sanitize_phone_number`. */
 export function toE164(raw?: string | null): string | null {

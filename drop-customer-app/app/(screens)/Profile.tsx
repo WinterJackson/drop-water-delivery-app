@@ -233,19 +233,25 @@ const Profile = () => {
 							)}
 
 							{/* PROFILE_PIC */}
-							{/* `UserAvatar`, not a bare `<Image>`.
-								A customer with no photo has `profile_pic` null and `image`
-								is `useState<string|undefined>()`, so the source resolved to
-								`{ uri: undefined }` — which renders nothing at all, leaving a
-								150px transparent hole above their own name. The same is true
-								whenever the URL simply fails to load. `UserAvatar` falls back
-								to their initials on a colour derived from the name, and is
-								already what `SettingsMain` uses two taps away. */}
-							<UserAvatar
-								profilePicUrl={User?.profile_pic || image}
-								fullName={User?.full_name || clerkUser?.fullName}
-								size={150}
-							/>
+							{/* `UserAvatar` inside the primary ring — the same treatment
+								the home header and `SettingsMain` use, at the same size as
+								`SettingsMain`'s, so the customer's face does not change shape
+								between two screens one tap apart.
+
+								It was a bare `<Image>` whose source was
+								`{ uri: profile_pic || image }`, where `image` is
+								`useState<string|undefined>()`. A customer with no photo got
+								`{ uri: undefined }`, which renders nothing at all — a
+								transparent hole directly above their own name — and so did
+								anyone whose photo simply failed to load. `UserAvatar` falls
+								back to their initials on a colour derived from the name. */}
+							<View style={{ borderWidth: 2, borderColor: BRAND.primary, borderRadius: 999, padding: 2 }}>
+								<UserAvatar
+									profilePicUrl={User?.profile_pic || image}
+									fullName={User?.full_name || clerkUser?.fullName || "Customer"}
+									size={100}
+								/>
+							</View>
 							{/* USERNAME , EMAIL */}
 							<View className="w-full items-center py-2 ">
 								<Text className={
@@ -587,11 +593,15 @@ const Profile = () => {
 								<View className="w-full flex-1 items-center pt-3 pb-5 gap-2">
 									{/* PROFILE_PIC */}
 									<View className="h-[170px] w-[170px] ">
-										<UserAvatar
-											profilePicUrl={User?.profile_pic || image}
-											fullName={User?.full_name || clerkUser?.fullName}
-											size={170}
-										/>
+										{/* Same ring as everywhere else; the container keeps its
+											size so the edit button below stays where it is. */}
+										<View style={{ borderWidth: 2, borderColor: BRAND.primary, borderRadius: 999, padding: 2 }}>
+											<UserAvatar
+												profilePicUrl={User?.profile_pic || image}
+												fullName={User?.full_name || clerkUser?.fullName || "Customer"}
+												size={162}
+											/>
+										</View>
 										{/* <------EDIT BUTTON------> */}
 										<PressableScale accessibilityLabel="Change your profile photo"
 											className="absolute bottom-0 right-0 "
