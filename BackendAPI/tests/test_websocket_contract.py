@@ -215,3 +215,88 @@ def test_the_mounted_guard_is_established_before_anything_connects(app):
         f"{app}: the mounted guard is set after the first connect() call, so a "
         "remount opens no socket at all"
     )
+
+
+# ── The in-band token refresh ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("app", APPS)
+def test_the_auth_refresh_asks_clerk_for_an_uncached_token(app):
+    """A refresh that re-sends the token the socket already has extends nothing.
+
+    Clerk session tokens live exactly 60s — Clerk's own guard is
+    `Leeway can not exceed the token lifespan (60 seconds)` — and a bare
+    `getToken()` returns the **cached** token whenever it has more than ~10s
+    left. So refreshing at the 30s half-life handed the server back the very
+    token it opened with: `_handle_auth_refresh` re-verified it, wrote the same
+    `exp` into the session dict, acked `auth_refreshed` with that same `exp`,
+    and extended nothing at all.
+
+    `_close_if_token_expired` then closed the socket at its original expiry and
+    the client reconnected one backoff step later — measured on the customer app
+    at a 63.7s mean period (60s of token plus the 3-4s first backoff step),
+    every socket, for ever. That is precisely the reconnect storm the in-band
+    refresh exists to avoid, and the ~3.5s hole in each cycle drops any order
+    update pushed while nothing is subscribed.
+
+    So the refresh call must pass `skipCache`. The *connect* path deliberately
+    does not: during a reconnect storm the cache is the thing keeping the app
+    from minting a token per attempt, and a short-lived cached token there costs
+    one self-correcting cycle rather than a permanent loop.
+    """
+    source = _code_only(_sources(app)["hooks/useWebSocket.ts"])
+
+    refreshes = re.findall(
+        r"getTokenRef\.current\(([^)]*)\)\s*;?\s*\n?\s*if\s*\(\s*fresh\s*\)", source
+    )
+    assert refreshes, (
+        f"{app}/hooks/useWebSocket.ts: could not find the auth-refresh token "
+        "call. If it moved, move this guard with it."
+    )
+    for args in refreshes:
+        assert "skipCache" in args and "true" in args, (
+            f"{app}/hooks/useWebSocket.ts refreshes the socket token with "
+            f"`getTokenRef.current({args.strip()})`. Clerk serves a cached token "
+            "for the first ~50s of its 60s life, so this re-sends the token the "
+            "socket already holds and the server extends nothing — the socket is "
+            "closed at its original `exp` and rebuilt roughly once a minute, for "
+            "ever. Pass `{ skipCache: true }`."
+        )
+
+
+@pytest.mark.parametrize("app", APPS)
+def test_the_refresh_runs_well_inside_the_token_lifetime(app):
+    """A 60s token refreshed on a >=60s cadence has already expired.
+
+    The margin is what makes the refresh a refresh rather than a race against
+    `_close_if_token_expired`, which closes the moment `time.time() >= exp`.
+    """
+    source = _code_only(_sources(app)["hooks/useWebSocket.ts"])
+    match = re.search(r"AUTH_REFRESH_INTERVAL_MS\s*=\s*([\d_]+)", source)
+    assert match, f"{app}/hooks/useWebSocket.ts declares no AUTH_REFRESH_INTERVAL_MS"
+    interval_ms = int(match.group(1).replace("_", ""))
+    assert interval_ms <= 45_000, (
+        f"{app} refreshes its socket token every {interval_ms / 1000:.0f}s. A "
+        "Clerk session token lives 60s and the server closes on expiry, so this "
+        "leaves no margin for a slow mint."
+    )
+
+
+def test_the_server_still_extends_the_session_from_the_refreshed_token():
+    """The other half of the contract the client test above depends on.
+
+    `_handle_auth_refresh` has to write the *new* payload over the session dict
+    the socket loop holds — `_token_expired` reads `exp` back out of that same
+    dict on every iteration. Re-binding a local instead would ack the refresh
+    and still close the socket on the old expiry, which is the failure the
+    client-side bug imitated.
+    """
+    source = (BACKEND / "routes" / "websocket_routes.py").read_text()
+    body = re.search(
+        r"async def _handle_auth_refresh\(.*?\n(?=\n?async def |\n?def )", source, re.S
+    )
+    assert body, "_handle_auth_refresh has moved or been renamed"
+    assert "user.update(payload)" in body.group(0), (
+        "_handle_auth_refresh must mutate the session dict in place — the socket "
+        "loop holds a reference to it and reads `exp` from it every iteration."
+    )

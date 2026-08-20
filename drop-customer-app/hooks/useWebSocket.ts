@@ -87,7 +87,17 @@ const AUTH_REFRESH_INTERVAL_MS = 30_000;
     authTimerRef.current = setInterval(async () => {
       if (ws.readyState !== WebSocket.OPEN) { stopAuthRefresh(); return; }
       try {
-        const fresh = await getTokenRef.current();
+        // `skipCache: true` is the whole mechanism, not a precaution.
+        // A Clerk session token lives exactly 60s, and a bare `getToken()`
+        // serves the cached one whenever it has more than ~10s left. Refreshing
+        // at the half-life therefore re-sent *the token the socket already had*:
+        // the server re-verified it, wrote back an identical `exp`, acked
+        // `auth_refreshed`, and extended nothing. Every socket on the platform
+        // was closed at its original `exp` and rebuilt one backoff step later,
+        // for ever — the exact reconnect storm this in-band refresh exists to
+        // prevent. Measured at 63.7s mean period: 60s of token plus 3-4s of
+        // first-step backoff.
+        const fresh = await getTokenRef.current({ skipCache: true });
         if (fresh) ws.send(JSON.stringify({ action: 'auth_refresh', token: fresh }));
       } catch {
         // A failed mint is not fatal: the server closes on expiry and the
