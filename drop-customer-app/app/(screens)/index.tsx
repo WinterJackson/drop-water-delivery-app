@@ -308,11 +308,13 @@ export default function Home() {
 						</PressableScale>
 
 						<View className="flex-row items-center gap-3">
-							{/* Drop Cashback Pill */}
+							{/* Drop Wallet pill. */}
 							{!isZeroMoney(User?.wallet_balance) && (
 								<PressableScale
 									activeOpacity={0.6}
-									onPress={() => router.push("/(screens)/Profile")}
+									accessibilityRole="button"
+									accessibilityLabel={`Drop Wallet, ${formatMoneyShort(User?.wallet_balance, 'KSh')}. Open your wallet.`}
+									onPress={() => router.push("/(screens)/BottleWallet")}
 								>
 									<View className={`flex-row items-center px-2.5 py-1.5 rounded-full border ${darkTheme ? "bg-blue-500/20 border-blue-500/30" : "bg-blue-50 border-blue-200"}`}>
 										<Ionicons name="wallet-outline" size={14} color={BRAND.primary} />

@@ -259,7 +259,7 @@ export default function RepeatOrderScreen() {
                     ['Bottle Deposit', lastOrder.bottle_deposit, false],
                     ['Previous Balance Settled', lastOrder.debt_settlement, false],
                     ['Welcome Discount', lastOrder.welcome_discount, true],
-                    ['Drop Cashback Applied', lastOrder.wallet_discount, true],
+                    ['Wallet Balance Applied', lastOrder.wallet_discount, true],
                     ['M-Pesa Payment Discount', lastOrder.mpesa_discount, true],
                   ] as const)
                     .filter(([, value]) => !isZeroMoney(value))

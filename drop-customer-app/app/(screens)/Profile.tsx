@@ -222,14 +222,27 @@ const Profile = () => {
 					>
 						{/* <-------PROFILE DETAILS: [ PROFILE_PIC , USERNAME , EMAIL , EDIT_PROFILE_BUTTON ]-------> */}
 						<View className="w-full items-center pt-3 pb-5 gap-2">
-							{/* Cashback Banner */}
+							{/* Wallet banner.
+								It read "Drop Cashback", which this balance almost never is.
+								`loyalty_cashback_per_delivery` defaults to 0 and
+								`deliverer_service` credits it only `if cashback > 0`, so no
+								order has earned any; what is actually here is the customer's
+								own money — a top-up, a refund, or a returned bottle deposit.
+								Calling a refunded deposit a reward is the opposite of what
+								happened, and part of it cannot even be withdrawn. */}
 							{!isZeroMoney(User?.wallet_balance) && (
-								<View className={`flex-row items-center px-4 py-2 rounded-full mb-2 border ${darkTheme ? "bg-green-500/20 border-green-500/30" : "bg-green-50 border-green-200"}`}>
-									<Text style={{ fontSize: 18, marginRight: 6 }}>💸</Text>
-									<Text className="font-sans-bold text-sm" style={{ color: BRAND_TOAST.success }}>
-										Drop Cashback: {formatMoneyShort(User?.wallet_balance, 'KSh')}
-									</Text>
-								</View>
+								<PressableScale
+									accessibilityRole="button"
+									accessibilityLabel={`Drop Wallet, ${formatMoneyShort(User?.wallet_balance, 'KSh')}. Open your wallet.`}
+									onPress={() => router.push('/(screens)/BottleWallet')}
+								>
+									<View className={`flex-row items-center px-4 py-2 rounded-full mb-2 border ${darkTheme ? "bg-green-500/20 border-green-500/30" : "bg-green-50 border-green-200"}`}>
+										<Ionicons name="wallet-outline" size={16} color={BRAND_TOAST.success} />
+										<Text className="font-sans-bold text-sm ml-2" style={{ color: BRAND_TOAST.success }}>
+											Drop Wallet: {formatMoneyShort(User?.wallet_balance, 'KSh')}
+										</Text>
+									</View>
+								</PressableScale>
 							)}
 
 							{/* PROFILE_PIC */}

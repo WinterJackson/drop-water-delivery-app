@@ -19,7 +19,7 @@ import { useBottleDeposit } from "@/hooks/queries/useBottleDeposit";
 import { BottleCollectionCard } from "@/components/common/BottleCollection";
 import { Toast } from "@/lib/toast";
 import { errorMessage } from "@/API/errors";
-import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
+import { compareMoney, formatMoney, formatMoneyShort, isZeroMoney, subtractMoney } from "@/utils/money";
 
 /** What a customer may type into an amount box: shillings, optionally cents. */
 const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
@@ -58,6 +58,26 @@ export default function BottleWallet() {
   // other refusal it does not have the facts to pre-empt.
   const minWithdrawal = deposit?.withdrawal?.minimum ?? null;
   const minTopUp = deposit?.topup?.minimum ?? null;
+
+  /**
+   * The two halves of the balance, both from the server.
+   *
+   * `wallet_balance` is everything the customer can spend on water.
+   * `wallet_not_withdrawable` is the part of it that came back from a returned
+   * bottle deposit, which buys water and cannot leave as cash — the server's
+   * `restricted_customer_credit`, and the reason `assert_withdrawable` refuses.
+   *
+   * The card said "Available Balance" over the whole figure, which is the same
+   * misnaming as calling this wallet "cashback": it states that all of it is
+   * available when some of it provably is not, and the customer only finds out
+   * at the refusal. Subtraction is `subtractMoney`, never `Number(a) - Number(b)`.
+   */
+  const restricted = deposit?.wallet_not_withdrawable ?? null;
+  const hasRestricted = restricted !== null && !isZeroMoney(restricted);
+  const withdrawable =
+    restricted !== null && user?.wallet_balance
+      ? subtractMoney(user.wallet_balance, restricted)
+      : null;
 
   const wallet: WalletData | null = user
     ? {
@@ -197,20 +217,45 @@ export default function BottleWallet() {
         contentContainerStyle={{ paddingBottom: tabBarClearance }}
         refreshControl={<RefreshControl refreshing={refreshing || isLoadingTx} onRefresh={handleRefresh} tintColor={BRAND.primary} />}
       >
-        {/* Wallet Balance Card */}
+        {/* Wallet Balance Card.
+            The headline is what the customer can spend, named as such. It used
+            to be labelled "Available Balance", which is only true when none of
+            it is returned deposit — and for a customer who has handed bottles
+            back, most of it is. When part is restricted the card splits the
+            figure rather than making the customer discover it at the
+            withdrawal form. */}
         <View className="rounded-[24px] overflow-hidden mb-6" style={{ backgroundColor: BRAND.primary }}>
-          <View className="px-6 pt-8 pb-10 items-center">
-            <Text className="text-white/80 font-sans-medium text-base mb-2">Available Balance</Text>
+          <View className="px-6 pt-8 pb-8 items-center">
+            <Text className="text-white/80 font-sans-medium text-base mb-2">Drop Wallet balance</Text>
             {loading ? (
               <Skeleton width={180} height={48} borderRadius={8} style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
             ) : (
               <Text className="text-white font-sans-bold text-5xl tracking-tight">{formatMoneyShort(wallet?.wallet_balance)}</Text>
             )}
-            
-            <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">
-              <Ionicons name="shield-checkmark" size={16} color="white" />
-              <Text className="text-white font-sans-medium ml-2">Zero-Fraud Protection Active</Text>
-            </View>
+            <Text className="text-white/70 font-sans-medium text-xs mt-2">Spend it on any order</Text>
+
+            {hasRestricted && withdrawable !== null ? (
+              <View className="flex-row w-full mt-6 bg-white/10 rounded-2xl px-4 py-3">
+                <View className="flex-1 pr-3">
+                  <Text className="text-white/70 text-xs">Can go to M-Pesa</Text>
+                  <Text className="text-white font-sans-bold text-lg mt-0.5">
+                    {formatMoneyShort(withdrawable)}
+                  </Text>
+                </View>
+                <View className="w-px self-stretch bg-white/20" />
+                <View className="flex-1 pl-3">
+                  <Text className="text-white/70 text-xs">Water only</Text>
+                  <Text className="text-white font-sans-bold text-lg mt-0.5">
+                    {formatMoneyShort(restricted)}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View className="flex-row items-center mt-6 bg-white/10 px-4 py-2 rounded-full">
+                <Ionicons name="shield-checkmark" size={16} color="white" />
+                <Text className="text-white font-sans-medium ml-2">Zero-Fraud Protection Active</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -255,10 +300,15 @@ export default function BottleWallet() {
             <Text className={`font-sans-bold text-base ml-2 ${darkTheme ? "text-white" : "text-slate-900"}`}>Workflow & Float Guide</Text>
           </View>
           <Text className={`leading-relaxed mb-3 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            <Text className="font-sans-bold">Seamless Payments:</Text> Top up your wallet to easily pay for water refills without entering your M-Pesa PIN for every order.
+            <Text className="font-sans-bold">Seamless payments:</Text> top up your wallet to pay for refills without entering your M-Pesa PIN on every order.
           </Text>
+          {/* This used to promise "loyalty bonuses". The setting behind that
+              — `loyalty_cashback_per_delivery` — was retired to 0 by
+              `b2f9c14e7a35` and is credited only `if cashback > 0`, so no order
+              has earned any. The four things listed here are the four things
+              that actually credit this balance. */}
           <Text className={`leading-relaxed ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            <Text className="font-sans-bold">Refunds & Rewards:</Text> Any cancelled orders, refunds, or loyalty bonuses are directly credited to this float balance.
+            <Text className="font-sans-bold">Where the money comes from:</Text> your own top-ups, refunds on cancelled orders, and deposits returned when you hand bottles back.
           </Text>
         </View>
 
@@ -396,9 +446,20 @@ export default function BottleWallet() {
                         color={isDeduction ? "#ef4444" : "#22c55e"} 
                       />
                     </View>
-                    <View>
-                      <Text className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
-                        {tx.transaction_type.replace(/_/g, " ").toUpperCase()}
+                    {/* The row led with the raw enum, uppercased: a returned
+                        bottle deposit, a refund on a cancelled order and a
+                        loyalty credit are all `refund`, so all three read
+                        "REFUND" and the one question this ledger exists to
+                        answer — where did this money come from — had the same
+                        answer for three different events. The server already
+                        writes a sentence per movement; `Transactions` shows it
+                        and this preview did not. */}
+                    <View className="flex-1">
+                      <Text
+                        numberOfLines={1}
+                        className={`font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}
+                      >
+                        {tx.description || tx.transaction_type.replace(/_/g, " ")}
                       </Text>
                       <Text className={`text-xs mt-1 ${darkTheme ? "text-slate-500" : "text-slate-400"}`}>
                         {format(new Date(tx.created_at), 'MMM dd, yyyy • hh:mm a')}
@@ -506,8 +567,17 @@ export default function BottleWallet() {
               </PressableScale>
             </View>
 
+            {/* What is actually withdrawable, stated before the customer types.
+                Only ever *stated* — never enforced here. The server's
+                `assert_withdrawable` reads the balance at request time and
+                refuses with its own sentence; a copy of a figure fetched
+                minutes ago that refused something the platform would have paid
+                is precisely the `MIN_WITHDRAWAL_KSH = 500` defect this screen
+                already had removed. */}
             <Text className={`text-sm mb-4 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-              Withdraw your wallet balance straight to M-Pesa.
+              {hasRestricted && withdrawable !== null
+                ? `You can send ${formatMoney(withdrawable)} to M-Pesa. The other ${formatMoney(restricted)} is returned bottle deposit — spendable on any order, but not withdrawable as cash.`
+                : "Withdraw your wallet balance straight to M-Pesa."}
               {minWithdrawal !== null ? ` Minimum ${formatMoney(minWithdrawal)}.` : ""}
             </Text>
 

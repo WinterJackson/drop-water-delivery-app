@@ -16,7 +16,7 @@ import {
 } from "@/hooks/queries/useBottleDeposit";
 import { Popup } from "@/lib/popup";
 import { Toast } from "@/lib/toast";
-import { formatMoney } from "@/utils/money";
+import { formatMoney, isZeroMoney } from "@/utils/money";
 
 /**
  * Getting the deposit back.
@@ -139,11 +139,14 @@ export function BottleCollectionCard({
     dark ? "bg-surface-container border-transparent" : "bg-white border-gray-100"
   }`;
 
-  const restricted = Number(notWithdrawable) || 0;
+  // `Number(notWithdrawable)` parsed a decimal money string into a float to
+  // ask one yes/no question. Harmless at these magnitudes and still the wrong
+  // idiom — `isZeroMoney` answers it on the string.
+  const hasRestricted = !isZeroMoney(notWithdrawable);
 
   // ── Nothing on deposit ────────────────────────────────────────────────
   if (bottlesHeld <= 0 && !openRequest) {
-    return restricted > 0 ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null;
+    return hasRestricted ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null;
   }
 
   // ── A collection is already booked ────────────────────────────────────
@@ -257,7 +260,7 @@ export function BottleCollectionCard({
           ) : null}
         </View>
 
-        {restricted > 0 ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null}
+        {hasRestricted ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null}
       </>
     );
   }
@@ -312,7 +315,7 @@ export function BottleCollectionCard({
         </PressableScale>
       </View>
 
-      {restricted > 0 ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null}
+      {hasRestricted ? <RestrictedNote amount={notWithdrawable} dark={dark} /> : null}
     </>
   );
 }

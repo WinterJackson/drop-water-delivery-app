@@ -825,9 +825,12 @@ export default function Cart() {
 														className="flex-row justify-between items-center pt-2 pb-2 border-b border-dashed"
 														style={{ borderBottomColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
 													>
-														<View className="flex-col">
+														<View className="flex-col flex-1 pr-3">
 															<Text className="text-base font-sans-medium" style={{ color: BRAND.primary }}>
-																Drop Cashback Applied
+																Wallet Balance Applied
+															</Text>
+															<Text className={`text-xs italic ${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>
+																Credit from your Drop Wallet
 															</Text>
 														</View>
 														<Text className="text-lg font-sans-semibold" style={{ color: BRAND.primary }}>
