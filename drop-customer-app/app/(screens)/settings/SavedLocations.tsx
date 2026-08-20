@@ -174,9 +174,13 @@ export default function SavedLocations() {
             </ScrollView>
 
             {/* Add New Location FAB */}
+            {/* `bottom-28` was 112px of guesswork: it clears the floating tab bar
+                on a handset with a small gesture area and sits behind it on one
+                without. The clearance is the same figure every scroller uses. */}
             <PressableScale
                 onPress={handleAddNew}
-                className="absolute bottom-28 right-5"
+                className="absolute right-5"
+                style={{ bottom: tabBarClearance }}
             >
                 <View className="w-14 h-14 rounded-full bg-accentbg items-center justify-center shadow-xl shadow-black/30">
                     <Text className="text-white text-2xl font-sans-bold">+</Text>

@@ -281,7 +281,7 @@ export default function OrderDetail() {
             </View>
 
             {/* Details Skeleton Block (Bottom 50%) */}
-            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }}>
+            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden', paddingBottom: tabBarClearance }}>
                 <View className="w-full items-center pt-3 pb-2">
                     <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-gray-800" : "bg-gray-300"}`} />
                 </View>
@@ -470,7 +470,9 @@ export default function OrderDetail() {
             </View>
 
             {/* Bottom Half: Scrollable Details */}
-            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12 }}>
+            {/* tab-bar-clearance: the panel is shortened rather than its scroller
+                padded — see the note in `constants/layout.ts`. */}
+            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, paddingBottom: tabBarClearance }}>
                 <View className="w-full items-center pt-3 pb-2 bg-transparent">
                     <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-[#333]" : "bg-[#cbd5e1]"}`} />
                 </View>
