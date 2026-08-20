@@ -216,7 +216,7 @@ now, which is where the vendor app has always kept its own.
 
 The repository head, `e6b2c8d40f17`, is **gated on purpose**: it drops the legacy
 single-staff columns and refuses to run without `ALLOW_STAFF_COLUMN_DROP=true`.
-Routine deploys should target `c8b4f0d92e17`, the last revision before it. The
+Routine deploys should target `d1c7e58b3a92`, the last revision before it. The
 expand/contract sequence is in the gated migration's own docstring.
 
 **The deploy is automatic and the migration is not.** Render redeploys on every
@@ -257,6 +257,8 @@ in this suite. The graph has forked before (`f9a3b7c2d1e0` branched off
 second head is not a subtle failure: `alembic upgrade head` and
 `scripts/bootstrap_database.py`, which stamps at `head` by default, both refuse
 to run at all.
+
+- **Anything a migration installs with `op.execute` does not exist on this database.** `scripts/bootstrap_database.py` runs `create_all` and stamps the head, so `alembic_version` reads the head while no revision has ever executed — which means a backfill, a trigger, a function or a view that lives only inside a migration step was never created. `search_vector` on `Products` and `Vendors` was exactly that: `7645438dc804` backfilled both and installed triggers, `create_all` made the column and the GIN index because the *model* declares those, and every row's vector stayed NULL. `tsvector @@ tsquery` on a NULL vector is NULL rather than true, so **every search box on the platform returned an empty list for every query** — the customer's product and vendor search, the vendor's search of their own catalogue, the rider's vendor search — with no error, no log line, and nothing to distinguish it from "nothing matched". Both are `Computed` generated columns now, so the definition is in `Base.metadata` where `create_all` emits it and Postgres maintains it with no trigger to install and nothing to backfill; `d1c7e58b3a92` converts an existing database and `test_search_vectors.py` fails the build if either becomes a plain column again. The rule generalises past this one column: if a database built by `create_all` alone would not have it, it does not belong in an `op.execute`.
 
 **The chain cannot build this database.** Sixty-eight revisions, one base, and
 not one creates `Vendors`, `Users`, `Orders` or `Products` — those tables

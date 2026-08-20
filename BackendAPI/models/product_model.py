@@ -1,7 +1,7 @@
 from db.session import Base
 from datetime import datetime, timezone
 import uuid
-from sqlalchemy import Column, String, Text, Boolean, Enum, TIMESTAMP, Float, Double, DateTime, Integer, ARRAY, ForeignKey, func, Numeric, Index
+from sqlalchemy import Column, String, Text, Boolean, Enum, TIMESTAMP, Float, Double, DateTime, Integer, ARRAY, ForeignKey, func, Numeric, Index, Computed
 from sqlalchemy.dialects.postgresql import UUID, TSVECTOR
 from enum import Enum as PyEnum
 from sqlalchemy.orm import relationship
@@ -79,7 +79,24 @@ class Product(Base):
       index=True,
       comment="Kenya market water product category"
   )
-  search_vector = Column(TSVECTOR)
+  # Maintained by Postgres itself, not by a trigger a migration installs.
+  #
+  # It used to be a plain column filled in by `7645438dc804`'s backfill and kept
+  # current by that migration's trigger. A database built by
+  # `scripts/bootstrap_database.py` runs `create_all` and stamps the head, so no
+  # revision ever executes against it: the column was created, the GIN index was
+  # created, and the trigger and the backfill — which live only inside
+  # `op.execute` — were not. Every row's vector stayed NULL, `@@` matched
+  # nothing, and every search box on the platform returned zero results without
+  # erroring. `Computed` puts the definition in `Base.metadata`, so a database
+  # built from the models comes out working.
+  search_vector = Column(
+      TSVECTOR,
+      Computed(
+          "to_tsvector('english', coalesce(name, '') || ' ' || coalesce(description, ''))",
+          persisted=True,
+      ),
+  )
   created_at= Column(TIMESTAMP(timezone=True), server_default=func.now())
   updated_at= Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
   
