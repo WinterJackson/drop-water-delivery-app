@@ -24,6 +24,39 @@ from services.vendor_service import set_vendor_position, clear_vendor_position
 
 logger = logging.getLogger(__name__)
 
+
+def _best_effort_email(send, /, **kwargs) -> None:
+    """Send a registration email without letting it fail the registration.
+
+    `send_welcome_email` was called bare, straight after the account row had
+    already been committed. `email_service._send` is wrapped in `tenacity`, so a
+    provider that is rate-limiting, down, or refusing the address is retried
+    inside the request and then *raises* — turning a registration that fully
+    succeeded into a 500, after the commit, with the account sitting in the
+    database.
+
+    What the customer sees is "Internal server error. Please try again later."
+    at the moment they finish onboarding. Retrying takes the `existing_user`
+    branch and reports success, so it self-heals for anyone who tries twice and
+    strands anyone who does not. Reproduced end to end: the row was written,
+    `RetryError[ValidationError]` came back out of the mailer, and the request
+    returned 500.
+
+    The rest of the codebase already treats mail this way —
+    `admin_support_routes` and `broadcast_service` both wrap it, on the grounds
+    that the committed record is what matters and the message is best effort.
+    These three routes were the exception. Same reasoning as `queue_push` /
+    `dispatch_background` for pushes: a notification must not be able to fail
+    the transaction that earned it.
+    """
+    try:
+        send(**kwargs)
+    except Exception:
+        logger.warning(
+            "Registration email failed for %s", kwargs.get("to"), exc_info=True
+        )
+
+
 router = APIRouter()
 
 
@@ -144,8 +177,8 @@ async def create_user(request: Request, user_data: BaseUser, session: AsyncSessi
       user_data.phone_number = sanitize_phone_number(user_data.phone_number)
   user = await createUser(db=session, data= user_data)
   
-  # Send welcome email asynchronously-ish (fire and forget for now)
-  send_welcome_email(to=user_data.email, name=user_data.full_name, app_type="customer")
+  # Best effort: the account is already committed.
+  _best_effort_email(send_welcome_email, to=user_data.email, name=user_data.full_name, app_type="customer")
 
   return{
     "message" : "user created successfully",
@@ -302,9 +335,9 @@ async def register_vendor(request: Request, vendor_data: CreateVendor, session: 
       vendor_data.phone_number = sanitize_phone_number(vendor_data.phone_number)
   vendor = await svc_create_vendor(db=session, data=vendor_data)
   
-  # Send welcome email
-  send_welcome_email(to=vendor_data.email, name=vendor_data.owners_name, app_type="vendor")
-  send_vendor_approved(to=vendor_data.email, name=vendor_data.owners_name)
+  # Best effort: the store is already committed.
+  _best_effort_email(send_welcome_email, to=vendor_data.email, name=vendor_data.owners_name, app_type="vendor")
+  _best_effort_email(send_vendor_approved, to=vendor_data.email, name=vendor_data.owners_name)
   
   return {
     "message" : "Vendor created successfully",
@@ -350,8 +383,8 @@ async def register_rider(request: Request, rider_data: CreateDeliverer, session:
       rider_data.phone_number = sanitize_phone_number(rider_data.phone_number)
   rider = await svc_create_rider(db=session, data=rider_data)
   
-  # Send welcome email
-  send_welcome_email(to=rider_data.email, name=rider_data.name, app_type="rider")
+  # Best effort: the rider is already committed.
+  _best_effort_email(send_welcome_email, to=rider_data.email, name=rider_data.name, app_type="rider")
   
   return {
     "message" : "Rider created successfully",
