@@ -119,6 +119,17 @@ export function isNegativeMoney(value: string | number | null | undefined): bool
 }
 
 /**
+ * The magnitude of a money value, as a decimal string. `"-450.00"` → `"450.00"`.
+ *
+ * For rendering a signed ledger amount as "− KSH 450.00" rather than
+ * "-KSH -450.00": the caller draws the sign, this supplies the figure. Stays in
+ * cents throughout, so it never becomes a float on the way.
+ */
+export function absMoney(value: string | number | null | undefined): string {
+  return isNegativeMoney(value) ? subtractMoney(0, value) : fromCents(toCents(value));
+}
+
+/**
  * A ratio between two money values, as a plain number in `0..1`.
  *
  * The **only** sanctioned way money becomes a number: a progress bar's width or

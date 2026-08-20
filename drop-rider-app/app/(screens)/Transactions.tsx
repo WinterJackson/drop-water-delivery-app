@@ -22,7 +22,7 @@ import SearchBar from "@/components/common/Search";
 import { ScrollView } from "react-native-gesture-handler";
 import { useWalletTransactionsPaginated, type WalletTransaction } from "@/hooks/queries/useWallet";
 import { flattenPages, keepPaging } from "@/utils/paging";
-import { formatMoney } from "@/utils/money";
+import { absMoney, formatMoney, isNegativeMoney } from "@/utils/money";
 
 const TRANSACTION_COLORS: Record<string, string> = {
   top_up: "bg-blue-500/20 text-blue-600",
@@ -53,9 +53,12 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
   // goes both ways for a rider — it debits them settling a cash order out of
   // float and credits them their delivery earnings — so a type allow-list
   // rendered float deductions as income.
-  // The ledger figure, never parsed. `isPositive` reads the transaction type.
+  // The ledger figure, never parsed. The direction reads the *amount*, through
+  // the same cents-based helper the other two apps now use — `amount >= 0`
+  // compared a decimal string against a number and worked only by coercion.
   const amount = item.amount ?? "0";
-  const isPositive = amount >= 0;
+  const negative = isNegativeMoney(amount);
+  const isPositive = !negative;
   const colorClass = TRANSACTION_COLORS[item.transaction_type] || "bg-slate-500/20 text-slate-600";
   const [bgColor] = colorClass.split(" ");
   const iconColor = TRANSACTION_ICON_HEX[item.transaction_type] || "#64748b";
@@ -81,7 +84,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
           </View>
         </View>
         <Text className={`font-sans-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
-          {isPositive ? "+" : "-"}{formatMoney(amount.replace("-", ""))}
+          {negative ? "-" : "+"}{formatMoney(absMoney(amount))}
         </Text>
       </View>
       

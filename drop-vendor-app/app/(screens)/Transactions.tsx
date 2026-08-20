@@ -23,7 +23,7 @@ import { ScrollView } from "react-native-gesture-handler";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useWalletTransactionsPaginated, type WalletTransaction } from "@/hooks/queries/useWallet";
 import { flattenPages, keepPaging } from "@/utils/paging";
-import { formatMoney } from "@/utils/money";
+import { absMoney, formatMoney, isNegativeMoney } from "@/utils/money";
 
 const TRANSACTION_COLORS: Record<string, string> = {
   top_up: "bg-blue-500/20 text-blue-600",
@@ -42,7 +42,21 @@ const TRANSACTION_ICONS: Record<string, string> = {
 };
 
 const TransactionItem = memo(({ item, darkTheme }: any) => {
-  const isPositive = ["top_up", "order_payment", "refund"].includes(item.transaction_type);
+  // The sign comes from the ledger amount, never from the transaction type.
+  //
+  // `apply_wallet_delta` documents it: "amount is signed: negative debits. The
+  // stored ledger amount keeps that sign." A customer paying from their wallet
+  // is written as `amount=-quote.wallet_discount`, and on the rider side the
+  // *same* `order_payment` type carries a negative (`-cash_float_required`) and
+  // a positive (`vendor_net`), so the type cannot decide the sign even in
+  // principle.
+  //
+  // Deriving it from the type put `order_payment` in the positive list and then
+  // rendered the raw amount, so a wallet-paid order showed "+-KSH 450.00" and a
+  // withdrawal "--KSH 200.00". The rider app already reads the amount; these two
+  // did not.
+  const negative = isNegativeMoney(item.amount);
+  const isPositive = !negative;
   const colorClass = TRANSACTION_COLORS[item.transaction_type] || "bg-slate-500/20 text-slate-600";
   const [bgColor, textColor] = colorClass.split(" ");
   const iconName = TRANSACTION_ICONS[item.transaction_type] || "list";
@@ -67,7 +81,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
           </View>
         </View>
         <Text className={`font-sans-bold text-lg ${isPositive ? "text-green-500" : (darkTheme ? "text-white" : "text-slate-900")}`}>
-          {isPositive ? "+" : "-"}{formatMoney(item.amount)}
+          {negative ? "-" : "+"}{formatMoney(absMoney(item.amount))}
         </Text>
       </View>
       
