@@ -111,8 +111,19 @@ export default function LocationRequired() {
                         darkTheme ? 'text-on-surface-variant' : 'text-gray-500'
                     }`}
                 >
-                    Drop delivers within 2.5 km for refills and 15 km for wholesale, so we
-                    need your address to show you the shops that can actually reach you.
+                    {/* No figures here. The radius is a settings row —
+                        `retail_max_distance_km` / `wholesale_max_distance_km` —
+                        and this app is not one of the places allowed to state
+                        it. Quoting "2.5 km" and "15 km" in copy meant the
+                        sentence became false the moment an administrator moved
+                        either one, on the screen whose whole job is to explain
+                        why the address matters. The rider app hit the same
+                        thing in a sentence of its own, which is why
+                        `operation_radius_km` is served to it; there is no
+                        equivalent field for a customer, and the customer does
+                        not need the number — they need the reason. */}
+                    Drop only shows you shops that can actually reach your address,
+                    so we need to know where you are.
                 </Text>
 
                 <View className="w-full mt-6 gap-3">
