@@ -20,7 +20,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from db.session import DATABASE_URL, Base
+from db.session import DATABASE_URL, CONNECT_ARGS, Base
 
 # Import all models so metadata knows about them
 from models.cart_model import Cart, CartItem
@@ -97,6 +97,9 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # The same verified connection the API makes. Without it this engine
+        # used asyncpg's defaults and verified nothing — see `CONNECT_ARGS`.
+        connect_args=CONNECT_ARGS,
     )
 
     async with connectable.connect() as connection:

@@ -170,6 +170,17 @@ _CONNECT_ARGS: dict = {"server_settings": _SERVER_SETTINGS}
 if _requires_tls(DATABASE_URL):
     _CONNECT_ARGS["ssl"] = _tls_context()
 
+#: The same arguments, under a name other modules may import.
+#:
+#: `alembic/env.py` builds its *own* engine from `DATABASE_URL` alone, so
+#: without this it connected with asyncpg's defaults: no CA bundle, and
+#: therefore no verification of the server on the other end. Against
+#: Supabase that is the difference between a verified connection and an
+#: encrypted one to whoever answered — over a link carrying every customer
+#: record and every wallet movement. `scripts/predeploy.py` drives
+#: `command.upgrade` through that same file, so it inherited the gap too.
+CONNECT_ARGS: dict = _CONNECT_ARGS
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # F-031 FIX
