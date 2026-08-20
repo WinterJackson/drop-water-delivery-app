@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import {
@@ -39,6 +40,7 @@ import {
  * someone the till handed them the catalogue and the wallet balance too.
  */
 export default function ManageStaff() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -165,7 +167,7 @@ export default function ManageStaff() {
                     </View>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }}>
                     {/* ── Current staff ─────────────────────────────────── */}
                     <Text className={`font-sans-bold text-lg mb-3 ${darkTheme ? "text-white" : "text-slate-900"}`}>
                         People with access

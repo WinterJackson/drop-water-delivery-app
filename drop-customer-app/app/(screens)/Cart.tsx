@@ -13,6 +13,7 @@ import {
     StyleSheet,
     ActivityIndicator,
 } from "react-native";
+import { useTabBarClearance } from '@/constants/layout';
 import { Text, TextInput } from '@/components/ui/Text';
 import React, { useContext, useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { BRAND } from "@/constants/brandColors";
@@ -62,6 +63,7 @@ const POLL_INTERVALS_MS = [3000, 3000, 5000, 5000, 8000];
 const POLL_CEILING_MS = 90_000;
 
 export default function Cart() {
+    const tabBarClearance = useTabBarClearance();
 	// <--------------HOOKS---------------->
 	const router = useRouter();
 	const { fetchCart } = useContext(Context)
@@ -531,7 +533,7 @@ export default function Cart() {
 							showsVerticalScrollIndicator={false}
 							overScrollMode="never"
 							snapToAlignment="start"
-							contentContainerStyle={{ paddingBottom: 120 }}
+							contentContainerStyle={{ paddingBottom: tabBarClearance }}
 							scrollEventThrottle={16}
 							refreshControl={
 								<RefreshControl
@@ -1002,7 +1004,9 @@ export default function Cart() {
 							</Animated.View>
 						</View>
 						{/* pager View  PAGES [ REVIEW ITEMS, DELIVERY ADDRESS, PAYMENT METHOD, PAYMENT]*/}
-							<ScrollView>
+							<ScrollView
+            contentContainerStyle={{ paddingBottom: tabBarClearance }}
+        >
 								<View className={`w-full pb-[50px] flex-row overflow-scroll flex-nowrap`}>
 											<Animated.View className="flex-row max-h-[300px]"
 												style={[

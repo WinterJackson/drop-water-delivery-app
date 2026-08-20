@@ -1,4 +1,5 @@
 import OrderCard from "@/components/common/OrderCard";
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OrderCardSkeleton } from "@/components/skeletons/ContextualSkeletons";
@@ -13,7 +14,6 @@ import { useContext, useCallback, useState, useMemo, useRef } from "react";
 import { RefreshControl, StatusBar, TouchableWithoutFeedback, View } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUserDetails } from "@/hooks/queries/useUser";
 import { BRAND } from "@/constants/brandColors";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,12 +22,12 @@ const FlashList = OriginalFlashList as any;
 const filterOptions = ["All", ...(Object.keys(ORDER_STATUS_GROUPS) as OrderFilter[])] as const;
 
 const Orders = () => {
+    const tabBarClearance = useTabBarClearance();
 	const router = useRouter();
 	const [showFilter, setShowFilter] = useState(false);
 	const [selectedFilter, setSelectedFilter] = useState<OrderFilter | "All">("All");
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
-	const insets = useSafeAreaInsets();
 	// The filter is the query, not a pass over the rows. Filtering client-side
 	// searched the page in hand, so "Delivered" answered "no orders" to anybody
 	// whose last delivery was further back than one page — and answered
@@ -151,8 +151,8 @@ const Orders = () => {
 	// FIX-RERENDER-06: Stable contentContainerStyle to avoid FlashList re-layout
 	const contentContainerStyle = useMemo(() => ({
 		paddingVertical: 10,
-		paddingBottom: 120 + insets.bottom + 16,
-	}), [insets.bottom]);
+		paddingBottom: tabBarClearance,
+	}), [tabBarClearance]);
 
 	// FIX-RERENDER-07: Stable data reference for skeleton loading state
 	const listData = useMemo(() => {

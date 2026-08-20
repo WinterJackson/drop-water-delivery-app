@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { OrderDetailSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -94,6 +95,7 @@ const SHORT_STATUS_LABELS: Record<string, string> = {
 };
 
 export default function OrderDetail() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const { orderId } = useLocalSearchParams<{ orderId: string }>();
@@ -473,7 +475,7 @@ export default function OrderDetail() {
                     <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-[#333]" : "bg-[#cbd5e1]"}`} />
                 </View>
                 <ScrollView
-                    contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: 60 }}
+                    contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: tabBarClearance }}
                     showsVerticalScrollIndicator={false}
                 >
                  {/* Status Timeline Tracking Bar */}

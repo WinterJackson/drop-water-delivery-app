@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import CapabilityGate from "@/components/common/CapabilityGate";
 import { PERMISSIONS } from "@/hooks/queries/useVendorProfile";
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
@@ -28,6 +29,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { VendorEditProductSkeleton } from "@/components/skeletons/ContextualSkeletons";
 
 function EditProductForm() {
+    const tabBarClearance = useTabBarClearance();
   const { id } = useLocalSearchParams();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -208,7 +210,7 @@ function EditProductForm() {
       </View>
 
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 120, paddingTop: 24, paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
+         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: tabBarClearance, paddingTop: 24, paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
            <View className="gap-6">
              <View>
                <Text className={labelStyle}>Product Name *</Text>

@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 
@@ -52,6 +53,7 @@ const PaymentCard = ({ item, index, darkTheme, handleRemove }: any) => (
 );
 
 export default function PaymentMethods() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -146,7 +148,7 @@ export default function PaymentMethods() {
                 </Text>
             </View>
             </View>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120}}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: tabBarClearance }}>
                 {paymentMethods.map((item: any, idx: number) => (
                     <PaymentCard {...paymentCardProps} key={idx} item={item} index={idx} />
                 ))}

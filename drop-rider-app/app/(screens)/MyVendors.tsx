@@ -1,4 +1,5 @@
 import { ApiError, errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { View, StatusBar, FlatList, RefreshControl, Image, TouchableOpacity, ActivityIndicator, Linking } from "react-native";
@@ -19,6 +20,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 const FlashList = OriginalFlashList as any;
 
 export default function MyVendors() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
@@ -271,7 +273,7 @@ export default function MyVendors() {
               />
             }
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 100 }}
+            contentContainerStyle={{ paddingBottom: tabBarClearance }}
           />
         </View>
       )}

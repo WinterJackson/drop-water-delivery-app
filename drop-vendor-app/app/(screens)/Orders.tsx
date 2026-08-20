@@ -1,4 +1,5 @@
 import type { VendorOrderStatus } from "@/types/models";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useCallback, useContext, useState, memo } from "react";
 import {
     RefreshControl,
@@ -164,6 +165,7 @@ const OrderItem = memo(({ item, darkTheme, updatingOrder, onUpdateStatus, router
 });
 
 export default function Orders() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -316,7 +318,7 @@ export default function Orders() {
           keyExtractor={(item: any) => item.id}
           // @ts-ignore
           refreshControl={<RefreshControl refreshing={productLoading} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance }}
           onEndReached={keepPaging(ordersQuery)}
           onEndReachedThreshold={0.5}
           ListEmptyComponent={

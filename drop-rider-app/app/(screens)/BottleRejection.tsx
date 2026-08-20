@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, StatusBar, Image, ScrollView, TouchableOpacity } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function BottleRejection() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
@@ -156,7 +158,7 @@ export default function BottleRejection() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} className="flex-1 p-5">
+      <ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }} className="flex-1 p-5">
          <Text className={`font-sans-bold text-lg mb-2 ${darkTheme ? "text-white" : "text-gray-900"}`}>1. Photographic Evidence</Text>
          <Text className={`text-sm mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Please provide at least 2 clear photos showing the damage. Max 3 photos.</Text>
          

@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -58,6 +59,7 @@ const MIN_SUBJECT = 3;
 const MIN_BODY = 10;
 
 const Support = () => {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -148,7 +150,7 @@ const Support = () => {
             </View>
 
             <ScrollView
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, flexGrow: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: tabBarClearance, flexGrow: 1 }}
                 refreshControl={
                     <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={BRAND.primary} />
                 }
@@ -256,7 +258,7 @@ const Support = () => {
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: tabBarClearance }}>
                         {orderId ? (
                             <View
                                 className={`flex-row items-center gap-2 px-4 py-3 rounded-xl mb-5 ${

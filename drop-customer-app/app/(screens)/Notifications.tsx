@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { useTabBarClearance } from '@/constants/layout';
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NotificationItemSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -18,6 +19,7 @@ import { BRAND } from "@/constants/brandColors";
 const FlashList = OriginalFlashList as any;
 
 const Notifications = () => {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -161,7 +163,7 @@ const Notifications = () => {
                     // feed changes — appending a page or marking one read reuses a
                     // recycled row against different data.
                     keyExtractor={(item: any) => String(item.id)}
-                    contentContainerStyle={{ padding: 15, paddingBottom: 120}}
+                    contentContainerStyle={{ padding: 15, paddingBottom: tabBarClearance }}
                     ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                     refreshControl={
                         <RefreshControl refreshing={loading} onRefresh={refetch} tintColor={darkTheme ? "#fff" : "#000"} />

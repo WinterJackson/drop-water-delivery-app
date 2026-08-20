@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useState, memo } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import {
     RefreshControl,
     StatusBar,
@@ -113,6 +114,7 @@ const TransactionItem = memo(({ item, darkTheme }: any) => {
 });
 
 export default function Transactions() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -239,7 +241,8 @@ export default function Transactions() {
                     </View>
                 ) : null
             }
-          />
+            contentContainerStyle={{ paddingBottom: tabBarClearance }}
+         />
         )}
       </View>
     </SafeAreaView>

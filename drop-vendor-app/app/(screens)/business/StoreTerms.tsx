@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND } from "@/constants/brandColors";
@@ -38,6 +39,7 @@ import { formatMoney } from "@/utils/money";
  * since changed.
  */
 export default function StoreTerms() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const dark = currentTheme === "dark";
     const router = useRouter();
@@ -115,7 +117,7 @@ export default function StoreTerms() {
                     </Text>
                 </View>
 
-                <ScrollView className="px-4" contentContainerStyle={{ paddingBottom: 40 }}>
+                <ScrollView className="px-4" contentContainerStyle={{ paddingBottom: tabBarClearance }}>
                     {/* ── Cash orders ──────────────────────────────────── */}
                     <View className={cardClass}>
                         <View className="flex-row items-center justify-between">

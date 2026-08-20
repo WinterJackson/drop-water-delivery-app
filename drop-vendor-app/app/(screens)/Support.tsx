@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { useTabBarClearance } from '@/constants/layout';
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND } from "@/constants/brandColors";
@@ -61,6 +62,7 @@ const MIN_SUBJECT = 3;
 const MIN_BODY = 10;
 
 const Support = () => {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -140,7 +142,7 @@ const Support = () => {
             </View>
 
             <ScrollView
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, flexGrow: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: tabBarClearance, flexGrow: 1 }}
                 refreshControl={
                     <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={BRAND.primary} />
                 }
@@ -249,7 +251,7 @@ const Support = () => {
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: tabBarClearance }}>
                         <Text className={`text-sm font-sans-semibold mb-2 ${darkTheme ? "text-gray-300" : "text-gray-700"}`}>
                             What's it about?
                         </Text>

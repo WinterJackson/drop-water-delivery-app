@@ -1,4 +1,5 @@
 import React, { useContext, useCallback, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, StatusBar, RefreshControl, Dimensions } from "react-native";
@@ -18,6 +19,7 @@ import { useAddToCartAction } from "@/hooks/useAddToCartAction";
 const { width } = Dimensions.get("window");
 
 export default function Offers() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -107,7 +109,7 @@ export default function Offers() {
                     renderItem={renderItem}
                     keyExtractor={(item) => item.id.toString()}
                     numColumns={2}
-                    contentContainerStyle={{ paddingHorizontal: GRID_GAP / 2, paddingBottom: 120, paddingTop: GRID_GAP }}
+                    contentContainerStyle={{ paddingHorizontal: GRID_GAP / 2, paddingBottom: tabBarClearance, paddingTop: GRID_GAP }}
                     ListEmptyComponent={renderEmpty}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "#fff" : "#000"} />

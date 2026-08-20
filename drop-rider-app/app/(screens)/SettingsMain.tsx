@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -67,6 +68,7 @@ const SettingItem = ({ title, iconName, onPress, danger = false, darkTheme }: an
 );
 
 export default function SettingsMain() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme, setTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -208,7 +210,7 @@ export default function SettingsMain() {
             </View>
 
             <ScrollView 
-                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 40, paddingBottom: 120 }} 
+                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 40, paddingBottom: tabBarClearance }} 
                 showsVerticalScrollIndicator={false}
             >
                 {isLoading ? (

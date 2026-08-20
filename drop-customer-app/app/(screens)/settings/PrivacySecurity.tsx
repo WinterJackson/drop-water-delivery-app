@@ -1,4 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, Switch, Linking } from "react-native";
@@ -79,6 +80,7 @@ const ToggleItem = ({ title, icon, description, value, onToggle, darkTheme }: im
 );
 
 export default function PrivacySecurity() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -157,7 +159,7 @@ export default function PrivacySecurity() {
             </View>
             </View>
 
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 120 }}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: tabBarClearance }}>
                 
                 <Text className={`text-sm font-sans-bold mb-3 uppercase tracking-widest mt-2 ${darkTheme ? "text-gray-500" : "text-gray-400"}`}>
                     Security

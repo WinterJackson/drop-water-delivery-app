@@ -1,6 +1,7 @@
 // url : /(screens)/Maps/lat=lat%lng=lng%id=id
 
 import { useCallback, useContext, useEffect, useState, useRef as useReactRef } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import {
     ActivityIndicator,
     Dimensions,
@@ -550,6 +551,7 @@ const darkMapStyle: MapStyleElement[] = [
 const standardMapStyle: MapStyleElement[] = []
 
 export default function Maps() {
+    const tabBarClearance = useTabBarClearance();
 	// <------------------------HOOKS------------------------->
 	const router = useRouter();
 	const { getToken } = useAuth();
@@ -1176,6 +1178,14 @@ const initialRegion: import("@/types/models").MapRegion = {
 										shadowOpacity: 1,
 										height: viewHeight,
 										width,
+										// The sheet reaches the bottom of the screen, as a bottom
+										// sheet should, but the floating tab bar is drawn over its
+										// last ~72px. Padding the inner ScrollView's *content* does
+										// not help: that only extends how far it can scroll, while
+										// rows still render under the bar at rest. Shortening the
+										// sheet's content box is what keeps the viewport itself
+										// clear of the bar.
+										paddingBottom: tabBarClearance,
 									},
 									animatedView,
 								]}
@@ -1224,11 +1234,17 @@ const initialRegion: import("@/types/models").MapRegion = {
 									</View>
 								</PressableScale>
 
+								{/* tab-bar-clearance: carried by the sheet container above,
+								    which shortens this viewport so no row is drawn under the
+								    bar at rest. Padding the content here would only extend how
+								    far it scrolls. */}
 								<ScrollView
 									className="flex-1 w-full "
 									contentContainerStyle={{
 										gap: 20,
-										paddingTop: 10, paddingBottom: 120}}
+										paddingTop: 10,
+										paddingBottom: 20,
+									}}
 									showsVerticalScrollIndicator={false}
 									overScrollMode={"never"}
 								>

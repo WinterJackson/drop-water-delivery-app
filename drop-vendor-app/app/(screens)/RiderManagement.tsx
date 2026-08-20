@@ -1,4 +1,5 @@
 import React, { useContext, useEffect, useState, useCallback, memo } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, StatusBar, RefreshControl } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -114,6 +115,7 @@ const RiderCard = memo(({
 ));
 
 export default function RiderManagement() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { put } = useApiRequest();
@@ -282,7 +284,7 @@ export default function RiderManagement() {
           // throw the row away and rebuild it, on the list this screen scrolls.
           keyExtractor={(item: any) => item.registry_id}
           // @ts-ignore
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
           onEndReached={keepPaging(ridersQuery)}
           onEndReachedThreshold={0.5}

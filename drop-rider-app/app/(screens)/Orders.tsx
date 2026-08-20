@@ -1,4 +1,5 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { useTabBarClearance } from '@/constants/layout';
 import { UIThemeContext } from "@/context/ThemeContext";
 import useWebSocket from "@/hooks/useWebSocket";
 import { ApiError, errorMessage } from "@/API/errors";
@@ -45,6 +46,7 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 export default function Orders() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { post } = useApiRequest();
@@ -254,7 +256,7 @@ export default function Orders() {
           data={currentList}
           keyExtractor={(item: any) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance, paddingTop: 10 }}
           onEndReached={keepPaging(ordersQuery)}
           onEndReachedThreshold={0.5}
           ListFooterComponent={

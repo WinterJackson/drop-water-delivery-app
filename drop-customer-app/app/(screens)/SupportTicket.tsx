@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND } from "@/constants/brandColors";
@@ -40,6 +41,7 @@ const STATUS_COPY: Record<string, string> = {
 };
 
 const SupportTicket = () => {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -113,7 +115,7 @@ const SupportTicket = () => {
             >
                 <ScrollView
                     ref={scrollRef}
-                    contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+                    contentContainerStyle={{ padding: 16, paddingBottom: tabBarClearance }}
                     onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
                 >
                     {isLoading ? (

@@ -1,4 +1,5 @@
 import FullHorizontalList from "@/components/common/FullHorizontalList";
+import { useTabBarClearance } from '@/constants/layout';
 import HorizontalList from "@/components/common/HorizontalList";
 import { Skeleton } from "@/components/ui/Skeleton";
 import UserAvatar from "@/components/ui/UserAvatar";
@@ -34,7 +35,7 @@ import {
 } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { FlashList, ListRenderItem } from "@shopify/flash-list";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { BRAND, TOAST } from "@/constants/brandColors";
 
@@ -130,6 +131,7 @@ const FlatlistRendorItem = React.memo(({ item, darkTheme, width, router }: { ite
 });
 
 export default function Home() {
+    const tabBarClearance = useTabBarClearance();
 	// <----------------HOOKS---------------->
 	const router = useRouter();
 	const { getToken } = useAuth();
@@ -138,7 +140,6 @@ export default function Home() {
 	const { fetchCart } = useContext(Context);
 	const { data: User } = useUserDetails();
 	const darkTheme = currentTheme === "dark";
-	const insets = useSafeAreaInsets();
 
 	const { width } = useWindowDimensions();
 	// <----------------STATES--------------->
@@ -372,7 +373,7 @@ export default function Home() {
 						renderItem={renderProductItem}
 						keyExtractor={(item) => item.id.toString()}
 						numColumns={2}
-						contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}
+						contentContainerStyle={{ paddingBottom: tabBarClearance }}
 						onEndReached={fetchRandomProducts}
 						onEndReachedThreshold={0.7}
 						extraData={darkTheme}

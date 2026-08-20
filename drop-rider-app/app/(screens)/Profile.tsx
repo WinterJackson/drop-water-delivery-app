@@ -1,4 +1,5 @@
 import { useBottleDebt } from "@/hooks/queries/useBottleDebt";
+import { useTabBarClearance } from '@/constants/layout';
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useContext, useEffect, useState } from "react";
@@ -90,6 +91,7 @@ const InfoRow = ({
 );
 
 export default function Profile() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken, signOut } = useAuth();
@@ -241,7 +243,7 @@ export default function Profile() {
           </View>
       </View>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{flex: 1}}>
-        <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: 120 }}>
+        <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: tabBarClearance }}>
         {loading ? (
             <RiderProfileSkeleton />
         ) : (

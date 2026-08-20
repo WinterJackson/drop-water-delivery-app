@@ -1,4 +1,5 @@
 import React, { useContext } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, StatusBar, TouchableOpacity } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,6 +13,7 @@ import { RiderPerformanceSkeleton } from "@/components/skeletons/ContextualSkele
 import { ratingScore, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Performance() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const router = useRouter();
@@ -58,7 +60,7 @@ export default function Performance() {
       {isLoading ? (
           <RiderPerformanceSkeleton />
       ) : (
-          <ScrollView contentContainerStyle={{ paddingBottom: 120 }} className="flex-1 px-4 pt-2">
+          <ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }} className="flex-1 px-4 pt-2">
             
             {/* Gamification Tier Card */}
             <View className={`w-full rounded-2xl p-5 border ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>

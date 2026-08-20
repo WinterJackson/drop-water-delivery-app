@@ -1,4 +1,5 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { useTabBarClearance } from '@/constants/layout';
 import { UIThemeContext } from "@/context/ThemeContext";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useRiderStore } from "@/stores/useRiderStore";
@@ -77,6 +78,7 @@ interface RadarOrder {
 type FilterType = "ALL" | "< 5KM" | "HIGH PAYOUT" | "QUICK SWAP" | "KEEP MY BOTTLE";
 
 export default function TripRadar() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { get, post } = useApiRequest();
@@ -629,7 +631,7 @@ export default function TripRadar() {
         renderItem={renderOrderCard}
         ListHeaderComponent={<>{renderSearchAndFilters()}{renderDiscoverBanner()}</>}
         ListEmptyComponent={loading ? <RiderTripRadarSkeleton /> : renderEmptyState}
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 100 }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: tabBarClearance }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

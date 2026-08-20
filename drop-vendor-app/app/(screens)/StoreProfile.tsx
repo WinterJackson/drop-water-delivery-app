@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { formatMoney } from "@/utils/money";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -83,6 +84,7 @@ const OperationsCard = ({ title, desc, icon, href, color, darkTheme, router, sha
 );
 
 export default function StoreProfile() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -315,7 +317,7 @@ export default function StoreProfile() {
                     </View>
                 </View>
                 
-                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }} showsVerticalScrollIndicator={false}>
                     
                     {dashLoading ? (
                         // Skeletons correctly shaped

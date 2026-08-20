@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, RefreshControl, Dimensions, Alert, TouchableOpacity, Modal } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +25,7 @@ const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
 
 
 export default function WalletScreen() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -183,7 +185,7 @@ export default function WalletScreen() {
 
       <ScrollView 
         className="flex-1 px-6 pt-4"
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: tabBarClearance }}
         refreshControl={<RefreshControl refreshing={isRefetching || isLoadingTx} onRefresh={handleRefresh} tintColor={BRAND.primary} />}
       >
         {/* Balance Card */}

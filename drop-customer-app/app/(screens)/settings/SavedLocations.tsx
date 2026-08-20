@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -16,6 +17,7 @@ import PressableScale from "@/components/ui/PressableScale";
 import { SavedLocationSkeleton } from "@/components/skeletons/ContextualSkeletons";
 
 export default function SavedLocations() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -108,7 +110,7 @@ export default function SavedLocations() {
             </View>
             </View>
 
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120}}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: tabBarClearance }}>
                 {/* Current Active Location */}
                 <View className={`p-4 mb-4 rounded-2xl border ${darkTheme ? "border-gray-800 bg-gray-900" : "border-gray-200 bg-white"}`}>
                     <View className="flex-row justify-between items-start mb-1">

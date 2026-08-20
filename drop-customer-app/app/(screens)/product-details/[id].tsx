@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import * as Haptics from 'expo-haptics';
 import {
@@ -31,6 +32,7 @@ import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { discountedPrice, formatMoney, isZeroMoney, multiplyMoney } from "@/utils/money";
 
 const ProductDetails = () => {
+    const tabBarClearance = useTabBarClearance();
 	// <---------------HOOKES--------------->
 	const router = useRouter();
 	const { fetchCart } = useContext(Context);
@@ -373,7 +375,7 @@ const ProductDetails = () => {
 				) : (
 					<ScrollView
 						className="flex-1"
-						contentContainerStyle={{ paddingBottom: 120 }}
+						contentContainerStyle={{ paddingBottom: tabBarClearance }}
 						showsVerticalScrollIndicator={false}
 						bounces={false}
 						overScrollMode="never"

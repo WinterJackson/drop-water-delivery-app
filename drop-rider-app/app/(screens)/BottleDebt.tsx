@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useMemo, useState, memo } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { RefreshControl, ScrollView, StatusBar, View } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { Ionicons } from "@expo/vector-icons";
@@ -167,6 +168,7 @@ const LedgerRow = memo(({ item, darkTheme }: { item: BottleLedgerEntry; darkThem
 LedgerRow.displayName = "LedgerRow";
 
 export default function BottleDebt() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const [refreshing, setRefreshing] = useState(false);
@@ -197,7 +199,7 @@ export default function BottleDebt() {
 
                 <ScrollView
                     className="px-4"
-                    contentContainerStyle={{ paddingBottom: 40 }}
+                    contentContainerStyle={{ paddingBottom: tabBarClearance }}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BRAND.primary} />
                     }

@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,6 +16,7 @@ import { useRiderProfile, type RiderPreferences } from "@/hooks/queries/useRider
 import { BRAND } from "@/constants/brandColors";
 
 export default function Preferences() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -59,7 +61,7 @@ export default function Preferences() {
                     </Text>
                 </View>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }}>
                 <Text className={`text-lg font-sans-bold mb-4 px-2 ${darkTheme ? "text-white" : "text-black"}`}>
                     App Preferences
                 </Text>

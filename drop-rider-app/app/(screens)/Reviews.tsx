@@ -1,4 +1,5 @@
 import React, { useContext } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, StatusBar, TouchableOpacity } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,6 +13,7 @@ import { RiderReviewsSkeleton } from "@/components/skeletons/ContextualSkeletons
 import { ratingScore, filledStars, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Reviews() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const router = useRouter();
@@ -76,7 +78,7 @@ export default function Reviews() {
               </TouchableOpacity>
           </View>
       ) : (
-          <ScrollView contentContainerStyle={{ paddingBottom: 120 }} className="flex-1 px-4 pt-2">
+          <ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }} className="flex-1 px-4 pt-2">
             {/* Overall Rating Card */}
             <View className={`w-full rounded-2xl p-5 border flex-row items-center justify-between mb-6 ${darkTheme ? "bg-white/5 border-white/10" : "bg-white border-gray-200"}`}>
                 <View className="items-center mr-6">

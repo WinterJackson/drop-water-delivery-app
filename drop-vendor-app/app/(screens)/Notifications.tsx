@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { useTabBarClearance } from '@/constants/layout';
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -112,6 +113,7 @@ const NotificationItemCard = memo(({
 });
 
 export default function Notifications() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -217,7 +219,7 @@ export default function Notifications() {
                     data={groupedNotifications}
                     keyExtractor={(item: any) => item.id}
                     // @ts-ignore
-                    contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+                    contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance }}
                     refreshControl={
                         <RefreshControl refreshing={loading} onRefresh={refetch} tintColor={darkTheme ? "white" : "black"} />
                     }

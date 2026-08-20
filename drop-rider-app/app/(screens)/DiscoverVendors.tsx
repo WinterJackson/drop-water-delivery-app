@@ -1,4 +1,5 @@
 import { ApiError, errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState, useCallback, useRef } from "react";
 import { View, StatusBar, FlatList, RefreshControl, Image, Switch, Platform, TouchableOpacity } from "react-native";
@@ -74,6 +75,7 @@ if (Platform.OS !== 'web') {
 }
 
 export default function DiscoverVendors() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
@@ -421,7 +423,7 @@ export default function DiscoverVendors() {
             data={vendors}
             keyExtractor={(item: DiscoveredVendor) => item.id}
             renderItem={renderVendorCard}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: tabBarClearance }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             ListEmptyComponent={
               <View className="items-center justify-center pt-20">

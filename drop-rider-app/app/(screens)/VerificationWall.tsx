@@ -1,4 +1,5 @@
 import React, { useState, useContext, useEffect, useRef } from 'react';
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, TouchableOpacity, Image, ActivityIndicator, StatusBar } from 'react-native';
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import { apiFetch } from '@/API/apiFetch';
 import { errorMessage } from '@/API/errors';
 
 export default function VerificationWall() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { getToken } = useAuth();
@@ -151,7 +153,7 @@ export default function VerificationWall() {
             To maintain platform safety, please verify your identity before accessing deliveries.
           </Text>
         </View>
-        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: tabBarClearance }}>
             <RiderVerificationSkeleton />
         </ScrollView>
       </SafeAreaView>
@@ -245,7 +247,7 @@ export default function VerificationWall() {
         </Text>
       </View>
 
-      <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: tabBarClearance }}>
         
         {kycStatus === "rejected" && (
           <View className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl mb-6">

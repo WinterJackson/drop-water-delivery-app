@@ -1,4 +1,5 @@
 import React, { useContext, useState, useMemo } from 'react';
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, StatusBar, Image, Platform, ActivityIndicator } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ const VENDOR_FILTERS = [
 ];
 
 export default function VendorDirectory() {
+    const tabBarClearance = useTabBarClearance();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { currentTheme } = useContext(UIThemeContext);
@@ -244,7 +246,7 @@ export default function VendorDirectory() {
                         keyExtractor={(item) => item.id}
                         renderItem={renderVendor}
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 120 }}
+                        contentContainerStyle={{ paddingBottom: tabBarClearance }}
                         onEndReached={keepPaging(directoryQuery)}
                         onEndReachedThreshold={0.6}
                         ListFooterComponent={

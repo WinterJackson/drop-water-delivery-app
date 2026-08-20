@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -26,6 +27,7 @@ import PressableScale from "@/components/ui/PressableScale";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 
 function AddProductForm() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { post } = useApiRequest();
@@ -130,7 +132,7 @@ function AddProductForm() {
       </View>
 
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 120, paddingTop: 24, paddingHorizontal: 20 }}>
+         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: tabBarClearance, paddingTop: 24, paddingHorizontal: 20 }}>
            <View className="gap-6">
              <View>
                <Text className={labelStyle}>Product Name *</Text>

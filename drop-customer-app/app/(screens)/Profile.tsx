@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { useTabBarClearance } from '@/constants/layout';
 import Button from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import icons from "@/constants/icons/icons";
@@ -41,6 +42,7 @@ import { formatMoney, formatMoneyShort, isZeroMoney } from "@/utils/money";
 const { width, height } = Dimensions.get("window");
 
 const Profile = () => {
+    const tabBarClearance = useTabBarClearance();
 	// <------------------------------HOOKES------------------------------>
 	const router = useRouter();
 	const queryClient = useQueryClient();
@@ -213,7 +215,7 @@ const Profile = () => {
 						contentContainerStyle={{
 							alignItems: "center",
 							gap: 20,
-							paddingTop: 10, paddingBottom: 120}}
+							paddingTop: 10, paddingBottom: tabBarClearance }}
 						showsVerticalScrollIndicator={false}
 						overScrollMode="never"
 					>
@@ -804,7 +806,7 @@ const Profile = () => {
 									<Text className={`text-2xl font-heading-semibold mb-4 ${darkTheme ? "text-white" : "text-black"}`}>
 										Saved Items
 									</Text>
-									<ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+									<ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 										{favorites.length === 0 ? (
 											<EmptyState mood="sad" title="No Saved Items" subtitle="You haven't saved any items yet." />
 										) : (

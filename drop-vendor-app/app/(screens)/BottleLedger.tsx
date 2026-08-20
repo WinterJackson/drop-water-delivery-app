@@ -1,4 +1,5 @@
 import React, { useContext, useMemo } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, FlatList, RefreshControl, ActivityIndicator } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -48,6 +49,7 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function BottleLedgerScreen() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -177,7 +179,7 @@ export default function BottleLedgerScreen() {
           data={entries}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: tabBarClearance }}
           refreshControl={
             <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={BRAND.primary} />
           }

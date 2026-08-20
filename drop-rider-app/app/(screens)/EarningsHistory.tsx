@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useContext } from 'react';
+import { useTabBarClearance } from '@/constants/layout';
 import { ActivityIndicator, View, StatusBar, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -123,6 +124,7 @@ const AccordionItem = ({ order, darkTheme }: { order: RiderOrder, darkTheme: boo
 };
 
 export default function EarningsHistory() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -206,7 +208,7 @@ export default function EarningsHistory() {
             <SectionList<{ title: string, data: RiderOrder[] }>
                 sections={groupedOrders as any}
                 keyExtractor={(item: any) => item.id}
-                contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+                contentContainerStyle={{ padding: 16, paddingBottom: tabBarClearance }}
                 refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
                 onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
                 onEndReachedThreshold={0.4}

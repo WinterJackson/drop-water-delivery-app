@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, ActivityIndicator } from "react-native";
@@ -58,6 +59,7 @@ const InputField = ({
 );
 
 export default function PersonalDetails() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -159,7 +161,7 @@ export default function PersonalDetails() {
             </View>
             </View>
             <ScrollView 
-                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: tabBarClearance }}
                 keyboardShouldPersistTaps="handled"
             >
                 <InputField darkTheme={darkTheme} label="Full Name" value={name} onChangeText={setName} maxLength={50} />

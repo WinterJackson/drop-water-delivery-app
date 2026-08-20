@@ -12,6 +12,7 @@
  * the server refused, and the two things the rider can do about it.
  */
 import { Ionicons } from "@expo/vector-icons";
+import { useTabBarClearance } from '@/constants/layout';
 import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -42,6 +43,7 @@ const LABELS: Record<string, string> = {
 };
 
 export default function PendingSync() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -133,7 +135,7 @@ export default function PendingSync() {
             </View>
 
             <ScrollView
-                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance }}
                 refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={BRAND.primary} />}
             >
                 {loading ? (

@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
@@ -14,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import { BRAND } from "@/constants/brandColors";
 
 export default function OperatingHours() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -148,7 +150,7 @@ export default function OperatingHours() {
                     </View>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }}>
                     <Text className={`text-sm mb-6 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
                         Set your standard operating hours. Customers will not be able to place new orders outside of this time window.
                     </Text>

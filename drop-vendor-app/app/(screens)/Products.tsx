@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import VendorApiRoutes from "@/API/routes/VendorApiRoutes";
 import { useApiRequest } from "@/API/useApiClient";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -105,6 +106,7 @@ const ProductCard = memo(({ item, darkTheme, canEdit, onDelete, onEdit, onToggle
 });
 
 export default function Products() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { del, put } = useApiRequest();
@@ -271,7 +273,7 @@ export default function Products() {
           keyExtractor={(item: any) => item.id}
           // @ts-ignore
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, paddingTop: 8 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarClearance, paddingTop: 8 }}
           onEndReached={keepPaging(productsQuery)}
           onEndReachedThreshold={0.5}
           ListEmptyComponent={

@@ -1,4 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, StatusBar, ActivityIndicator, KeyboardAvoidingView, Platform, TouchableOpacity, KeyboardTypeOptions } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -71,6 +72,7 @@ const InfoRow = ({
 };
 
 export default function OwnerProfile() {
+    const tabBarClearance = useTabBarClearance();
 
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -259,7 +261,7 @@ export default function OwnerProfile() {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{flex: 1}}>
-        <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: tabBarClearance }} showsVerticalScrollIndicator={false}>
           {/* Personal Identity */}
           <View className="items-center pt-8 pb-8">
             <View className="relative mb-4">

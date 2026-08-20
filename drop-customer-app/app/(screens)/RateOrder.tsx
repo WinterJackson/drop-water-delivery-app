@@ -1,4 +1,5 @@
 import { UIThemeContext } from "@/context/ThemeContext";
+import { useTabBarClearance } from '@/constants/layout';
 import { useSubmitReview } from "@/hooks/queries/useReviews";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,6 +40,7 @@ const RatingStars = ({ rating, setRating, darkTheme }: { rating: number, setRati
 };
 
 const RateOrder = () => {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const { orderId, vendorId, riderId } = useLocalSearchParams();
@@ -158,7 +160,7 @@ const RateOrder = () => {
             </View>
             </View>
 
-            <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingVertical: 20, paddingBottom: 120}}>
+            <ScrollView className="flex-1 px-5" contentContainerStyle={{ paddingVertical: 20, paddingBottom: tabBarClearance }}>
                 {vendorId && (
                     <View className={`mb-8 p-6 rounded-2xl ${darkTheme ? "bg-white/5" : "bg-white"}`}>
                         <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>Vendor Rating</Text>

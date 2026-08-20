@@ -1,4 +1,5 @@
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
+import { useTabBarClearance } from '@/constants/layout';
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PaymentRecordSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -15,7 +16,6 @@ import {
 } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { FlashList as OriginalFlashList } from "@shopify/flash-list";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BRAND } from "@/constants/brandColors";
 
 const FlashList = OriginalFlashList as any;
@@ -29,10 +29,10 @@ const FlashList = OriginalFlashList as any;
  */
 
 export default function PaymentHistory() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const paymentsQuery = usePaymentHistory();
     const { isLoading: loading, isFetchingNextPage, hasNextPage, refetch: fetchPayments } = paymentsQuery;
     const payments = paymentRows(paymentsQuery.data);
@@ -112,7 +112,7 @@ export default function PaymentHistory() {
                     }
 					// @ts-ignore
 					estimatedItemSize={100}
-                    contentContainerStyle={{ paddingTop: 16, paddingBottom: 120}}
+                    contentContainerStyle={{ paddingTop: 16, paddingBottom: tabBarClearance }}
                     showsVerticalScrollIndicator={false}
                     refreshControl={
                         <RefreshControl

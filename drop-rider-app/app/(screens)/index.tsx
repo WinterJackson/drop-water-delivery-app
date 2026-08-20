@@ -1,4 +1,5 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { useTabBarClearance } from '@/constants/layout';
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { ApiError, errorMessage } from "@/API/errors";
@@ -65,6 +66,7 @@ const QuickActionCard = ({ title, subtitle, icon, route, darkTheme, router }: { 
 );
 
 export default function Dashboard() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { put } = useApiRequest();
@@ -328,7 +330,7 @@ export default function Dashboard() {
         </View>
 
           <ScrollView 
-            contentContainerStyle={{ paddingBottom: 120 }} 
+            contentContainerStyle={{ paddingBottom: tabBarClearance }} 
             className="flex-1" 
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={darkTheme ? "#fff" : "#000"} />}
           >

@@ -1,4 +1,5 @@
 import type { VendorOrderStatus } from "@/types/models";
+import { useTabBarClearance } from '@/constants/layout';
 import { Skeleton } from "@/components/ui/Skeleton";
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useOrderReview, useUpdateOrderStatus, useVendorOrder } from "@/hooks/queries/useVendorOrders";
@@ -29,6 +30,7 @@ import { useRef, useMemo, useCallback } from "react";
 import { compareMoney, formatMoney, isNegativeMoney, isZeroMoney, multiplyMoney, subtractMoney, sumMoney } from "@/utils/money";
 
 export default function OrderDetail() {
+    const tabBarClearance = useTabBarClearance();
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -200,7 +202,7 @@ export default function OrderDetail() {
           </View>
         </View>
 
-        <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        <ScrollView className="flex-1 px-5 pt-6" contentContainerStyle={{ paddingBottom: tabBarClearance }} showsVerticalScrollIndicator={false}>
           {/* Status indicator */}
           <View className="items-center mb-6">
             <View className={`px-5 py-2.5 rounded-full border border-transparent ${orderStatusStyle(order.order_status).pill}`}>
@@ -738,7 +740,7 @@ export default function OrderDetail() {
             </PressableScale>
           </View>
 
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabBarClearance }}>
             {riders.length === 0 ? (
               <View className="items-center py-10">
                   <Ionicons name="warning-outline" size={48} color={BRAND.primary} className="mb-4" />

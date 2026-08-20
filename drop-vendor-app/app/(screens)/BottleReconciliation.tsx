@@ -1,4 +1,5 @@
 import React, { useContext, useState } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, RefreshControl, Image, Alert, Modal } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,6 +19,7 @@ import { PERMISSIONS, useCan } from "@/hooks/queries/useVendorProfile";
 import Toast from "react-native-toast-message";
 
 export default function BottleReconciliation() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -128,7 +130,8 @@ export default function BottleReconciliation() {
       <ScrollView 
         className="flex-1 px-6 pt-2"
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={BRAND.primary} />}
-      >
+            contentContainerStyle={{ paddingBottom: tabBarClearance }}
+        >
         <Text className={`text-sm mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
           Empties owed to you by riders who delivered your Quick Swap orders. Log what they physically hand back to clear their balance — every entry is recorded against the order it came from.
         </Text>

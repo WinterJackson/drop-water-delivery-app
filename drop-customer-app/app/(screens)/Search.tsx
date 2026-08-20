@@ -1,4 +1,5 @@
 import SearchBar from "@/components/common/Search";
+import { useTabBarClearance } from '@/constants/layout';
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonRow } from "@/components/ui/Skeleton";
@@ -9,7 +10,6 @@ import { useContext, useEffect, useState } from "react";
 import { Image, Keyboard, Linking, Modal, Platform, ScrollView, StatusBar, View } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { PressableScale } from "@/components/ui/PressableScale";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BRAND } from "@/constants/brandColors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { FlashList } from "@shopify/flash-list";
@@ -36,6 +36,7 @@ const PRODUCT_CATEGORIES = [
 const SEARCH_HISTORY_KEY = "@search_history";
 
 export default function Search() {
+    const tabBarClearance = useTabBarClearance();
 	const { q, category, mode } = useLocalSearchParams();
 	const initialQuery = Array.isArray(q) ? q[0] : q || "";
 	const initialCategory = Array.isArray(category) ? category[0] : category || "all";
@@ -44,7 +45,6 @@ export default function Search() {
 	const router = useRouter();
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
-	const insets = useSafeAreaInsets();
 	
 	const [searchState, setSearchState] = useState(initialQuery);
 	const [search, setSearch] = useState(initialQuery);
@@ -370,13 +370,13 @@ export default function Search() {
 						{/* Results List */}
 						<View style={{ flex: 1 }}>
 							{(productError || vendorError) && (
-								<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+								<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 									<EmptyState mood="concerned" title="Something went wrong" subtitle="Please check your connection and try again" />
 								</ScrollView>
 							)}
 
 							{loading && productResults.length === 0 && vendorResults.length === 0 && !productError && !vendorError ? (
-								<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+								<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 									<View className="px-4 mt-6 w-full">
 										<SkeletonRow />
 										<SkeletonRow />
@@ -386,15 +386,15 @@ export default function Search() {
 									</View>
 								</ScrollView>
 							) : !hasSearched ? (
-								<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+								<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 									<EmptyState mood="search" title="Search for products and vendors" subtitle="Type what you need in the search bar" />
 								</ScrollView>
 							) : totalResults === 0 && !productError && !vendorError ? (
-								<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+								<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 									<EmptyState mood="search" title="No results found" subtitle={`No matching results found for "${search}"`} />
 								</ScrollView>
 							) : (selectedResultTab === "products" ? productResults.length : vendorResults.length) === 0 && totalResults > 0 ? (
-								<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+								<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 									<EmptyState mood="search" title={`No ${selectedResultTab} found`} subtitle={`Try switching to the ${selectedResultTab === "products" ? "Vendors" : "Products"} tab`} />
 								</ScrollView>
 							) : (
@@ -407,7 +407,7 @@ export default function Search() {
 									// @ts-ignore - Required for FlashList to render despite missing from TS definitions in v2
 									estimatedItemSize={120}
 									keyboardDismissMode="on-drag"
-									contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}
+									contentContainerStyle={{ paddingBottom: tabBarClearance }}
 									onEndReached={handleScrollEnd}
 									onEndReachedThreshold={0.5}
 									keyExtractor={(item: any, index: number) => item.id ? String(item.id) : index.toString()}
@@ -499,7 +499,7 @@ export default function Search() {
 				{!hasSearched && (
 					<View style={{ flex: 1 }}>
 						{(!showHistory || history.length === 0) ? (
-							<ScrollView contentContainerStyle={{ paddingBottom: 120 + insets.bottom + 16 }}>
+							<ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
 								<EmptyState mood="search" title="Search for products and vendors" subtitle="Type what you need in the search bar" />
 							</ScrollView>
 						) : null}

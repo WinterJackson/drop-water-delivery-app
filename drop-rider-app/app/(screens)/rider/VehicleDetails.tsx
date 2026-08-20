@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -60,6 +61,7 @@ const InputField = ({
 );
 
 export default function VehicleDetails() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -116,7 +118,7 @@ export default function VehicleDetails() {
                     </Text>
                 </View>
             </View>
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }}>
                 <InputField darkTheme={darkTheme} 
                     label="Plate Number / Registration" 
                     value={plateNo} 

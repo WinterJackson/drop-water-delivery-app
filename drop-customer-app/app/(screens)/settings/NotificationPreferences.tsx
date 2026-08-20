@@ -1,4 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, Switch } from "react-native";
@@ -43,6 +44,7 @@ const ToggleItem = ({ title, description, prefKey, darkTheme, preferences, handl
 );
 
 export default function NotificationPreferences() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -102,7 +104,7 @@ export default function NotificationPreferences() {
                 </Text>
             </View>
             </View>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120}}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: tabBarClearance }}>
                 <ToggleItem {...toggleItemProps} 
                     title="Order Updates" 
                     description="Get push notifications about your order status, out for delivery, and arrival." 

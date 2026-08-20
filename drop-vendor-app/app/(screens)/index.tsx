@@ -1,4 +1,5 @@
 import { UIThemeContext } from "@/context/ThemeContext";
+import { useTabBarClearance } from '@/constants/layout';
 import { useDashboard } from "@/hooks/queries/useDashboard";
 import { useVendorOrders } from "@/hooks/queries/useVendorOrders";
 import { useRouter } from "expo-router";
@@ -32,6 +33,7 @@ import { formatMoney } from "@/utils/money";
 import { ratingScore, UNRATED_LABEL } from "@/utils/rating";
 
 export default function Dashboard() {
+    const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -170,7 +172,7 @@ export default function Dashboard() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: tabBarClearance }}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} tintColor={darkTheme ? "white" : "black"} />}
         showsVerticalScrollIndicator={false}
       >

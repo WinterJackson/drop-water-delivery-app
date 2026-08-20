@@ -1,4 +1,5 @@
 import React, { useContext } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import {
     Dimensions,
     Image,
@@ -36,6 +37,7 @@ type Props = {};
 const { height: screenHeight } = Dimensions.get("window");
 
 const VendorDetails = (props: Props) => {
+    const tabBarClearance = useTabBarClearance();
 	// <-------------------<HOOKES>------------------->
 	const router = useRouter();
 	const auth = useAuth();
@@ -218,7 +220,7 @@ const VendorDetails = (props: Props) => {
 				<ScrollView
 					overScrollMode={"never"}
 					showsVerticalScrollIndicator={false}
-					contentContainerStyle={{ paddingBottom: 120 }}
+					contentContainerStyle={{ paddingBottom: tabBarClearance }}
 				>
 					{/* <-------------------------<HERO SECTION>------------------------> */}
 					<View className="w-full relative" style={{ height: screenHeight * 0.35 }}>

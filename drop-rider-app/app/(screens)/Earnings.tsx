@@ -1,4 +1,5 @@
 import RiderApiRoutes from "@/API/routes/RiderApiRoutes";
+import { useTabBarClearance } from '@/constants/layout';
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useContext } from "react";
@@ -41,6 +42,7 @@ const StatRow = ({ label, value, darkTheme }: { label: string; value: string | n
 );
 
 export default function Earnings() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
 
@@ -75,7 +77,7 @@ export default function Earnings() {
               </Text>
           </View>
       </View>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} className="px-5" refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}>
+      <ScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }} className="px-5" refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={onRefresh} />}>
 
         {isLoading ? (
           <RiderEarningsSkeleton />

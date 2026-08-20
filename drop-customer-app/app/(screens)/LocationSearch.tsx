@@ -1,10 +1,11 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext, useState } from "react";
 import { View, StatusBar, ScrollView, ActivityIndicator } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { PressableScale } from "@/components/ui/PressableScale";
@@ -84,10 +85,10 @@ const SavedLocationCard = ({ loc, single = false, darkTheme, isLocationActive, l
 };
 
 export default function LocationSearch() {
+    const tabBarClearance = useTabBarClearance();
 	const router = useRouter();
 	const { currentTheme } = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark";
-	const insets = useSafeAreaInsets();
 
 	const { data: User } = useUserDetails();
 	const { data: savedLocations = [], isLoading: isLoadingSaved } = useSavedLocations();
@@ -240,7 +241,7 @@ export default function LocationSearch() {
 			<ScrollView 
 				className="flex-1" 
 				showsVerticalScrollIndicator={false}
-				contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+				contentContainerStyle={{ paddingBottom: tabBarClearance }}
 				keyboardShouldPersistTaps="always"
 			>
 				<View className="px-4 gap-2">

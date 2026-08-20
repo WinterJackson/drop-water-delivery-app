@@ -1,4 +1,5 @@
 import { UIThemeContext } from "@/context/ThemeContext";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext, useState } from "react";
 import { useUser, useAuth } from "@clerk/clerk-expo";
 import * as Haptics from "expo-haptics";
@@ -66,6 +67,7 @@ const NavItem = ({ icon, label, description, path, onPress, danger, darkTheme, r
 );
 
 export default function Profile() {
+    const tabBarClearance = useTabBarClearance();
   const { currentTheme, setTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
   const { user } = useUser();
@@ -243,7 +245,7 @@ export default function Profile() {
         </View>
       </View>
 
-      <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView className="px-5" contentContainerStyle={{ paddingBottom: tabBarClearance }}>
         {/* Hub Header */}
         <View className="items-center pt-8 pb-8">
           <View className="relative">

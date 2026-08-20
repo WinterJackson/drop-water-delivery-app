@@ -1,4 +1,5 @@
 import { errorMessage } from "@/API/errors";
+import { useTabBarClearance } from '@/constants/layout';
 import React, { useContext } from 'react';
 import { View, ScrollView, StatusBar } from 'react-native';
 import { Text } from '@/components/ui/Text';
@@ -23,6 +24,7 @@ import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 import { formatMoney, sumMoney } from "@/utils/money";
 
 export default function RepeatOrderScreen() {
+    const tabBarClearance = useTabBarClearance();
   const { vendorId } = useLocalSearchParams<{ vendorId: string }>();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
@@ -136,7 +138,7 @@ export default function RepeatOrderScreen() {
           </View>
         ) : (
           <>
-            <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 120}}>
+            <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: tabBarClearance }}>
               {/* Vendor Info */}
               <GlassCard darkTheme={darkTheme} className="flex-row items-center gap-4 p-4">
                 <View className={`w-12 h-12 rounded-full items-center justify-center ${darkTheme ? "bg-primary-container/20" : "bg-blue-50"}`}>

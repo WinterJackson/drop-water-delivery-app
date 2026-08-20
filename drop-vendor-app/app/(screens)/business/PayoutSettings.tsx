@@ -1,4 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
+import { useTabBarClearance } from '@/constants/layout';
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { View, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, KeyboardTypeOptions } from "react-native";
@@ -86,6 +87,7 @@ const MethodTab = ({ method, title, icon, darkTheme, activeMethod, setActiveMeth
 };
 
 export default function PayoutSettings() {
+    const tabBarClearance = useTabBarClearance();
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const router = useRouter();
@@ -217,7 +219,7 @@ export default function PayoutSettings() {
                     </View>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
+                <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarClearance }}>
                     <View className={`p-4 rounded-2xl mb-6 flex-row items-start ${darkTheme ? "bg-slate-800" : "bg-blue-50"}`}>
                         <Ionicons name="information-circle" size={24} color={BRAND.primary} />
                         <View className="flex-1 ml-3">
