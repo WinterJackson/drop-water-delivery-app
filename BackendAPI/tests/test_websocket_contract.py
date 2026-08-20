@@ -300,3 +300,50 @@ def test_the_server_still_extends_the_session_from_the_refreshed_token():
         "_handle_auth_refresh must mutate the session dict in place — the socket "
         "loop holds a reference to it and reads `exp` from it every iteration."
     )
+
+
+@pytest.mark.parametrize("app", APPS)
+def test_only_one_socket_can_be_opened_at_a_time(app):
+    """Two sockets from one hook share one refresh timer, and one of them dies.
+
+    `connect()` is reachable from three places — the mount effect, the AppState
+    listener, and the NetInfo listener, which emits as soon as it is subscribed.
+    Its guard tested only `readyState === OPEN`; a socket still `CONNECTING` is
+    not `OPEN`, and the token is *awaited* before `wsRef.current` is assigned, so
+    two callers could both pass any readyState check and each build a socket.
+
+    They then share this hook's single `authTimerRef`, and `startAuthRefresh`
+    begins by calling `stopAuthRefresh()` — which cancels the **first** socket's
+    refresh. That socket never re-presents a token, so the server closes it at
+    its expiry with `1008 Token expired`, and its `onclose` schedules another
+    reconnect. Self-sustaining churn that looks exactly like the token-caching
+    bug above and is not it: observed as `1008 Token expired` on the wire while
+    the `auth_refreshed` acks were visibly advancing.
+
+    So the slot has to be claimed **synchronously**, before the first `await`.
+    """
+    source = _code_only(_sources(app)["hooks/useWebSocket.ts"])
+
+    body = re.search(r"const connect = useCallback\(async \(\) => \{(.*?)\n  \}", source, re.S)
+    assert body, f"{app}: could not find the connect() body"
+    connect = body.group(1)
+
+    guard = connect.split("await", 1)[0]
+    assert "CONNECTING" in guard, (
+        f"{app}: connect() does not refuse a socket that is still CONNECTING, so "
+        "a second caller can start a second socket before the first has opened."
+    )
+    assert re.search(r"connectingRef\.current\s*=\s*true", guard), (
+        f"{app}: connect() does not claim an in-flight flag before its first "
+        "`await`. A readyState check alone cannot close the window, because the "
+        "token is minted before `wsRef.current` is assigned."
+    )
+
+    # And it has to be released on every exit, or the hook can never reconnect.
+    releases = len(re.findall(r"connectingRef\.current\s*=\s*false", source))
+    assert releases >= 5, (
+        f"{app}: the in-flight flag is released in only {releases} places. It "
+        "must be cleared on open, on close, on error, on a failed mint and on "
+        "teardown — a path that leaves it set means this hook never reconnects "
+        "again."
+    )

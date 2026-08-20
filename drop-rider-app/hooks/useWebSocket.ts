@@ -92,6 +92,24 @@ const useWebSocket = (
   const { getToken } = useAuth();
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  /**
+   * Set synchronously, before the first `await`.
+   *
+   * `connect()` is called from three places — the mount effect, the AppState
+   * listener and the NetInfo listener, which fires an event as soon as it is
+   * subscribed. The guard below it only tested `OPEN`, and a socket that is
+   * still `CONNECTING` is not `OPEN`; worse, minting the token is awaited
+   * *before* `wsRef.current` is assigned, so two callers could both pass any
+   * readyState check and each build a socket.
+   *
+   * Both then shared this hook's single `authTimerRef`, and
+   * `startAuthRefresh(second)` begins by calling `stopAuthRefresh()` — which
+   * cancels the *first* socket's refresh. That socket then never re-presented a
+   * token, so the server closed it at its expiry with `1008 Token expired`,
+   * whose `onclose` scheduled another reconnect. A self-sustaining churn that
+   * looks exactly like the token bug it is not.
+   */
+  const connectingRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // FIX-WS-RERENDER-01: Stabilize references to prevent dependency-loop re-renders
@@ -188,11 +206,15 @@ const useWebSocket = (
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
     if (!entityIdRef.current) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    const state = wsRef.current?.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
+    if (connectingRef.current) return;
+    connectingRef.current = true;
 
     try {
         const token = await getTokenRef.current();
         if (!token || !mountedRef.current) {
+          connectingRef.current = false;
           if (__DEV__) console.log('WebSocket skipped — no auth token available.');
           return;
         }
@@ -201,6 +223,7 @@ const useWebSocket = (
         const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      connectingRef.current = false;
       if (!mountedRef.current) { ws.close(); return; }
       if (__DEV__) console.log('WebSocket connected');
       setConnected(true);
@@ -245,6 +268,7 @@ const useWebSocket = (
     };
 
     ws.onclose = (event) => {
+      connectingRef.current = false;
       stopAuthRefresh();
       stopLivenessWatch();
       if (__DEV__) console.log('WebSocket disconnected', event?.code, event?.reason);
@@ -269,12 +293,16 @@ const useWebSocket = (
     };
 
     ws.onerror = () => {
+      connectingRef.current = false;
       // Errors are expected during reconnection cycles — handled silently in production.
       // The onclose handler will trigger the reconnect logic.
     };
 
     wsRef.current = ws;
     } catch (e) {
+      // Releasing here too: without it a throw from `new WebSocket()` would
+      // leave the slot claimed and this hook could never reconnect at all.
+      connectingRef.current = false;
       if (__DEV__) console.error('WebSocket connection failed:', e);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -329,6 +357,7 @@ const useWebSocket = (
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      connectingRef.current = false;
       if (wsRef.current) {
         // Prevent onclose from triggering a reconnect when intentionally unmounting/cleaning up
         stopLivenessWatch();
