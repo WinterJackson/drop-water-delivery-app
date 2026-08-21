@@ -341,9 +341,22 @@ export default function Home() {
 								</View>
 							</PressableScale>
 
+							{/* The avatar opens the customer's own profile, which is what an
+								avatar means, and `Profile` carries a Settings row into
+								`SettingsMain` one tap further on.
+
+								It used to open `SettingsMain` directly, and the wallet pill
+								beside it was the *only* thing that pushed `/(screens)/Profile`
+								— so when the pill was repointed at the wallet it names, a
+								fully built screen with the favourites list, the edit-profile
+								sheet and the theme toggle became unreachable while still
+								declared in the Stack. A route nothing navigates to is dead
+								code that typechecks. */}
 							<PressableScale
 								activeOpacity={0.6}
-								onPress={() => router.push("/(screens)/SettingsMain")}
+								accessibilityRole="button"
+								accessibilityLabel="Your profile"
+								onPress={() => router.push("/(screens)/Profile")}
 							>
 								<View style={{ borderWidth: 2, borderColor: BRAND.primary, borderRadius: 999, padding: 2 }}>
 									<UserAvatar

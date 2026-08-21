@@ -50,7 +50,12 @@ MONEY_FIELDS = frozenset(
         "service_fee", "surge_fee", "delivery_markup", "payload_surcharge",
         "staircase_surcharge", "wallet_discount", "welcome_discount",
         "debt_settlement", "Subtotal", "subtotal", "price", "discount",
-        "price_at_order", "subtotal_at_order",
+        # `price_at_order` / `subtotal_at_order` were here for the hand-rolled
+        # order dict in `vendor_favorites_service`, which named the same two
+        # columns differently from every other order response and served the
+        # Repeat Order screen a shape its `Order` type did not describe. That
+        # endpoint returns `BaseOrder` now, so the names are gone from the
+        # backend — and this list is the specification, so they go from here.
         # Cart
         "welcome_discount_amount", "delivery_fee_quick_swap",
         "delivery_fee_keep_my_bottle",

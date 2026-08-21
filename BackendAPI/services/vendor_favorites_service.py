@@ -6,7 +6,7 @@ from models.vendor_favorite_model import VendorFavorite
 from models.user_model import User
 from models.vendor_model import Vendor
 from models.order_model import Order, OrderItem
-from utils.money import money_str
+from schemas.order_schema import BaseOrder
 
 
 async def _get_user_id_from_clerk(session: AsyncSession, clerk_id: str):
@@ -114,13 +114,34 @@ async def remove_vendor_favorite(session: AsyncSession, clerk_id: str, vendor_id
 
 
 async def get_last_order_to_vendor(session: AsyncSession, clerk_id: str, vendor_id: str):
-    """
-    Fetch the most recent completed/delivered order by this user to a specific vendor.
-    Returns order details + items with current product data (for price change detection).
+    """The most recent non-cancelled order by this customer to this vendor.
+
+    Returns the platform's own `BaseOrder`, not a shape invented here.
+
+    It used to build a dict by hand, and that dict disagreed with the app's one
+    `Order` declaration in the two ways that matter: the items came back under
+    **`items`** where every other order response calls them `order_item`, and
+    the money was `total_amount` and `delivery_fee` and nothing else. The hook
+    is typed `Order`, so TypeScript asserted the wrong shape and never looked
+    again — `lastOrder.order_item` was `undefined` on every render.
+
+    The visible result was a Repeat Order screen that had never worked: an
+    empty item list, a summary that read "Delivery Fee 120.00, Total Paid
+    365.00" with the 245 of water missing between them, and a button whose
+    handler opens `if (!lastOrder?.order_item?.length) return;` — so the one
+    control on the screen did nothing at all, silently, on every tap.
+
+    This is the second-table defect the guide already names one layer up, and
+    it is why the fix belongs here rather than in the screen: there is one
+    declaration of an order on the wire, and an endpoint that serves orders
+    serves that.
     """
     user_id = await _get_user_id_from_clerk(session, clerk_id)
 
-    # Get the most recent order to this vendor (any status except cancelled)
+    # `deliverer` is loaded because `BaseOrder` serialises it. Every
+    # relationship is `lazy="raise_on_sql"`, so an unloaded one is an error at
+    # render time rather than a lazy SELECT — and an order that has been
+    # delivered always has a rider to load.
     order_query = (
         select(Order)
         .where(
@@ -131,6 +152,7 @@ async def get_last_order_to_vendor(session: AsyncSession, clerk_id: str, vendor_
         .options(
             selectinload(Order.order_item).selectinload(OrderItem.product),
             selectinload(Order.vendor),
+            selectinload(Order.deliverer),
         )
         .order_by(desc(Order.created_at))
         .limit(1)
@@ -141,47 +163,10 @@ async def get_last_order_to_vendor(session: AsyncSession, clerk_id: str, vendor_
     if not order:
         return None
 
-    # This feeds a Reorder button. Offering it against a store that is shut
-    # produces a full basket and a refusal at the last step.
-    from services import vendor_availability
-
-    await vendor_availability.annotate(session, [order.vendor] if order.vendor else [])
-
-    return {
-        "id": str(order.id),
-        "order_status": order.order_status,
-        "total_amount": money_str(order.total_amount),
-        "delivery_fee": money_str(order.delivery_fee),
-        "created_at": order.created_at.isoformat() if order.created_at else None,
-        "vendor": {
-            "id": str(order.vendor.id),
-            "business_name": order.vendor.business_name,
-            "profile_pic": order.vendor.profile_pic,
-            "is_online": order.vendor.is_online,
-            "is_accepting_orders": order.vendor.is_accepting_orders,
-            "store_state": order.vendor.store_state,
-            "store_reason": order.vendor.store_reason,
-            "reopens_at": (
-                order.vendor.reopens_at.isoformat() if order.vendor.reopens_at else None
-            ),
-        } if order.vendor else None,
-        "items": [
-            {
-                "id": str(item.id),
-                "product_id": str(item.product_id),
-                "quantity": item.quantity,
-                "price_at_order": money_str(item.price),
-                "subtotal_at_order": money_str(item.Subtotal),
-                "product": {
-                    "id": str(item.product.id),
-                    "name": item.product.name,
-                    "price": money_str(item.product.price),
-                    "discount": money_str(item.product.discount),
-                    "image_url": item.product.image_url,
-                    "is_available": item.product.is_available if hasattr(item.product, 'is_available') else True,
-                    "stock_quantity": item.product.stock,
-                } if item.product else None,
-            }
-            for item in (order.order_item or [])
-        ],
-    }
+    # No `vendor_availability.annotate` here. It used to run so the hand-rolled
+    # dict could carry `store_state` and friends, but `OrderVendorSnippet` does
+    # not declare them and the screen asks `vendor_availability` itself through
+    # `useVendorDetails` — which is the one thing allowed to decide whether a
+    # store is trading. Annotating for a field nobody serialises is a query per
+    # request buying nothing.
+    return BaseOrder.model_validate(order)

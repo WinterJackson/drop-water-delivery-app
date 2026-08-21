@@ -74,7 +74,14 @@ async def vendor_last_order(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_customer),
 ):
-    """Get the most recent order to a specific vendor for quick reorder."""
+    """The most recent order to this vendor, for the Repeat Order screen.
+
+    `order` is the platform's `BaseOrder` — the same shape every other order
+    response uses, and the shape the customer app's one `Order` declaration
+    describes. It used to be a dict assembled in the service with the items
+    under `items` and only two of the money fields, which is why that screen
+    rendered an empty basket and a summary that did not add up.
+    """
     clerk_id = user["sub"]
     result = await get_last_order_to_vendor(session=db, clerk_id=clerk_id, vendor_id=vendor_id)
     if result is None:

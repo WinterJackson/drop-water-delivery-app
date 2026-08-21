@@ -71,3 +71,72 @@ def test_the_scanner_would_catch_the_shape_that_shipped():
     assert sorted(set_keys - rendered) == ["privacy"], (
         "the scanner no longer recognises a set-but-never-rendered sheet key"
     )
+
+
+# ---------------------------------------------------------------------------
+# A declared route is a route something navigates to.
+# ---------------------------------------------------------------------------
+
+
+def _screen_sources(app: str) -> dict[pathlib.Path, str]:
+    base = ROOT / app
+    out: dict[pathlib.Path, str] = {}
+    for sub in ("app", "components", "hooks"):
+        d = base / sub
+        if not d.is_dir():
+            continue
+        for p in d.rglob("*.ts*"):
+            if "__tests__" in p.parts:
+                continue
+            out[p] = p.read_text()
+    return out
+
+
+@pytest.mark.parametrize("app", APPS)
+def test_every_declared_screen_is_navigated_to(app):
+    """A `<Stack.Screen>` nothing pushes is dead code that typechecks.
+
+    `Profile.tsx` in the customer app became exactly that. It was reached from
+    one place — the wallet pill on the home header — and when that pill was
+    repointed at the wallet screen whose balance it shows, a fully built screen
+    carrying the favourites list, the edit-profile sheet and the theme toggle
+    stopped being reachable at all. Nothing failed: the route stayed declared,
+    the file stayed compiled, `tsc` stayed happy, and the only symptom was that
+    no sequence of taps could arrive there.
+
+    That is the same shape as the route table this repo already enforces from
+    the other end, and as `setBottomSheetData` above: a name one half of the
+    code writes and the other half never reads.
+
+    Dynamic segments are exempt — those are pushed with an interpolated id, and
+    the route contract covers them. `index` is exempt because it is the group's
+    own entry.
+    """
+    layout = ROOT / app / "app" / "(screens)" / "_layout.tsx"
+    if not layout.is_file():
+        pytest.skip(f"{app} has no (screens) layout")
+
+    declared = re.findall(r'<Stack\.Screen\s+name="([^"]+)"', layout.read_text())
+    assert declared, f"{app}: no screens declared — the pattern has stopped matching"
+
+    sources = _screen_sources(app)
+    orphans = []
+    for name in declared:
+        if "[" in name or name == "index":
+            continue
+        # A push may carry a query string (`/repeat-order?vendorId=…`) or a
+        # further segment, so the name may be followed by a quote, a slash or
+        # a question mark — but not by more word characters, or `Products`
+        # would be satisfied by `manageProducts`.
+        pattern = rf'["\'`][^"\'`]*/{re.escape(name)}(?=["\'`/?])'
+        if not any(
+            re.search(pattern, src)
+            for path, src in sources.items()
+            if f"(screens)/{name}" not in str(path).replace("\\", "/")
+        ):
+            orphans.append(name)
+
+    assert not orphans, (
+        f"{app}: these routes are declared and nothing navigates to them, so no "
+        f"sequence of taps reaches them: {orphans}"
+    )
