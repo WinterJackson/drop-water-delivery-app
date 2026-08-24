@@ -387,7 +387,7 @@ export default function MyMap() {
     return (
         <View className={`flex-1 ${darkTheme ? "bg-black" : "bg-[#f8fafc]"}`}>
             <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
-            <View style={{ height: Dimensions.get('window').height * 0.5 }}>
+            <View style={{ flex: 1 }}>
                 {MapView ? (
                     // @ts-ignore
                     <MapView
@@ -433,7 +433,7 @@ export default function MyMap() {
                             <PressableScale onPress={() => router.back()} className="mr-3 pointer-events-auto">
                                 <BackButtonMinimal />
                             </PressableScale>
-                            <View className={`flex-1 mr-3 flex-row items-center px-4 py-3 rounded-full border pointer-events-auto ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                            <View className={`flex-1 mr-3 flex-row items-center px-4 py-3 rounded-full border pointer-events-auto ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
                                 <Ionicons name="search" size={20} color={darkTheme ? "#89929b" : "#94a3b8"} className="mr-2" />
                                 <TextInput
                                     placeholder="Search order ID, rider, or customer"
@@ -446,10 +446,10 @@ export default function MyMap() {
                         </View>
                         <View className="flex-row items-center gap-2 pointer-events-auto">
                             <View className="flex-row gap-2">
-                                <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                                <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
                                     <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
                                 </PressableScale>
-                                <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                                <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
                                     <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
                                 </PressableScale>
                             </View>
@@ -458,7 +458,7 @@ export default function MyMap() {
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                     mapRef.current?.animateToRegion({ latitude: safeCenter.latitude, longitude: safeCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 800);
                                 }}
-                                className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`}
+                                className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`}
                                 style={shadowStyle}
                             >
                                 <Ionicons name="navigate" size={20} color={BRAND.primary} />
@@ -467,131 +467,128 @@ export default function MyMap() {
                     </View>
                 </SafeAreaView>
             </View>
-            <View className={`flex-1 rounded-t-[32px] pt-2 px-5 mt-[-24px] ${darkTheme ? "bg-black border-t border-outline-variant" : "bg-[#f8fafc] border-t border-gray-200"}`} style={shadowStyle}>
-                <View className="items-center mb-4">
-                    <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-slate-700" : "bg-slate-300"}`} />
-                </View>
-                <Text className={`text-xl font-sans-bold mb-6 ${darkTheme ? "text-white" : "text-slate-900"}`}>Delivery Zone Details</Text>
-                {loading ? (
-                    <VendorMapBottomSkeleton />
-                ) : (
-                    <>
-                        <View className={`rounded-[24px] p-5 mb-5 border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                            <View className="flex-row justify-between items-center">
-                                <View className="flex-1 mr-4">
-                                    <Text className={`text-[10px] font-sans-bold mb-1 tracking-widest uppercase ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Service Radius</Text>
-                                    <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-                                        How far Drop carries your orders. Set by Drop, the same for every store.
-                                    </Text>
-                                </View>
-                                <View className="items-center bg-transparent">
-                                    <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>
-                                        {currentDisplayRadius}<Text className="text-sm font-sans-bold">km</Text>
-                                    </Text>
-                                </View>
-                            </View>
-                        </View>
-                        <View className="flex-row gap-4 mb-5">
-                            <View className={`flex-1 rounded-[24px] p-5 border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
-                                    <Ionicons name="bicycle-outline" size={20} color={BRAND.primary} />
-                                </View>
-                                <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{activeOrders.length}</Text>
-                                <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Active Orders</Text>
-                            </View>
-                            <View className={`flex-1 rounded-[24px] p-5 border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-green-500/20" : "bg-green-500/10"}`}>
-                                    <Ionicons name="checkmark-circle-outline" size={20} color={TOAST.success} />
-                                </View>
-                                <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{deliveredOrders.length}</Text>
-                                <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Delivered</Text>
-                            </View>
-                        </View>
-                    </>
-                )}
-            </View>
 
-            {/* Bottom Sheet for Active Dispatches */}
+            {/* Single Combined Bottom Sheet */}
             <BottomSheet
                 ref={bottomSheetRef}
                 index={0}
-                snapPoints={['20%', '50%', '85%']}
-                backgroundStyle={{ backgroundColor: darkTheme ? '#1e293b' : '#ffffff' }}
-                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#cbd5e1' : '#cbd5e1', width: 40 }}
+                snapPoints={['35%', '60%', '90%']}
+                backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
             >
-                <BottomSheetView style={{ flex: 1 }}>
-                    <View className="px-6 pt-2 pb-4 flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800">
+                <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 }}>
+                    {/* Delivery Zone Details */}
+                    <Text className={`text-xl font-sans-bold mb-6 ${darkTheme ? "text-white" : "text-slate-900"}`}>Delivery Zone Details</Text>
+                    {loading ? (
+                        <VendorMapBottomSkeleton />
+                    ) : (
+                        <>
+                            <View className={`rounded-[24px] p-5 mb-5 border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                                <View className="flex-row justify-between items-center">
+                                    <View className="flex-1 mr-4">
+                                        <Text className={`text-[10px] font-sans-bold mb-1 tracking-widest uppercase ${darkTheme ? "text-[#bfc7d2]" : "text-slate-500"}`}>Service Radius</Text>
+                                        <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                                            How far Drop carries your orders. Set by Drop, the same for every store.
+                                        </Text>
+                                    </View>
+                                    <View className="items-center bg-transparent">
+                                        <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                                            {currentDisplayRadius}<Text className="text-sm font-sans-bold">km</Text>
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+                            <View className="flex-row gap-4 mb-8">
+                                <View className={`flex-1 rounded-[24px] p-5 border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                                    <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
+                                        <Ionicons name="bicycle-outline" size={20} color={BRAND.primary} />
+                                    </View>
+                                    <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{activeOrders.length}</Text>
+                                    <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Active Orders</Text>
+                                </View>
+                                <View className={`flex-1 rounded-[24px] p-5 border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                                    <View className={`w-10 h-10 rounded-full items-center justify-center mb-3 ${darkTheme ? "bg-green-500/20" : "bg-green-500/10"}`}>
+                                        <Ionicons name="checkmark-circle-outline" size={20} color={TOAST.success} />
+                                    </View>
+                                    <Text className={`text-3xl font-sans-extrabold ${darkTheme ? "text-white" : "text-slate-900"}`}>{deliveredOrders.length}</Text>
+                                    <Text className={`text-xs font-sans-bold mt-1 tracking-wide uppercase ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Delivered</Text>
+                                </View>
+                            </View>
+                        </>
+                    )}
+
+                    {/* Active Dispatches Header */}
+                    <View className="flex-row items-center justify-between mb-4">
                         <Text className={`text-lg font-sans-bold ${darkTheme ? "text-white" : "text-gray-900"}`}>
                             Active Dispatches
                         </Text>
-                        <View className={`px-2 py-1 rounded-full ${activeOrders.length > 0 ? "bg-amber-100" : "bg-gray-100"}`}>
-                            <Text className={`text-xs font-sans-semibold ${activeOrders.length > 0 ? "text-amber-700" : "text-gray-500"}`}>
+                        <View className={`px-2 py-1 rounded-full ${activeOrders.length > 0 ? (darkTheme ? "bg-amber-900/30" : "bg-amber-100") : (darkTheme ? "bg-[#201f1f]" : "bg-gray-100")}`}>
+                            <Text className={`text-xs font-sans-semibold ${activeOrders.length > 0 ? (darkTheme ? "text-amber-400" : "text-amber-700") : (darkTheme ? "text-gray-400" : "text-gray-500")}`}>
                                 {activeOrders.length} Riders
                             </Text>
                         </View>
                     </View>
 
-                    <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40 }}>
-                        {activeOrders.length === 0 ? (
-                            <View className="items-center justify-center py-10">
-                                <Ionicons name="bicycle-outline" size={48} color={darkTheme ? "#475569" : "#cbd5e1"} />
-                                <Text className={`mt-4 text-center ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                                    No active riders currently on the road.
-                                </Text>
-                            </View>
-                        ) : (
-                            activeOrders.map((order, idx) => {
-                                // Live socket only — see the note on the map
-                                // overlay above; `deliverer.current_lat/lng`
-                                // are not on the wire.
-                                const riderId = order.deliverer?.id;
-                                const live = riderId ? riderLocations[riderId] : undefined;
-                                const rLat = live?.lat ?? null;
-                                const rLng = live?.lng ?? null;
+                    {/* Active Dispatches List */}
+                    {activeOrders.length === 0 ? (
+                        <View className="items-center justify-center py-10">
+                            <Ionicons name="bicycle-outline" size={48} color={darkTheme ? "#475569" : "#cbd5e1"} />
+                            <Text className={`mt-4 text-center ${darkTheme ? "text-[#89929b]" : "text-gray-500"}`}>
+                                No active riders currently on the road.
+                            </Text>
+                        </View>
+                    ) : (
+                        activeOrders.map((order, idx) => {
+                            // Live socket only — see the note on the map
+                            // overlay above; `deliverer.current_lat/lng`
+                            // are not on the wire.
+                            const riderId = order.deliverer?.id;
+                            const live = riderId ? riderLocations[riderId] : undefined;
+                            const rLat = live?.lat ?? null;
+                            const rLng = live?.lng ?? null;
 
-                                const hasLocation = !!(rLat && rLng);
+                            const hasLocation = !!(rLat && rLng);
 
-                                return (
-                                    <PressableScale 
-                                        key={`dispatch-${order.id || idx}`}
-                                        onPress={() => {
-                                            if (hasLocation) handleSnapToRider(rLat, rLng);
-                                            else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                                        }}
-                                        disabled={!hasLocation}
-                                    >
-                                        <View className={`flex-row items-center p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-gray-800 border-gray-700" : "bg-white border-gray-100"} shadow-sm`}>
-                                            <View className={`w-12 h-12 rounded-full items-center justify-center ${darkTheme ? "bg-gray-700" : "bg-blue-50"}`}>
-                                                <Ionicons name="person" size={20} color={BRAND.primary} />
-                                                {connected && hasLocation && (
-                                                    <View className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
-                                                )}
-                                            </View>
-                                            <View className="flex-1 ml-4">
-                                                <Text className={`font-sans-semibold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
-                                                    {order.deliverer?.full_name || 'Waiting for Rider'}
-                                                </Text>
-                                                <Text className={`text-sm mt-1 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
-                                                    Order #{order.id?.substring(0, 8)}
-                                                </Text>
-                                            </View>
-                                            <View className="items-end">
-                                                <View className={`px-2 py-1 rounded-md bg-[${STATUS_COLORS[order.order_status ?? ''] || '#ccc'}20]`}>
-                                                    <Text style={{ color: STATUS_COLORS[order.order_status ?? ''] || '#ccc', fontSize: 12, fontFamily: 'Karla_600SemiBold' }}>
-                                                        {(order.order_status ?? 'unknown').toUpperCase()}
-                                                    </Text>
-                                                </View>
-                                                {!hasLocation && order.deliverer && (
-                                                    <Text className="text-[10px] text-gray-400 mt-1">No GPS Signal</Text>
-                                                )}
-                                            </View>
+                            return (
+                                <PressableScale 
+                                    key={`dispatch-${order.id || idx}`}
+                                    onPress={() => {
+                                        if (hasLocation) handleSnapToRider(rLat, rLng);
+                                        else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                                    }}
+                                    disabled={!hasLocation}
+                                >
+                                    <View className={`flex-row items-center p-4 mb-3 rounded-2xl border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"} shadow-sm`}>
+                                        <View className={`w-12 h-12 rounded-full items-center justify-center ${darkTheme ? "bg-[#201f1f]" : "bg-blue-50"}`}>
+                                            <Ionicons name="person" size={20} color={BRAND.primary} />
+                                            {connected && hasLocation && (
+                                                <View className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
+                                            )}
                                         </View>
-                                    </PressableScale>
-                                );
-                            })
-                        )}
-                    </BottomSheetScrollView>
-                </BottomSheetView>
+                                        <View className="flex-1 ml-4">
+                                            <Text className={`font-sans-semibold text-base ${darkTheme ? "text-white" : "text-gray-900"}`} numberOfLines={1}>
+                                                {order.deliverer?.full_name || 'Waiting for Rider'}
+                                            </Text>
+                                            <Text className={`text-sm mt-1 ${darkTheme ? "text-[#89929b]" : "text-gray-500"}`}>
+                                                Order #{order.id?.substring(0, 8)}
+                                            </Text>
+                                        </View>
+                                        <View className="items-end">
+                                            <View className={`px-2 py-1 rounded-md bg-[${STATUS_COLORS[order.order_status ?? ''] || '#ccc'}20]`}>
+                                                <Text style={{ color: STATUS_COLORS[order.order_status ?? ''] || '#ccc', fontSize: 12, fontFamily: 'Karla_600SemiBold' }}>
+                                                    {(order.order_status ?? 'unknown').toUpperCase()}
+                                                </Text>
+                                            </View>
+                                            {!hasLocation && order.deliverer && (
+                                                <Text className="text-[10px] text-gray-400 mt-1">No GPS Signal</Text>
+                                            )}
+                                        </View>
+                                    </View>
+                                </PressableScale>
+                            );
+                        })
+                    )}
+                </BottomSheetScrollView>
             </BottomSheet>
         </View>
     );

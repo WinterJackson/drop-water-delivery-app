@@ -19,6 +19,7 @@ import {
     ScrollView,
     TouchableOpacity,
     StatusBar,
+    StyleSheet,
 } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -725,7 +726,7 @@ export default function ActiveDelivery() {
       </SafeAreaView>
 
       {/* ── Live Map & Zoom Controls ── */}
-      <View className={`flex-1 ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
+      <View style={StyleSheet.absoluteFillObject}>
         {/* Search Bar Overlay */}
         <View className="absolute top-4 left-4 right-4 z-10">
             <View className={`flex-row items-center px-4 py-3 rounded-full border ${darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-100"}`} style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }}>

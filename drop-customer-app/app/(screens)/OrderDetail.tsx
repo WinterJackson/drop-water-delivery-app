@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTabBarClearance } from '@/constants/layout';
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
 import { OrderDetailSkeleton } from "@/components/skeletons/ContextualSkeletons";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -21,6 +22,7 @@ import {
     Dimensions,
     Modal,
     Linking,
+    StyleSheet,
 } from "react-native";
 import { Text } from '@/components/ui/Text';
 import { useRiderTracking } from "@/hooks/queries/useRiderTracking";
@@ -207,6 +209,7 @@ export default function OrderDetail() {
 
     const mapRef = useRef<MapViewType | null>(null);
     const markerRef = useRef<React.ComponentRef<typeof MarkerAnimatedType> | null>(null);
+    const bottomSheetRef = useRef<BottomSheet>(null);
 
     const { height } = Dimensions.get('window');
     const StatusBarHeight = StatusBar.currentHeight || 0;
@@ -269,7 +272,7 @@ export default function OrderDetail() {
             <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
 
             {/* Map Skeleton Block (Top 55%) */}
-            <View className="absolute top-0 left-0 right-0" style={{ height: '55%' }}>
+            <View style={StyleSheet.absoluteFillObject}>
                 <View className={`flex-1 ${darkTheme ? "bg-gray-900" : "bg-gray-300"}`} />
                 <View className="absolute top-0 left-0 right-0 z-10 px-4" style={{ paddingTop: (StatusBar.currentHeight || 40) + 10 }}>
                     <View className="flex-row items-center gap-3">
@@ -281,12 +284,17 @@ export default function OrderDetail() {
             </View>
 
             {/* Details Skeleton Block (Bottom 50%) */}
-            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden', paddingBottom: tabBarClearance }}>
-                <View className="w-full items-center pt-3 pb-2">
-                    <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-gray-800" : "bg-gray-300"}`} />
-                </View>
-                <OrderDetailSkeleton />
-            </View>
+            <BottomSheet
+                ref={bottomSheetRef}
+                index={1}
+                snapPoints={['35%', '50%', '90%']}
+                backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+            >
+                <BottomSheetScrollView contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: tabBarClearance }} showsVerticalScrollIndicator={false}>
+                    <OrderDetailSkeleton />
+                </BottomSheetScrollView>
+            </BottomSheet>
         </View>
         );
     }
@@ -304,7 +312,7 @@ export default function OrderDetail() {
             <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
 
             {/* Top Half: Map Area */}
-            <View className="absolute top-0 left-0 right-0" style={{ height: '55%' }}>
+            <View style={StyleSheet.absoluteFillObject}>
                 {MapView && (
                     <MapView
                         ref={mapRef}
@@ -470,14 +478,15 @@ export default function OrderDetail() {
             </View>
 
             {/* Bottom Half: Scrollable Details */}
-            {/* tab-bar-clearance: the panel is shortened rather than its scroller
-                padded — see the note in `constants/layout.ts`. */}
-            <View className="absolute bottom-0 left-0 right-0" style={{ height: '50%', backgroundColor: darkTheme ? '#000' : '#f9fafb', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, paddingBottom: tabBarClearance }}>
-                <View className="w-full items-center pt-3 pb-2 bg-transparent">
-                    <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-[#333]" : "bg-[#cbd5e1]"}`} />
-                </View>
-                <ScrollView
-                    contentContainerStyle={{ padding: 16, paddingTop: 0, paddingBottom: tabBarClearance }}
+            <BottomSheet
+                ref={bottomSheetRef}
+                index={1}
+                snapPoints={['35%', '50%', '90%']}
+                backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+            >
+                <BottomSheetScrollView
+                    contentContainerStyle={{ padding: 16, paddingTop: 10, paddingBottom: tabBarClearance }}
                     showsVerticalScrollIndicator={false}
                 >
                  {/* Status Timeline Tracking Bar */}
@@ -952,8 +961,8 @@ export default function OrderDetail() {
                         Get help with this order
                     </Text>
                 </PressableScale>
-                </ScrollView>
-            </View>
+                </BottomSheetScrollView>
+            </BottomSheet>
 
             {/* Address Mismatch Dispute Modal */}
             <Modal

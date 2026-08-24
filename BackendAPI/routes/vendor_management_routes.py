@@ -33,7 +33,7 @@ from uuid import UUID
 from typing import Optional, List, Literal
 from utils.serializers import safe_serialize
 from utils.money import money_str
-from schemas.order_schema import PaginatedOrders
+from schemas.order_schema import PaginatedOrders, OrderWithDetails
 
 router = APIRouter()
 
@@ -550,7 +550,7 @@ async def vendor_get_orders(
     }
 
 
-@router.get("/orders/{order_id}")
+@router.get("/orders/{order_id}", response_model=OrderWithDetails)
 async def vendor_get_order(
     order_id: UUID,
     db: AsyncSession = Depends(get_db),

@@ -579,11 +579,11 @@ async def get_deliverer_earnings(session: AsyncSession, clerk_id: str):
         days=config.get_int("platinum_window_days")
     )
 
-    from models.vendor_model import Vendor, VendorType
+    from models.vendor_model import Vendor, VendorBusinessType
     paid_rider_filter = and_(
         Order.deliverer_id == deliverer.id,
         Order.order_status == "delivered",
-        or_(Vendor.vendor_type.is_(None), Vendor.vendor_type != VendorType.wholesale_b2b),
+        or_(Vendor.vendor_type.is_(None), Vendor.vendor_type != VendorBusinessType.wholesale_b2b),
     )
 
     total_deliveries_q = select(func.count(Order.id)).where(

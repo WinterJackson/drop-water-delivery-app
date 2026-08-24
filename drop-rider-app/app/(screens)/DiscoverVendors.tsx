@@ -2,7 +2,7 @@ import { ApiError, errorMessage } from "@/API/errors";
 import { useTabBarClearance } from '@/constants/layout';
 import { useApiRequest } from "@/API/useApiClient";
 import React, { useContext, useEffect, useState, useCallback, useRef } from "react";
-import { View, StatusBar, FlatList, RefreshControl, Image, Switch, Platform, TouchableOpacity } from "react-native";
+import { View, StatusBar, FlatList, RefreshControl, Image, Switch, Platform, TouchableOpacity, StyleSheet } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { UIThemeContext } from "@/context/ThemeContext";
@@ -15,6 +15,7 @@ import { Toast } from "@/lib/toast";
 import { useRiderStore } from "@/stores/useRiderStore";
 import { useRiderProfile } from "@/hooks/queries/useRiderData";
 import { BRAND } from "@/constants/brandColors";
+import BottomSheet, { BottomSheetFlatList } from "@gorhom/bottom-sheet";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { RiderDiscoverVendorCardSkeleton } from "@/components/skeletons/ContextualSkeletons";
@@ -87,8 +88,7 @@ export default function DiscoverVendors() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingLoc, setLoadingLoc] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isMapView, setIsMapView] = useState(false);
-  const [userLocation, setUserLocation] = useState<LatLng | null>(null);
+    const [userLocation, setUserLocation] = useState<LatLng | null>(null);
   const mapRef = useRef<MapViewType | null>(null);
   
   const handleZoom = async (zoomIn: boolean) => {
@@ -318,12 +318,7 @@ export default function DiscoverVendors() {
           <View className="flex-1">
             <Text className={`text-sm mt-1 mb-4 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Find and apply to up to 10 nearby water vendors.</Text>
           </View>
-          <PressableScale accessibilityLabel={isMapView ? "Show these vendors as a list" : "Show these vendors on a map"}
-            onPress={() => setIsMapView(!isMapView)}
-            className={`w-12 h-12 rounded-full items-center justify-center border ${darkTheme ? "bg-white/10 border-white/20" : "bg-white border-gray-200"}`}
-          >
-            <Ionicons name={isMapView ? "list-outline" : "map-outline"} size={24} color={BRAND.primary} />
-          </PressableScale>
+
         </View>
         
         {/* Search Bar */}
@@ -341,26 +336,14 @@ export default function DiscoverVendors() {
 
       {/* Content */}
       <View style={{ flex: 1 }}>
-        {isMapView ? (
-          <View className="flex-1">
+          <View style={StyleSheet.absoluteFillObject}>
             {MapView && (
               <>
               <MapView
                 ref={mapRef}
                 style={{ flex: 1 }}
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // 🟢 FREE OPEN SOURCE MVP MODE (CartoDB / OSM tiles)
-                //    Uses provider={undefined} + UrlTile overlay
-                // provider={undefined}
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // 🔴 PRODUCTION GOOGLE MAPS MODE
-                //    Swap the line above for this one:
-                provider={PROVIDER_GOOGLE}
-                // `googleMapId`, not `mapId` — react-native-maps names it the former, so
-                // the prop every map screen in all three apps passed was dropped and cloud
-                // styling has never once been applied. A misspelt prop is silent here.
+                provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
                 googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                 zoomControlEnabled={false}
                 showsUserLocation={true}
                 showsMyLocationButton={false}
@@ -378,10 +361,6 @@ export default function DiscoverVendors() {
                   longitudeDelta: 0.05,
                 }}
               >
-                {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-                {/* 🟢 OSM TILE OVERLAY (Remove this block when using Google Maps) */}
-                {/* {UrlTile && <UrlTile urlTemplate={darkTheme ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png" : "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"} maximumZ={20} />} */}
-                {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
                 {vendors.map((vendor) => (
                   <Marker
                     key={vendor.id}
@@ -392,25 +371,25 @@ export default function DiscoverVendors() {
                   />
                 ))}
               </MapView>
-              <View className="absolute top-4 right-4 pointer-events-auto flex-row gap-2">
+              <View className="absolute top-4 right-4 pointer-events-auto flex-row gap-2" style={{ zIndex: 10 }}>
                 <PressableScale
                   onPress={snapToCurrentLocation}
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
-                  style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+                  style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
                 >
                   <View className={`w-4 h-4 rounded-full border-2 ${darkTheme ? "border-white" : "border-gray-800"}`} />
                 </PressableScale>
                 <PressableScale
                   onPress={() => handleZoom(true)}
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
-                  style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+                  style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
                 >
                   <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>+</Text>
                 </PressableScale>
                 <PressableScale
                   onPress={() => handleZoom(false)}
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
-                  style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}
+                  style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
                 >
                   <Text className={`text-xl font-sans-bold ${darkTheme ? "text-on-surface" : "text-gray-800"}`}>−</Text>
                 </PressableScale>
@@ -418,8 +397,13 @@ export default function DiscoverVendors() {
               </>
             )}
           </View>
-        ) : (
-          <FlashList
+          <BottomSheet
+            index={1}
+            snapPoints={['35%', '50%', '90%']}
+            backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+            handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+          >
+          <BottomSheetFlatList
             data={vendors}
             keyExtractor={(item: DiscoveredVendor) => item.id}
             renderItem={renderVendorCard}
@@ -440,7 +424,7 @@ export default function DiscoverVendors() {
               </View>
             }
           />
-        )}
+          </BottomSheet>
       </View>
     </SafeAreaView>
   );

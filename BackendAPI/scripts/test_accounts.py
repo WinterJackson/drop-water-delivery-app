@@ -29,7 +29,7 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta as _timedelta, timezone
 from decimal import Decimal
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,6 +53,11 @@ from models.vendor_staff_model import (  # noqa: E402
     DEFAULT_PERMISSIONS,
     VendorStaff,
 )
+from models.cart_model import Cart, CartItem  # noqa: E402
+from models.notification_model import Notification  # noqa: E402
+from models.saved_location_model import SavedLocation  # noqa: E402
+from models.vendor_favorite_model import VendorFavorite  # noqa: E402
+from models.wallet_transaction_model import WalletTransaction  # noqa: E402
 
 CLERK_API = "https://api.clerk.com/v1"
 TIMEOUT = 30.0
@@ -179,18 +184,23 @@ async def _upsert_customer(session, clerk_id: str, email: str, name: str) -> str
     row.lat, row.lng = geo["lat"], geo["lng"]
     row.location = geo["location"]
     row.h3_index_res8 = geo["h3_index_res8"]
-    # Ground floor and no lift: no staircase surcharge, so the first quote a
-    # tester sees is the simple one. Raise `floor_level` to exercise it.
-    row.floor_level = 0
+    # Third floor, no lift: exercises the staircase surcharge on every quote.
+    row.floor_level = 3
     row.has_elevator = False
     row.wallet_balance = Decimal("500.00")
     row.device_id = f"clerk-test-device-{clerk_id[-8:]}"
-    # Unused, so the first order shows the welcome offer and a bottle deposit —
-    # the branch with the most moving parts.
-    row.has_used_welcome_offer = False
+    # Returning customer: the welcome offer has been used. This means the
+    # tester sees the normal pricing path, not the first-order discount.
+    row.has_used_welcome_offer = True
     row.debt_balance = Decimal("0")
-    row.bottle_deposit_balance = Decimal("0")
-    row.bottles_held = 0
+    # 2 × 20 L bottles at KSH 300 each = KSH 600 deposit on file.
+    # Populates the Bottle Wallet's "Bottles you're holding" and
+    # "Refundable deposit" cards.
+    row.bottle_deposit_balance = Decimal("600.00")
+    row.bottles_held = 2
+    row.bottle_purchased_at = datetime.now(timezone.utc) - _timedelta(days=45)
+    row.bottle_refill_count = 8  # shows "4.0 kg Plastic Waste Saved"
+    row.last_order_date = datetime.now(timezone.utc) - _timedelta(days=3)
     await session.flush()
     return "customer"
 
@@ -225,6 +235,14 @@ async def _upsert_rider(session, clerk_id: str, email: str, name: str) -> str:
     # Enough float to accept a cash order: the check is
     # `vendor_net + platform_total`, roughly KSH 420 on a typical retail order.
     row.wallet_balance = Decimal("5000.00")
+    # Gamification — a rider who has been working the platform.
+    # `rating` must equal `rating_sum / rating_count` or review_service will
+    # produce a discontinuity on the next submitted review.
+    row.rating = 4.85
+    row.rating_count = 120
+    row.rating_sum = 582.0  # 120 × 4.85
+    row.acceptance_rate = 97.5
+    row.is_platinum = True
     row.shift_start, row.shift_end = time(7, 0), time(19, 0)
     await session.flush()
     return "rider"
@@ -270,9 +288,27 @@ async def _upsert_vendor(
     row.deposit_fee = Decimal("300.00")
     row.wallet_balance = Decimal("10000.00")
     row.preferred_payment_method = ["cash", "mpesa"]
+    # Social proof — stores with no reviews look abandoned in the directory.
+    # `rating` = `rating_sum / rating_count`, kept consistent so review_service
+    # does not produce a jump on the first real review.
     if wholesale:
+        row.rating = 4.6
+        row.rating_count = 85
+        row.rating_sum = 391.0  # 85 × 4.6
+        row.total_sales = 34
+        row.sales_amount = Decimal("45600.00")
+        row.full_bottle_inventory = 400
+        row.empty_bottle_inventory = 120
         row.wholesale_base_delivery_fee = Decimal("150.00")
         row.wholesale_per_km_fee = Decimal("90.00")
+    else:
+        row.rating = 4.8
+        row.rating_count = 340
+        row.rating_sum = 1632.0  # 340 × 4.8
+        row.total_sales = 127
+        row.sales_amount = Decimal("21590.00")
+        row.full_bottle_inventory = 150
+        row.empty_bottle_inventory = 45
     await session.flush()
 
     # A store with no catalogue cannot be ordered from, which makes it useless
@@ -391,6 +427,236 @@ async def _register_rider_with_stores(session) -> int:
     return created
 
 
+async def _enrich_demo_data(session) -> int:
+    """Seed the ancillary rows that make every test account feel lived-in.
+
+    Called after all identities and registrations exist. Everything here is
+    idempotent — re-provisioning overwrites or skips, never duplicates.
+    """
+    enriched = 0
+
+    # ── Resolve the test identities ───────────────────────────────────
+    customer = (
+        await session.execute(select(User).where(User.email == address("customer")))
+    ).scalars().first()
+    rider = (
+        await session.execute(select(Deliverer).where(Deliverer.email == address("rider")))
+    ).scalars().first()
+    retail_store = (
+        await session.execute(select(Vendor).where(Vendor.email == address("vendor-retail")))
+    ).scalars().first()
+
+    if not all([customer, rider, retail_store]):
+        print("  ⚠ Enrichment skipped — core identities not found.")
+        return 0
+
+    # ── Rider: set employer_vendor_id (unlocks Trip Radar + Active Delivery) ──
+    rider.employer_vendor_id = retail_store.id
+    enriched += 1
+
+    # ── Customer: saved locations ─────────────────────────────────────
+    existing_locs = (
+        await session.execute(
+            select(SavedLocation).where(SavedLocation.user_id == customer.id)
+        )
+    ).scalars().all()
+    if not existing_locs:
+        session.add(SavedLocation(
+            user_id=customer.id, label="Home",
+            address="House 12, Ngong Town", lat=NGONG[0], lng=NGONG[1],
+            is_default=True, use_count=14,
+        ))
+        session.add(SavedLocation(
+            user_id=customer.id, label="Office",
+            address="Matasia, Magadi Road", lat=MATASIA[0], lng=MATASIA[1],
+            is_default=False, use_count=3,
+        ))
+        enriched += 1
+
+    # ── Customer: favourite the retail store ───────────────────────────
+    existing_fav = (
+        await session.execute(
+            select(VendorFavorite).where(
+                VendorFavorite.user_id == customer.id,
+                VendorFavorite.vendor_id == retail_store.id,
+            )
+        )
+    ).scalars().first()
+    if not existing_fav:
+        session.add(VendorFavorite(user_id=customer.id, vendor_id=retail_store.id))
+        enriched += 1
+
+    # ── Customer: pre-filled cart ──────────────────────────────────────
+    existing_cart = (
+        await session.execute(select(Cart).where(Cart.customer_id == customer.id))
+    ).scalars().first()
+    if not existing_cart:
+        # Pick the first retail product (20L Purified Refill, KSH 180)
+        product = (
+            await session.execute(
+                select(Product).where(Product.vendor_id == retail_store.id).limit(1)
+            )
+        ).scalars().first()
+        if product:
+            unit_price = Decimal(str(product.price)) - Decimal(str(product.discount or 0))
+            qty = 2
+            cart = Cart(
+                customer_id=customer.id,
+                items_count=qty,
+                total_amount=unit_price * qty,
+            )
+            session.add(cart)
+            await session.flush()
+            session.add(CartItem(
+                cart_id=cart.id,
+                vendor_id=retail_store.id,
+                product_id=product.id,
+                quantity=qty,
+                price=unit_price,
+                Subtotal=unit_price * qty,
+            ))
+            enriched += 1
+
+    # ── Customer: wallet transaction history ───────────────────────────
+    existing_tx = (
+        await session.execute(
+            select(WalletTransaction).where(
+                WalletTransaction.wallet_owner_id == customer.id
+            ).limit(1)
+        )
+    ).scalars().first()
+    if not existing_tx:
+        now = datetime.now(timezone.utc)
+        for tx_data in [
+            {
+                "user_id": customer.clerk_id, "user_type": "customer",
+                "wallet_owner_id": customer.id,
+                "transaction_type": "top_up", "amount": Decimal("500.00"),
+                "status": "completed", "description": "M-Pesa top-up",
+                "mpesa_receipt_number": "TES1234567",
+                "created_at": now - _timedelta(days=10),
+            },
+            {
+                "user_id": customer.clerk_id, "user_type": "customer",
+                "wallet_owner_id": customer.id,
+                "transaction_type": "order_payment", "amount": Decimal("-442.00"),
+                "status": "completed", "description": "Order payment — 2× 20L Purified Refill",
+                "created_at": now - _timedelta(days=7),
+            },
+            {
+                "user_id": customer.clerk_id, "user_type": "customer",
+                "wallet_owner_id": customer.id,
+                "transaction_type": "refund", "amount": Decimal("50.00"),
+                "status": "completed", "description": "Refund — cancelled order",
+                "created_at": now - _timedelta(days=4),
+            },
+        ]:
+            session.add(WalletTransaction(**tx_data))
+        enriched += 1
+
+    # ── Customer: notifications ───────────────────────────────────────
+    existing_notif = (
+        await session.execute(
+            select(Notification).where(
+                Notification.user_id == customer.id,
+                Notification.user_type == "customer",
+            ).limit(1)
+        )
+    ).scalars().first()
+    if not existing_notif:
+        now = datetime.now(timezone.utc)
+        session.add(Notification(
+            user_id=customer.id, user_type="customer",
+            title="Your order was delivered! 🎉",
+            message="Your 2× 20L Purified Refill from Ngong Springs has arrived.",
+            message_type="delivery_complete", is_read=True,
+            created_at=now - _timedelta(days=3),
+        ))
+        session.add(Notification(
+            user_id=customer.id, user_type="customer",
+            title="Welcome back, Amina!",
+            message="Your bottles are due for a refill. Tap to reorder.",
+            message_type="promotion", is_read=False,
+            created_at=now - _timedelta(hours=6),
+        ))
+        enriched += 1
+
+    # ── Rider: wallet transactions ────────────────────────────────────
+    existing_rider_tx = (
+        await session.execute(
+            select(WalletTransaction).where(
+                WalletTransaction.wallet_owner_id == rider.id
+            ).limit(1)
+        )
+    ).scalars().first()
+    if not existing_rider_tx:
+        now = datetime.now(timezone.utc)
+        session.add(WalletTransaction(
+            user_id=rider.clerk_id, user_type="rider",
+            wallet_owner_id=rider.id,
+            transaction_type="top_up", amount=Decimal("5000.00"),
+            status="completed", description="M-Pesa float top-up",
+            mpesa_receipt_number="TES7654321",
+            created_at=now - _timedelta(days=14),
+        ))
+        enriched += 1
+
+    # ── Rider: notifications ──────────────────────────────────────────
+    existing_rider_notif = (
+        await session.execute(
+            select(Notification).where(
+                Notification.user_id == rider.id,
+                Notification.user_type == "rider",
+            ).limit(1)
+        )
+    ).scalars().first()
+    if not existing_rider_notif:
+        session.add(Notification(
+            user_id=rider.id, user_type="rider",
+            title="KYC Approved ✅",
+            message="Your documents have been verified. You can now accept deliveries.",
+            message_type="kyc_update", is_read=True,
+            created_at=datetime.now(timezone.utc) - _timedelta(days=30),
+        ))
+        session.add(Notification(
+            user_id=rider.id, user_type="rider",
+            title="Platinum Tier Achieved! 🏆",
+            message="You've completed 20+ deliveries this week. Commission reduced to 7%.",
+            message_type="tier_change", is_read=False,
+            created_at=datetime.now(timezone.utc) - _timedelta(hours=12),
+        ))
+        enriched += 1
+
+    # ── Vendor: notifications ─────────────────────────────────────────
+    existing_vendor_notif = (
+        await session.execute(
+            select(Notification).where(
+                Notification.user_id == retail_store.id,
+                Notification.user_type == "vendor",
+            ).limit(1)
+        )
+    ).scalars().first()
+    if not existing_vendor_notif:
+        session.add(Notification(
+            user_id=retail_store.id, user_type="vendor",
+            title="New Rider Registered",
+            message="Brian Otieno has been approved to deliver for your store.",
+            message_type="rider_approved", is_read=True,
+            created_at=datetime.now(timezone.utc) - _timedelta(days=7),
+        ))
+        session.add(Notification(
+            user_id=retail_store.id, user_type="vendor",
+            title="Low Stock Alert ⚠️",
+            message="5L Household Jerrycan is running low (60 left).",
+            message_type="low_stock", is_read=False,
+            created_at=datetime.now(timezone.utc) - _timedelta(hours=2),
+        ))
+        enriched += 1
+
+    await session.flush()
+    return enriched
+
+
 # ── Commands ──────────────────────────────────────────────────────────────
 
 
@@ -419,6 +685,7 @@ async def cmd_provision() -> int:
             bound.append((email, what, clerk_id))
 
         registrations = await _register_rider_with_stores(session)
+        enrichments = await _enrich_demo_data(session)
         await session.commit()
 
     print(f"Provisioned {len(bound)} test identities.\n")
@@ -428,6 +695,8 @@ async def cmd_provision() -> int:
 
     if registrations:
         print(f"\n  + {registrations} rider–vendor registration(s) approved.")
+    if enrichments:
+        print(f"  + {enrichments} demo-data enrichment(s) applied.")
 
     print(f"\nPassword for all of them: {PASSWORD}")
     print("Verification code: 424242 (development instance only).")

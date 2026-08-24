@@ -16,6 +16,7 @@ import {
 import { Text, TextInput } from '@/components/ui/Text';
 import { Toast } from "@/lib/toast";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
+import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 
 /**
  * `react-native-maps` is `require`d rather than imported: it has no web build,
@@ -127,11 +128,7 @@ import { usePathname, useRouter, useLocalSearchParams } from "expo-router";
 import { Image } from "react-native";
 import { useRef } from "react";
 import { PressableScale } from "@/components/ui/PressableScale";
-import {
-    Directions,
-    Gesture,
-    GestureDetector,
-} from "react-native-gesture-handler";
+
 import { Ionicons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
@@ -751,15 +748,9 @@ const initialRegion: import("@/types/models").MapRegion = {
 	const orderActive = ShowFloatingOrder;
 	const fullscreen = vendorActive || orderActive;
 
-	const animatedMapStyle = { height: fullscreen ? finalHeight : finalHeight * 0.55 };
+	
 
-	const animatedView = {
-		opacity: fullscreen ? 0 : 1,
-		transform: [
-			{ scaleY: fullscreen ? 0 : 1 },
-			{ translateY: fullscreen ? finalHeight * 0.46 * 0.5 : 0 },
-		]
-	};
+	
 
 	const animatedFloatingVendorView = {
 		opacity: vendorActive ? 1 : 0,
@@ -785,7 +776,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 		setShowFloatingVendor(false)
 	};
 
-	const [viewHeight, setViewHeight] = useState(finalHeight * 0.46);
+	const bottomSheetRef = useReactRef<BottomSheet>(null);
 
 	// ── Zoom controls ──
 	const handleZoom = async (zoomIn: boolean) => {
@@ -800,7 +791,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 	};
 
 	// Gesture handler — passthrough (no fling expand/collapse needed for setLocation mode)
-	const flingGesture = Gesture.Fling().direction(Directions.UP).enabled(false);
+	// Gesture handler — passthrough (no fling expand/collapse needed for setLocation mode)
 
 	// >---->> FETCHING DATA FROM BACKEND
     useEffect(() => {
@@ -1003,10 +994,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 			>
 
 				<GestureHandlerRootViewComponent>
-					<View
-						
-						style={[animatedMapStyle]}
-					>
+					<View style={StyleSheet.absoluteFillObject}>
 						<TouchableWithoutFeedback>
 										<MapView
 											ref={mapRef}
@@ -1163,91 +1151,51 @@ const initialRegion: import("@/types/models").MapRegion = {
 						</View>
 					)}
 
-					<KeyboardAvoidingView
-						behavior="position"
-						className="absolute bottom-0 flex-1 justify-end"
-					>
-						<GestureDetector gesture={flingGesture}>
-							<View
-								className={`${
-									darkTheme ? "bg-surface" : "bg-white"
-								} rounded-t-[15px] shadow-black shadow-2xl items-center p-2 relative bottom-0 w-full`}
-								style={[
-									{
-										shadowColor: "black",
-										shadowOpacity: 1,
-										height: viewHeight,
-										width,
-										// The sheet reaches the bottom of the screen, as a bottom
-										// sheet should, but the floating tab bar is drawn over its
-										// last ~72px. Padding the inner ScrollView's *content* does
-										// not help: that only extends how far it can scroll, while
-										// rows still render under the bar at rest. Shortening the
-										// sheet's content box is what keeps the viewport itself
-										// clear of the bar.
-										paddingBottom: tabBarClearance,
-									},
-									animatedView,
-								]}
-							>
-								{/* <-------------------------GESTURE CONTROLLER---------------------------> */}
-								<PressableScale
-									activeOpacity={0.7}
-									style={{
-										width: width,
-									}}
-								>
-									<View className="pb-4 px-3 w-full items-center justify-center ">
-										<View
-											className={`w-14 h-2 rounded-full bg-accentbg/40`}
-										></View>
-									</View>
-								</PressableScale>
+					
+<BottomSheet
+    ref={bottomSheetRef}
+    index={1}
+    snapPoints={['35%', '50%', '90%']}
+    backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+    handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+>
+    <PressableScale accessibilityLabel="Centre the map on my location"
+        className="absolute -top-14 right-4"
+        onPress={async () => {
+            try {
+                await getCurrentLocation();
+                if (location && mapRef.current) {
+                    mapRef.current.animateToRegion({
+                        latitude: location.coords.latitude,
+                        longitude: location.coords.longitude,
+                        latitudeDelta: 0.008,
+                        longitudeDelta: 0.008,
+                    }, 800);
+                }
+            } catch (e) {
+                if (__DEV__) console.error(e);
+            }
+        }}
+        activeOpacity={0.7}
+    >
+        <View
+            className={`  w-12 h-12 ${
+                darkTheme ? "bg-black" : "bg-white"
+            } rounded-full items-center justify-center shadow-xl shadow-black `}
+        >
+            <Ionicons name="navigate" size={24} color={BRAND.primary} />
+        </View>
+    </PressableScale>
 
-								{/* <---------------------CENTER USER LOCATION TOGGLE-----------------------> */}
-								<PressableScale accessibilityLabel="Centre the map on my location"
-									className="absolute -top-14 right-4"
-									onPress={async () => {
-										try {
-											await getCurrentLocation();
-											if (location && mapRef.current) {
-												mapRef.current.animateToRegion({
-													latitude: location.coords.latitude,
-													longitude: location.coords.longitude,
-													latitudeDelta: 0.008,
-													longitudeDelta: 0.008,
-												}, 800);
-											}
-										} catch (e) {
-											if (__DEV__) console.error(e);
-										}
-									}}
-									activeOpacity={0.7}
-								>
-									<View
-										className={`  w-12 h-12 ${
-											darkTheme ? "bg-black" : "bg-white"
-										} rounded-full items-center justify-center shadow-xl shadow-black `}
-										style={{}}
-									>
-										<Ionicons name="navigate" size={24} color={BRAND.primary} />
-									</View>
-								</PressableScale>
+    <BottomSheetScrollView
+        contentContainerStyle={{
+            gap: 20,
+            paddingTop: 10,
+            paddingBottom: tabBarClearance,
+        }}
+        showsVerticalScrollIndicator={false}
+    >
 
-								{/* tab-bar-clearance: carried by the sheet container above,
-								    which shortens this viewport so no row is drawn under the
-								    bar at rest. Padding the content here would only extend how
-								    far it scrolls. */}
-								<ScrollView
-									className="flex-1 w-full "
-									contentContainerStyle={{
-										gap: 20,
-										paddingTop: 10,
-										paddingBottom: 20,
-									}}
-									showsVerticalScrollIndicator={false}
-									overScrollMode={"never"}
-								>
 									{/* <-----SETTING LOCATION MANUALLY: SEARCH INPUT WITH AUTOFILL CURRENT LOCATION BY DEFAULT, ABILITY TO SET THE SELECTED LOCATION AS YOUR DELIVERY ADDRESS----> */}
 									
 									{dataShown === "setLocation" && (
@@ -1402,18 +1350,10 @@ const initialRegion: import("@/types/models").MapRegion = {
 
 									{/* <----------------DATA FOR TRACKING ONGOING ORDERS LIVE-----------------> */}
 									{/* <----DATA: RIDER PROFILE[ NAME, PROFILE_PIC, PHONE_NUMBER WITH OPTION TO CALL;CALL_BUTTON,EST TIME REMAINING ]----> */}
-								</ScrollView>
+								
+    </BottomSheetScrollView>
+</BottomSheet>
 
-								{/* <-------------------TRACK ORDER & SET LOCATION BUTTONS-------------------> */}
-								<View
-									className={` min-h-[0px]  justify-center gap-4 items-center flex-row ${
-										darkTheme ? "bg-black" : "bg-white"
-									} w-full `}
-								>
-								</View>
-							</View>
-						</GestureDetector>
-					</KeyboardAvoidingView>
 				</GestureHandlerRootViewComponent>
 			</View>
 		</>

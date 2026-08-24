@@ -33,7 +33,10 @@ export default function Cashout() {
   
   const { data: rider, isLoading, refetch: refetchProfile, isRefetching } = useRiderProfile();
   const { data: earnings, isLoading: isLoadingEarnings, refetch: refetchEarnings } = useRiderEarnings();
-  const { data: transactions, isLoading: isLoadingTx, refetch: refetchTx } = useWalletTransactions();
+  const { data: rawTx, isLoading: isLoadingTx, refetch: refetchTx } = useWalletTransactions();
+  // The backend wraps the ledger in `{data: [...]}`. The hook should unwrap
+  // it, but guard here too so a stale bundle cannot crash the screen.
+  const transactions: any[] = Array.isArray(rawTx) ? rawTx : (rawTx as any)?.data ?? [];
   const withdrawMutation = useWalletWithdraw();
 
   const [topUpAmount, setTopUpAmount] = useState("");

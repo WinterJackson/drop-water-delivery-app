@@ -18,10 +18,17 @@ export const useWalletTransactions = (limit = 50, offset = 0) => {
 
   return useQuery<WalletTransaction[], Error>({
     queryKey: ["walletTransactions", limit, offset],
-    queryFn: () =>
-      get<WalletTransaction[]>(
+    queryFn: async () => {
+      const response = await get<{ data: WalletTransaction[] } | WalletTransaction[]>(
         `${RiderApiRoutes.GetTransactions.path}?limit=${limit}&offset=${offset}`
-      ),
+      );
+      // The backend wraps the array in `{ data: [...], nextCursor, ... }`.
+      // Extract it so every consumer receives a plain array.
+      if (response && !Array.isArray(response) && Array.isArray((response as any).data)) {
+        return (response as any).data;
+      }
+      return Array.isArray(response) ? response : [];
+    },
   });
 };
 

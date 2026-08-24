@@ -1,5 +1,6 @@
 import { UIThemeContext } from "@/context/ThemeContext";
 import { useCallback, useContext, useEffect, useRef as useReactRef, useState } from "react";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import {
     Dimensions,
     Platform,
@@ -78,6 +79,7 @@ export default function LiveMap() {
     const [riderCoordinates, setRiderCoordinates] = useState<{lat: number, lng: number} | null>(null);
     const mapRef = useReactRef<MapViewType | null>(null);
     const trackingMarkerRef = useReactRef<React.ComponentRef<typeof MarkerAnimatedType> | null>(null);
+    const bottomSheetRef = useReactRef<BottomSheet>(null);
 
     /**
      * Live rider position, from the one hook that knows how to open this socket.
@@ -143,14 +145,11 @@ export default function LiveMap() {
         <View className={`flex-1 ${darkTheme ? "bg-black" : "bg-white"}`}>
             <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
             
-            <View style={{ height: finalHeight * 0.75 }}>
+            <View style={StyleSheet.absoluteFillObject}>
                 {MapView ? (
                     <MapView
                         ref={mapRef}
                         provider={PROVIDER_GOOGLE}
-                        // `googleMapId`, not `mapId` — react-native-maps names it the former, so
-                        // the prop every map screen in all three apps passed was dropped and cloud
-                        // styling has never once been applied. A misspelt prop is silent here.
                         googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
                         style={StyleSheet.absoluteFill}
                         initialRegion={initialRegion}
@@ -158,7 +157,6 @@ export default function LiveMap() {
                         showsMyLocationButton={false}
                         showsCompass={false}
                     >
-
                         {/* Customer Location */}
                         {Marker && activeOrder.lat && activeOrder.lng && (
                             <Marker
@@ -203,64 +201,62 @@ export default function LiveMap() {
                         <Skeleton width="100%" height="100%" borderRadius={0} />
                     </View>
                 )}
-
-                <SafeAreaView edges={["top"]} className="absolute w-full" pointerEvents="box-none">
-                    <View className="px-4 pt-3 flex-row items-center justify-between" pointerEvents="box-none">
-                        <View className="flex-row items-center" pointerEvents="box-none">
-                            <PressableScale onPress={() => router.back()} className="mr-4">
-                                <BackButtonMinimal />
-                            </PressableScale>
-                        </View>
-                        <View className="flex-row gap-2 pointer-events-auto">
-                            <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
-                            </PressableScale>
-                            <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                                <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
-                            </PressableScale>
-                        </View>
-                    </View>
-                </SafeAreaView>
             </View>
 
-            {/* Bottom Card matching the UI style exactly */}
-            <View className={`absolute bottom-0 w-full rounded-t-[32px] pt-4 pb-8 px-6 border-t shadow-2xl ${darkTheme ? "bg-surface border-outline-variant" : "bg-white border-gray-200"}`}>
-                <View className="items-center mb-5">
-                    <View className={`w-12 h-1.5 rounded-full ${darkTheme ? "bg-slate-700" : "bg-slate-300"}`} />
-                </View>
-                
-                <Text className={`text-xl font-sans-extrabold mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Live Tracking</Text>
-                <Text className={`text-sm font-sans-semibold mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Order #{activeOrder.id.substring(0,8)}</Text>
-                
-                <View className={`flex-row items-center justify-between p-4 rounded-2xl border ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-slate-50 border-gray-100"}`}>
-                    <View className="flex-row items-center">
-                        <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
-                            {isLive ? (
-                                <Ionicons name="pulse" size={24} color={BRAND.primary} />
-                            ) : (
-                                <ActivityIndicator size="small" color={BRAND.primary} />
-                            )}
-                        </View>
-                        <View>
-                            {/* Three states, not two. A position with a dead
-                                socket is the last one we were told, not a rider
-                                who is moving — and saying "moving" over a frozen
-                                marker is the version of this a vendor calls
-                                support about. */}
-                            <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
-                                {isLive
-                                    ? "Rider is moving"
-                                    : riderCoordinates
-                                        ? "Reconnecting — showing last position"
-                                        : "Waiting for rider location..."}
-                            </Text>
-                            <Text className={`text-xs mt-0.5 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
-                                {activeOrder.order_status?.replace("_", " ") ?? "unknown"}
-                            </Text>
-                        </View>
+            <SafeAreaView edges={["top"]} className="absolute w-full pointer-events-none" style={{ zIndex: 50 }}>
+                <View className="px-4 pt-3 flex-row items-center justify-between pointer-events-none">
+                    <View className="flex-row items-center pointer-events-auto">
+                        <PressableScale onPress={() => router.back()} className="mr-4">
+                            <BackButtonMinimal />
+                        </PressableScale>
+                    </View>
+                    <View className="flex-row gap-2 pointer-events-auto">
+                        <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
+                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
+                        </PressableScale>
+                        <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
+                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
+                        </PressableScale>
                     </View>
                 </View>
-            </View>
+            </SafeAreaView>
+
+            <BottomSheet
+                ref={bottomSheetRef}
+                index={1}
+                snapPoints={['20%', '35%', '50%']}
+                backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+            >
+                <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 40 }}>
+                    <Text className={`text-xl font-sans-extrabold mb-1 ${darkTheme ? "text-white" : "text-slate-900"}`}>Live Tracking</Text>
+                    <Text className={`text-sm font-sans-semibold mb-6 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>Order #{activeOrder.id.substring(0,8)}</Text>
+                    
+                    <View className={`flex-row items-center justify-between p-4 rounded-2xl border ${darkTheme ? "bg-[#111] border-gray-800" : "bg-white border-gray-200"}`}>
+                        <View className="flex-row items-center">
+                            <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${darkTheme ? "bg-accentbg/20" : "bg-accentbg/10"}`}>
+                                {isLive ? (
+                                    <Ionicons name="pulse" size={24} color={BRAND.primary} />
+                                ) : (
+                                    <ActivityIndicator size="small" color={BRAND.primary} />
+                                )}
+                            </View>
+                            <View>
+                                <Text className={`text-sm font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>
+                                    {isLive
+                                        ? "Rider is moving"
+                                        : riderCoordinates
+                                            ? "Reconnecting — showing last position"
+                                            : "Waiting for rider location..."}
+                                </Text>
+                                <Text className={`text-xs mt-0.5 ${darkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                                    {activeOrder.order_status?.replace("_", " ") ?? "unknown"}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                </BottomSheetScrollView>
+            </BottomSheet>
         </View>
     );
 }

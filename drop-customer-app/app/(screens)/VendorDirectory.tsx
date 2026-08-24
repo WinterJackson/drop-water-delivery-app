@@ -1,6 +1,6 @@
-import React, { useContext, useState, useMemo } from 'react';
+import React, { useContext, useState, useMemo, useRef } from 'react';
 import { useTabBarClearance } from '@/constants/layout';
-import { View, ScrollView, StatusBar, Image, Platform, ActivityIndicator } from 'react-native';
+import { View, ScrollView, StatusBar, Image, Platform, ActivityIndicator, StyleSheet } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { VendorCardSkeleton } from '@/components/skeletons/ContextualSkeletons';
 import { useDebounce } from '@/hooks/useDebounce';
 import { keepPaging } from '@/utils/paging';
-import { FlashList } from '@shopify/flash-list';
+import BottomSheet, { BottomSheetFlatList, BottomSheetView } from '@gorhom/bottom-sheet';
 import MapView, { Marker, UrlTile, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from "@expo/vector-icons";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
@@ -43,6 +43,7 @@ export default function VendorDirectory() {
     const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
     const mapRef = React.useRef<MapView>(null);
+    const bottomSheetRef = useRef<BottomSheet>(null);
 
     const directoryQuery = useVendorDirectory(debouncedSearchQuery, filter);
     const { isLoading, isFetchingNextPage, hasNextPage } = directoryQuery;
@@ -128,25 +129,8 @@ export default function VendorDirectory() {
         <View className={`flex-1 ${darkTheme ? 'bg-black' : 'bg-background'}`}>
             <StatusBar barStyle={darkTheme ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
             
-            {/* Header */}
-            <View className={`px-4 pb-4 ${darkTheme ? 'bg-black border-white/10' : 'bg-white border-gray-100'}`} style={{ paddingTop: insets.top + 16, borderBottomWidth: 1 }}>
-                <View className="flex-row items-center gap-3">
-                    <PressableScale onPress={() => router.back()}>
-                        <BackButtonMinimal />
-                    </PressableScale>
-                    <SearchBar
-                        width="flex-1"
-                        height="h-[46px]"
-                        buttonStyle=""
-                        value={searchQuery}
-                        placeholder="Search stores near you"
-                        setFunc={setSearchQuery}
-                    />
-                </View>
-            </View>
-
             {/* Map Area */}
-            <View className="h-56 relative overflow-hidden" style={{ backgroundColor: darkTheme ? '#1f2937' : '#e5e7eb' }}>
+            <View style={StyleSheet.absoluteFillObject}>
                 <MapView
                     ref={mapRef}
                     // 🟢 FREE OPEN SOURCE MVP MODE 
@@ -204,65 +188,95 @@ export default function VendorDirectory() {
                 </MapView>
             </View>
 
-            {/* Filters */}
-            <View className="px-4 py-4">
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                    {VENDOR_FILTERS.map((f) => (
-                        <PressableScale
-                            key={f.id}
-                            onPress={() => setFilter(f.id)}
-                            className={`px-4 py-2 rounded-full border ${filter === f.id ? 'bg-accentbg border-accentbg' : darkTheme ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200'}`}
-							style={darkTheme || filter === f.id ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+            {/* Floating Header */}
+            <View className="absolute top-0 left-0 right-0 z-10 px-4" style={{ paddingTop: insets.top + 16 }}>
+                <View className="flex-row items-center gap-3">
+                    <PressableScale onPress={() => router.back()}>
+                        <View 
+                            className={`w-10 h-10 rounded-full items-center justify-center`}
+                            style={{ backgroundColor: BRAND.primary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}
                         >
-                            <Text className={`font-sans-semibold ${filter === f.id ? 'text-white' : darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
-                                {f.label}
-                            </Text>
-                        </PressableScale>
-                    ))}
-                </ScrollView>
+                            <Ionicons name="chevron-back" size={24} color="white" />
+                        </View>
+                    </PressableScale>
+                    <SearchBar
+                        width="flex-1"
+                        height="h-[46px]"
+                        buttonStyle=""
+                        value={searchQuery}
+                        placeholder="Search stores near you"
+                        setFunc={setSearchQuery}
+                    />
+                </View>
             </View>
 
-            {/* List */}
-            <View className="flex-1 px-4">
-                {isLoading ? (
-                    <View className="gap-4">
-                        {[1, 2, 3].map((i) => (
-                            <VendorCardSkeleton key={i} />
-                        ))}
+            <BottomSheet
+                ref={bottomSheetRef}
+                index={1}
+                snapPoints={['35%', '60%', '90%']}
+                backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+                handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
+            >
+                <BottomSheetView>
+                    {/* Filters */}
+                    <View className="px-4 py-4">
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                            {VENDOR_FILTERS.map((f) => (
+                                <PressableScale
+                                    key={f.id}
+                                    onPress={() => setFilter(f.id)}
+                                    className={`px-4 py-2 rounded-full border ${filter === f.id ? 'bg-accentbg border-accentbg' : darkTheme ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200'}`}
+                                    style={darkTheme || filter === f.id ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+                                >
+                                    <Text className={`font-sans-semibold ${filter === f.id ? 'text-white' : darkTheme ? 'text-gray-300' : 'text-gray-600'}`}>
+                                        {f.label}
+                                    </Text>
+                                </PressableScale>
+                            ))}
+                        </ScrollView>
                     </View>
-                ) : filteredVendors.length === 0 ? (
-                    <View className="flex-1 mt-10">
-                        <EmptyState 
-                            mood="sad" 
-                            title="No vendors found" 
-                            subtitle="Try adjusting your filters or search query." 
+                </BottomSheetView>
+
+                {/* List */}
+                <View className="flex-1 px-4">
+                    {isLoading ? (
+                        <View className="gap-4">
+                            {[1, 2, 3].map((i) => (
+                                <VendorCardSkeleton key={i} />
+                            ))}
+                        </View>
+                    ) : filteredVendors.length === 0 ? (
+                        <View className="flex-1 mt-10">
+                            <EmptyState 
+                                mood="sad" 
+                                title="No vendors found" 
+                                subtitle="Try adjusting your filters or search query." 
+                            />
+                        </View>
+                    ) : (
+                        <BottomSheetFlatList
+                            data={filteredVendors}
+                            keyExtractor={(item) => item.id}
+                            renderItem={renderVendor}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ paddingBottom: tabBarClearance }}
+                            onEndReached={keepPaging(directoryQuery)}
+                            onEndReachedThreshold={0.6}
+                            ListFooterComponent={
+                                isFetchingNextPage ? (
+                                    <View className="py-6 items-center">
+                                        <ActivityIndicator color={BRAND.primary} />
+                                    </View>
+                                ) : !hasNextPage && filteredVendors.length > 0 ? (
+                                    <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
+                                        That's every store that delivers to you.
+                                    </Text>
+                                ) : null
+                            }
                         />
-                    </View>
-                ) : (
-                    <FlashList
-                        data={filteredVendors}
-						// @ts-ignore
-						estimatedItemSize={120}
-                        keyExtractor={(item) => item.id}
-                        renderItem={renderVendor}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: tabBarClearance }}
-                        onEndReached={keepPaging(directoryQuery)}
-                        onEndReachedThreshold={0.6}
-                        ListFooterComponent={
-                            isFetchingNextPage ? (
-                                <View className="py-6 items-center">
-                                    <ActivityIndicator color={BRAND.primary} />
-                                </View>
-                            ) : !hasNextPage && filteredVendors.length > 0 ? (
-                                <Text className={`text-center text-xs py-6 ${darkTheme ? "text-gray-600" : "text-gray-400"}`}>
-                                    That's every store that delivers to you.
-                                </Text>
-                            ) : null
-                        }
-                    />
-                )}
-            </View>
+                    )}
+                </View>
+            </BottomSheet>
         </View>
     );
 }

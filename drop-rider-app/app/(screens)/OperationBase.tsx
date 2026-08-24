@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as SecureStore from "expo-secure-store";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 
 import type { RiderProfile } from '@/hooks/queries/useRiderData';
 import type { DiscoveredVendor } from '@/app/(screens)/DiscoverVendors';
@@ -103,6 +104,7 @@ export default function OperationBase() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapViewType | null>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
   const { width, height } = Dimensions.get("window");
 
   const [loading, setLoading] = useState(true);
@@ -314,7 +316,7 @@ export default function OperationBase() {
       <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
 
       {/* FULL SCREEN MAP */}
-      <View style={{ height: height * 0.55, width: width, position: 'absolute', top: 0 }}>
+      <View style={StyleSheet.absoluteFillObject}>
         {MapView && location && !loading ? (
           <MapView
             ref={mapRef}
@@ -488,20 +490,14 @@ export default function OperationBase() {
       </View>
 
       {/* BOTTOM SHEET INFO PANEL */}
-      <View
-        className={`${darkTheme ? "bg-surface" : "bg-white"} absolute w-full pt-6 px-6`}
-        style={{
-          top: (height * 0.55), // Meets the bottom of the map exactly
-          bottom: 0, // Stretches dynamically to the bottom of the screen
-          shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 10,
-          borderTopWidth: 1, borderColor: darkTheme ? BRAND.gray800 : "transparent",
-          borderTopLeftRadius: 35, borderTopRightRadius: 35 // Much larger corner radius
-        }}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={1}
+        snapPoints={['35%', '50%', '90%']}
+        backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+        handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
       >
-        {/* Gesture Bar Indicator */}
-        <View className="w-full items-center justify-center pb-4">
-            <View className="w-16 h-2 rounded-full bg-gray-300" style={{ backgroundColor: darkTheme ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
-        </View>
+        <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 110 }}>
 
         <Text className={`text-2xl font-heading-semibold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
           Working Zone
@@ -547,7 +543,8 @@ export default function OperationBase() {
             </PressableScale>
           )}
         </View>
-      </View>
+        </BottomSheetScrollView>
+      </BottomSheet>
 
     </View>
   );

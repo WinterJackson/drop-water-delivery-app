@@ -27,7 +27,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Toast } from "@/lib/toast";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView, BottomSheetFlatList } from "@gorhom/bottom-sheet";
+import { StyleSheet } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import { DataFallbackUI } from "@/components/ui/DataFallbackUI";
 import { compareMoney, formatMoney, subtractMoney, sumMoney } from "@/utils/money";
@@ -449,70 +450,16 @@ export default function TripRadar() {
   const renderTripPreview = () => {
     if (!selectedOrder) return null;
 
-    const hasVendorCoords = selectedOrder.lat_from !== undefined && selectedOrder.lng_from !== undefined;
-    const hasCustomerCoords = selectedOrder.lat !== undefined && selectedOrder.lng !== undefined;
-    
-    // Default fallback to Nairobi if coordinates are totally missing
-    const initialRegion = hasVendorCoords ? {
-      latitude: selectedOrder.lat_from!,
-      longitude: selectedOrder.lng_from!,
-      latitudeDelta: 0.05,
-      longitudeDelta: 0.05,
-    } : {
-      latitude: -1.2921,
-      longitude: 36.8219,
-      latitudeDelta: 0.1,
-      longitudeDelta: 0.1,
-    };
-
     return (
-      <View className={`flex-1 ${darkTheme ? "bg-surface" : "bg-white"}`}>
-        <View className={`h-[250px] w-full ${darkTheme ? "bg-gray-800" : "bg-white"}`}>
-          <MapView
-            provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
-            // @ts-ignore
-            // `googleMapId`, not `mapId` — react-native-maps names it the former, so
-            // the prop every map screen in all three apps passed was dropped and cloud
-            // styling has never once been applied. A misspelt prop is silent here.
-            googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
-            style={{ flex: 1 }}
-            initialRegion={initialRegion}
-            showsUserLocation={false}
-            scrollEnabled={false}
-            zoomEnabled={false}
-          >
-            {hasVendorCoords && (
-              <Marker coordinate={{ latitude: selectedOrder.lat_from!, longitude: selectedOrder.lng_from! }}>
-                <View className="bg-primary p-1.5 rounded-full border-2 border-white">
-                  <Ionicons name="storefront-outline" size={16} color={BRAND.white} />
-                </View>
-              </Marker>
-            )}
-            {hasCustomerCoords && (
-              <Marker coordinate={{ latitude: selectedOrder.lat!, longitude: selectedOrder.lng! }}>
-                <View className="bg-green-500 p-1.5 rounded-full border-2 border-white">
-                  <Ionicons name="location" size={16} color={BRAND.white} />
-                </View>
-              </Marker>
-            )}
-            {hasVendorCoords && hasCustomerCoords && (
-              <Polyline
-                coordinates={[
-                  { latitude: selectedOrder.lat_from!, longitude: selectedOrder.lng_from! },
-                  { latitude: selectedOrder.lat!, longitude: selectedOrder.lng! }
-                ]}
-                strokeColor={BRAND.primary}
-                strokeWidth={3}
-                lineDashPattern={[5, 5]}
-              />
-            )}
-          </MapView>
-        </View>
-
-        <BottomSheetScrollView contentContainerStyle={{ padding: 20 }}>
-          <Text className={`text-2xl font-sans-extrabold mb-1 ${darkTheme ? "text-white" : "text-black"}`}>
-            {formatMoney(selectedOrder.delivery_fee)}
-          </Text>
+        <View style={{ padding: 20 }}>
+          <View className="flex-row items-center justify-between mb-4">
+            <Text className={`text-2xl font-sans-extrabold ${darkTheme ? "text-white" : "text-black"}`}>
+                {formatMoney(selectedOrder.delivery_fee)}
+            </Text>
+            <TouchableOpacity onPress={() => setSelectedOrder(null)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-gray-800" : "bg-gray-200"}`}>
+                <Ionicons name="close" size={20} color={darkTheme ? "#fff" : "#000"} />
+            </TouchableOpacity>
+          </View>
           <Text className={`text-base mb-5 ${darkTheme ? "text-gray-400" : "text-gray-500"}`}>
             {selectedOrder.distance_km?.toFixed(1)} km • {selectedOrder.estimated_minutes} min total est.
           </Text>
@@ -568,7 +515,7 @@ export default function TripRadar() {
                  <Text className={`font-sans-bold text-sm ${darkTheme ? "text-amber-500" : "text-amber-700"}`}>Cash Order</Text>
                </View>
                <Text className={`text-xs mb-2 ${darkTheme ? "text-amber-200/70" : "text-amber-700/80"}`}>
-                 You must have enough funds in your Wallet to cover the vendor net pay and platform&apos;s commission ({formatMoney(cashFloatRequired)}) to accept this cash order.
+                 You must have enough funds in your Wallet to cover the vendor net pay and platform's commission ({formatMoney(cashFloatRequired)}) to accept this cash order.
                </Text>
                <View className="flex-row items-center justify-between mt-2 pt-2 border-t border-amber-500/20">
                  <Text className={`text-xs font-sans-semibold ${darkTheme ? "text-amber-200" : "text-amber-800"}`}>Your Wallet Balance:</Text>
@@ -601,8 +548,7 @@ export default function TripRadar() {
               </>
             )}
           </TouchableOpacity>
-        </BottomSheetScrollView>
-      </View>
+        </View>
     );
   };
 
@@ -619,36 +565,73 @@ export default function TripRadar() {
     );
   }
 
+  const mapInitialRegion = profile?.operation_lat && profile?.operation_lng ? {
+    latitude: profile.operation_lat,
+    longitude: profile.operation_lng,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
+  } : {
+    latitude: -1.2921,
+    longitude: 36.8219,
+    latitudeDelta: 0.1,
+    longitudeDelta: 0.1,
+  };
+
   return (
     <View className={`flex-1 ${darkTheme ? "bg-black" : "bg-white"}`}>
       <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
       
-      {renderHeader()}
-      
-      <FlatList
-        data={filteredOrders}
-        keyExtractor={(item) => item.id}
-        renderItem={renderOrderCard}
-        ListHeaderComponent={<>{renderSearchAndFilters()}{renderDiscoverBanner()}</>}
-        ListEmptyComponent={loading ? <RiderTripRadarSkeleton /> : renderEmptyState}
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: tabBarClearance }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[BRAND.primary]}
-            tintColor={BRAND.primary}
-          />
-        }
-      />
+      {/* Background Map */}
+      <View style={StyleSheet.absoluteFillObject}>
+        {MapView && (
+            <MapView
+                provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
+                googleMapId={Platform.OS === 'ios' ? '3b06fa233809c6d3b07afa7e' : '3b06fa233809c6d35d39c7c1'}
+                style={{ flex: 1 }}
+                initialRegion={mapInitialRegion}
+                showsUserLocation={true}
+                scrollEnabled={true}
+                zoomEnabled={true}
+            >
+                {selectedOrder && selectedOrder.lat_from !== undefined && selectedOrder.lng_from !== undefined && (
+                  <Marker coordinate={{ latitude: selectedOrder.lat_from!, longitude: selectedOrder.lng_from! }}>
+                    <View className="bg-primary p-1.5 rounded-full border-2 border-white">
+                      <Ionicons name="storefront-outline" size={16} color={BRAND.white} />
+                    </View>
+                  </Marker>
+                )}
+                {selectedOrder && selectedOrder.lat !== undefined && selectedOrder.lng !== undefined && (
+                  <Marker coordinate={{ latitude: selectedOrder.lat!, longitude: selectedOrder.lng! }}>
+                    <View className="bg-green-500 p-1.5 rounded-full border-2 border-white">
+                      <Ionicons name="location" size={16} color={BRAND.white} />
+                    </View>
+                  </Marker>
+                )}
+                {selectedOrder && selectedOrder.lat_from !== undefined && selectedOrder.lng_from !== undefined && selectedOrder.lat !== undefined && selectedOrder.lng !== undefined && (
+                  <Polyline
+                    coordinates={[
+                      { latitude: selectedOrder.lat_from!, longitude: selectedOrder.lng_from! },
+                      { latitude: selectedOrder.lat!, longitude: selectedOrder.lng! }
+                    ]}
+                    strokeColor={BRAND.primary}
+                    strokeWidth={3}
+                    lineDashPattern={[5, 5]}
+                  />
+                )}
+            </MapView>
+        )}
+      </View>
+
+      <View className="absolute top-0 left-0 right-0 z-10" style={{ paddingTop: StatusBar.currentHeight || 0 }}>
+        {renderHeader()}
+      </View>
 
       <BottomSheet
         ref={bottomSheetRef}
-        index={-1}
-        snapPoints={snapPoints}
-        enablePanDownToClose
-        backgroundStyle={{ backgroundColor: darkTheme ? "#1c1c1e" : "white" }}
-        handleIndicatorStyle={{ backgroundColor: darkTheme ? "#3f4850" : "#ddd" }}
+        index={1}
+        snapPoints={['35%', '50%', '90%']}
+        backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
+        handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
         style={{
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -4 },
@@ -657,7 +640,28 @@ export default function TripRadar() {
           elevation: 10,
         }}
       >
-        {renderTripPreview()}
+        {selectedOrder ? (
+            <BottomSheetScrollView contentContainerStyle={{ paddingBottom: tabBarClearance }}>
+                {renderTripPreview()}
+            </BottomSheetScrollView>
+        ) : (
+            <BottomSheetFlatList
+                data={filteredOrders}
+                keyExtractor={(item) => item.id}
+                renderItem={renderOrderCard}
+                ListHeaderComponent={<>{renderSearchAndFilters()}{renderDiscoverBanner()}</>}
+                ListEmptyComponent={loading ? <RiderTripRadarSkeleton /> : renderEmptyState()}
+                contentContainerStyle={{ flexGrow: 1, paddingBottom: tabBarClearance }}
+                refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={[BRAND.primary]}
+                    tintColor={BRAND.primary}
+                />
+                }
+            />
+        )}
       </BottomSheet>
     </View>
   );

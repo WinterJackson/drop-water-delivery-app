@@ -368,6 +368,148 @@ async def seed_orders(session, target: int = 24) -> int:
     return created
 
 
+# ── Test-account-specific orders ──────────────────────────────────────────
+
+#: The `+clerk_test` addresses used by `scripts/test_accounts.py`.
+_TEST_CUSTOMER_EMAIL = "customer+clerk_test@example.com"
+_TEST_RIDER_EMAIL = "rider+clerk_test@example.com"
+_TEST_RETAIL_EMAIL = "vendor-retail+clerk_test@example.com"
+
+
+async def seed_test_account_orders(session) -> int:
+    """Force specific orders for the test identities.
+
+    The random seeder gives everyone a mix, but a tester logging into the rider
+    app needs an active delivery **now**, the customer app needs order history
+    to show, and the vendor dashboard needs an active queue. This function
+    guarantees all three, using `compute_order_quote` for every figure.
+    """
+    await config.ensure_fresh(session)
+
+    customer = (
+        await session.execute(select(User).where(User.email == _TEST_CUSTOMER_EMAIL))
+    ).scalars().first()
+    rider = (
+        await session.execute(select(Deliverer).where(Deliverer.email == _TEST_RIDER_EMAIL))
+    ).scalars().first()
+    retail = (
+        await session.execute(
+            select(Vendor).options(selectinload(Vendor.products))
+            .where(Vendor.email == _TEST_RETAIL_EMAIL)
+        )
+    ).unique().scalars().first()
+
+    if not all([customer, rider, retail]):
+        print("⚠️  Test identities not found — run `scripts/test_accounts.py provision` first.")
+        return 0
+
+    products = list(retail.products)
+    items = _pick_cart(products, "retail_refill")
+    if not items:
+        print("⚠️  No deliverable products in the retail test store.")
+        return 0
+
+    now = datetime.now(timezone.utc)
+    created = 0
+
+    # Each scenario: (status, rider_assigned, age_delta, payment_status)
+    scenarios = [
+        ("picked_up",  rider, timedelta(minutes=25), "paid"),      # active delivery for rider
+        ("delivered",  rider, timedelta(days=3),      "paid"),      # history for customer + rate
+        ("delivered",  rider, timedelta(days=7),      "paid"),      # second history item
+        ("preparing",  rider, timedelta(minutes=10),  "paid"),      # vendor active queue
+        ("accepted",   None,  timedelta(minutes=5),   "pending"),   # vendor queue, unassigned
+    ]
+
+    for status, assigned_rider, age, payment_status in scenarios:
+        distance_km = round(random.uniform(0.4, 1.8), 2)
+        drop_lat, drop_lng = _point_at(retail.lat, retail.lng, distance_km)
+        delivery_type = "quick_swap"
+        payment_method = "mpesa"
+
+        cart_items = _pick_cart(products, "retail_refill")
+        if not cart_items:
+            cart_items = items  # fallback to the first working cart
+
+        quote = await compute_order_quote(
+            session,
+            items=cart_items,
+            user=customer,
+            vendor=retail,
+            delivery_type=delivery_type,
+            lat=drop_lat,
+            lng=drop_lng,
+            apply_wallet=False,
+        )
+
+        revenue = quote.revenue
+        order_id = uuid.uuid4()
+
+        order = Order(
+            id=order_id,
+            customer_id=customer.id,
+            vendor_id=retail.id,
+            deliverer_id=assigned_rider.id if assigned_rider else None,
+            checkout_request_ID=f"ws_CO_{uuid.uuid4().hex[:20]}",
+            delivery_address=customer.location_address,
+            phone=customer.phone_number,
+            lat_from=retail.lat,
+            lng_from=retail.lng,
+            lat=drop_lat,
+            lng=drop_lng,
+            h3_index_res8=str(h3.latlng_to_cell(drop_lat, drop_lng, 8)),
+            distance_km=quote.distance_km,
+            vehicle_class=quote.vehicle_class,
+            delivery_time=quote.estimated_minutes,
+            total_amount=quote.total,
+            order_status=status,
+            payment_status=payment_status,
+            payment_method=payment_method,
+            delivery_fee=quote.delivery_fee,
+            delivery_type=delivery_type,
+            bottle_source="own",
+            is_welcome_offer=False,
+            vendor_commission=revenue["vendor_commission"],
+            service_fee=revenue["service_fee"],
+            rider_commission=revenue["rider_commission"],
+            platform_total=revenue["platform_total"],
+            vendor_net=revenue["vendor_net"],
+            rider_net=revenue["rider_net"],
+            surge_fee=quote.surge_fee,
+            delivery_markup=quote.delivery_markup,
+            commission_lost=0,
+            wallet_discount=quote.wallet_discount,
+            welcome_discount=Decimal("0"),
+            product_subtotal=quote.product_subtotal,
+            bottle_deposit=Decimal("0"),
+            debt_settlement=Decimal("0"),
+            staircase_surcharge=quote.staircase_surcharge,
+            payload_surcharge=quote.payload_surcharge,
+            proof_url=(
+                "https://res.cloudinary.com/dn5f0jksu/image/upload/v1749059743/zjfoz5vc9pw9dzn7jpuh.jpg"
+                if status == "delivered" else None
+            ),
+            created_at=now - age,
+        )
+        session.add(order)
+
+        for line in cart_items:
+            session.add(
+                OrderItem(
+                    order_id=order_id,
+                    product_id=line.product.id,
+                    quantity=line.quantity,
+                    price=line.price,
+                    Subtotal=line.Subtotal,
+                )
+            )
+
+        created += 1
+
+    await session.flush()
+    return created
+
+
 async def reconcile_vendor_totals(session) -> None:
     """Set each store's lifetime figures from the orders that exist.
 
@@ -409,10 +551,11 @@ async def main():
             return
 
         created = await seed_orders(session)
-        if created:
+        test_created = await seed_test_account_orders(session)
+        if created or test_created:
             await reconcile_vendor_totals(session)
             await session.commit()
-            print(f"✅ {created} orders seeded, every figure from `compute_order_quote`.")
+            print(f"✅ {created} random + {test_created} test-account orders seeded.")
 
 
 if __name__ == "__main__":
