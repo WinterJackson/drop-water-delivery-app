@@ -58,6 +58,7 @@ from models.notification_model import Notification  # noqa: E402
 from models.saved_location_model import SavedLocation  # noqa: E402
 from models.vendor_favorite_model import VendorFavorite  # noqa: E402
 from models.wallet_transaction_model import WalletTransaction  # noqa: E402
+from models.order_model import Order, OrderItem  # noqa: E402
 
 CLERK_API = "https://api.clerk.com/v1"
 TIMEOUT = 30.0
@@ -580,6 +581,92 @@ async def _enrich_demo_data(session) -> int:
             created_at=now - _timedelta(hours=6),
         ))
         enriched += 1
+
+    # ── Customer & Rider: Completed Order ──────────────────────────────────────
+    #
+    # Every figure below was hand-derived from `compute_order_quote` and
+    # `calculate_revenue_splits` using the default `Platform_Settings`:
+    #
+    #   product:  2× 20L Purified Refill @ KSH 180 = KSH 360
+    #   delivery: short hop (store and customer both at NGONG, 0 km) = KSH 50
+    #   service:  retail_service_fee = KSH 35
+    #   staircase: floor 3, free 2, (3-2) × KSH 10 = KSH 10
+    #   mpesa discount: KSH 10
+    #   gross = 360 + 50 + 35 + 10 = 455
+    #   total = 455 - 10 (mpesa) = KSH 445
+    #
+    # Revenue split identity: vendor_net + rider_net + platform_total == gross
+    #   342 + 55 + 58 == 455 ✓
+    existing_order = (
+        await session.execute(select(Order).where(Order.customer_id == customer.id).limit(1))
+    ).scalars().first()
+    if not existing_order:
+        product = (
+            await session.execute(
+                select(Product).where(Product.vendor_id == retail_store.id).limit(1)
+            )
+        ).scalars().first()
+        if product:
+            unit_price = Decimal(str(product.price)) - Decimal(str(product.discount or 0))
+            qty = 2
+            subtotal = unit_price * qty  # 360.00
+
+            order = Order(
+                customer_id=customer.id,
+                vendor_id=retail_store.id,
+                deliverer_id=rider.id,
+                delivery_address="House 12, Ngong Town",
+                # Store (NGONG) → Customer (NGONG). Distance is 0 km.
+                lat_from=NGONG[0], lng_from=NGONG[1],
+                lat=NGONG[0], lng=NGONG[1],
+                h3_index_res8=customer.h3_index_res8,
+                distance_km=0.0,
+                vehicle_class="motorbike",
+                delivery_time=5,  # max(5, ceil(0 * 3)) = 5 minutes
+                # ── Totals ──
+                total_amount=Decimal("445.00"),
+                product_subtotal=subtotal,
+                delivery_fee=Decimal("50.00"),   # short hop flat fee
+                service_fee=Decimal("35.00"),     # retail_service_fee
+                surge_fee=Decimal("0.00"),
+                delivery_markup=Decimal("0.00"),  # retail_delivery_markup_rate = 0
+                payload_surcharge=Decimal("0.00"),
+                staircase_surcharge=Decimal("10.00"),
+                bottle_deposit=Decimal("0.00"),   # exchange → no deposit
+                debt_settlement=Decimal("0.00"),
+                wallet_discount=Decimal("0.00"),
+                welcome_discount=Decimal("0.00"),
+                mpesa_discount=Decimal("10.00"),
+                rounding_adjustment=Decimal("0.00"),
+                is_welcome_offer=False,
+                # ── Revenue split ──
+                vendor_commission=Decimal("18.00"),   # 360 × 0.05
+                rider_commission=Decimal("5.00"),     # 50 × 0.10
+                platform_total=Decimal("58.00"),      # 18 + 35 + 5 + 0 + 0
+                platform_cost=Decimal("15.00"),       # mpesa_collection_cost
+                platform_net=Decimal("43.00"),        # 58 - 15
+                vendor_net=Decimal("342.00"),          # 360 - 18 + 0 (deposit)
+                rider_net=Decimal("55.00"),            # 50 - 5 - 0 + 10 (staircase)
+                # ── Status & metadata ──
+                order_status="delivered",
+                payment_status="completed",
+                payment_method="mpesa",
+                delivery_type="exchange",
+                bottle_source="platform",
+                actual_floor_level=3,
+                created_at=datetime.now(timezone.utc) - _timedelta(days=3),
+                updated_at=datetime.now(timezone.utc) - _timedelta(days=3),
+            )
+            session.add(order)
+            await session.flush()
+            session.add(OrderItem(
+                order_id=order.id,
+                product_id=product.id,
+                quantity=qty,
+                price=unit_price,
+                Subtotal=subtotal,
+            ))
+            enriched += 1
 
     # ── Rider: wallet transactions ────────────────────────────────────
     existing_rider_tx = (

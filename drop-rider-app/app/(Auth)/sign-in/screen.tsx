@@ -178,7 +178,7 @@ export default function SignIn() {
 			/>
 
 			<View
-				className={darkTheme ? "bg-black" : ""}
+				className={darkTheme ? "bg-black" : "bg-[#f0f0f0]"}
 				style={{
 					flex: 1,
 				}}
@@ -207,16 +207,16 @@ export default function SignIn() {
 						>
 							<LinearGradient
 								className="w-full h-full "
-								colors={[
+									colors={[
 									darkTheme
 										? "rgba(0, 0, 0, 0.2)"
 										: "transparent",
 									darkTheme
 										? "rgba(0, 0, 0, 0.6)"
-										: "rgba(240, 240, 240, 0.7)",
+										: "rgba(240, 240, 240, 0.8)",
 									darkTheme
 										? "rgba(0, 0, 0, 1)"
-										: "rgb(240, 240, 240)",
+										: "#f0f0f0",
 								]}
 							></LinearGradient>
 						</ImageBackground>
@@ -321,8 +321,8 @@ export default function SignIn() {
 								>
 									<View
 										className={`flex-row gap-4 w-[260px] h-[40px] rounded-[30px]  ${
-											darkTheme ? "bg-slate-50/15" : "bg-white"
-										} shadow-2xl bg-slate-50/15 items-center justify-center`}
+											darkTheme ? "bg-slate-50/15" : "bg-white border border-gray-200"
+										} shadow-2xl items-center justify-center`}
 										style={{
 											width: width * 0.6,
 										}}
@@ -334,14 +334,14 @@ export default function SignIn() {
 										<Text className={
 												darkTheme
 													? "text-base text-gray-300"
-													: "text-base"
+													: "text-base text-gray-700"
 											}>{"Sign in with Google"}</Text>
 									</View>
 								</PressableScale>
 							</View>
 						</View>
 						<View className="flex-row gap-2 items-center justify-center">
-							<Text className={darkTheme?"text-white":""}>{"Don't Have an Account?"}</Text>
+							<Text className={darkTheme ? "text-white" : "text-gray-700"}>{"Don't Have an Account?"}</Text>
 							<PressableScale
 								onPress={() => {
 									router.push("/(Auth)/sign-up/screen");

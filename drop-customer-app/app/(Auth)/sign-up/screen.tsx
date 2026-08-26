@@ -213,7 +213,7 @@ export default function SignUp() {
 			/>
 
 			<View
-				className={darkTheme ? "bg-black" : ""}
+				className={darkTheme ? "bg-black" : "bg-[#f0f0f0]"}
 				style={{
 					flex: 1,
 				}}
@@ -247,10 +247,10 @@ export default function SignUp() {
 										: "transparent",
 									darkTheme
 										? "rgba(0, 0, 0, 0.6)"
-										: "rgba(240, 240, 240, 0.7)",
+										: "rgba(240, 240, 240, 0.8)",
 									darkTheme
 										? "rgba(0, 0, 0, 1)"
-										: "rgb(240, 240, 240)",
+										: "#f0f0f0",
 								]}
 							></LinearGradient>
 						</ImageBackground>
@@ -368,8 +368,8 @@ export default function SignUp() {
 								>
 									<View
 										className={`flex-row gap-4 w-[260px] h-[40px] rounded-[30px]  ${
-											darkTheme ? "bg-slate-50/15" : "bg-white"
-										} shadow-2xl bg-slate-50/15 items-center justify-center`}
+											darkTheme ? "bg-slate-50/15" : "bg-white border border-gray-200"
+										} shadow-2xl items-center justify-center`}
 										
 									>
 										<Image
@@ -379,14 +379,14 @@ export default function SignUp() {
 										<Text className={
 												darkTheme
 													? "text-lg text-gray-300"
-													: "text-lg"
+													: "text-lg text-gray-700"
 											}>{"Sign in with Google"}</Text>
 									</View>
 								</PressableScale>
 							</View>
 						</View>
 						<View className="flex-row gap-2 items-center justify-center">
-							<Text className={darkTheme?"text-white":""}>{"Already Have an Account?"}</Text>
+							<Text className={darkTheme ? "text-white" : "text-gray-700"}>{"Already Have an Account?"}</Text>
 							<PressableScale
 								// href={"/(Auth)/sign-in/screen"}
 								onPress={() => {
