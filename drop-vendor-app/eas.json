@@ -25,7 +25,7 @@
       },
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_c2FmZS1tYXJtb3QtNzIuY2xlcmsuYWNjb3VudHMuZGV2JA",
-        "EXPO_PUBLIC_BACKEND_BASE_URL": "http://192.168.88.229:8000",
+        "EXPO_PUBLIC_BACKEND_BASE_URL": "https://vepo-backend.onrender.com",
         "EXPO_PUBLIC_SENTRY_DSN": "https://860dc1d16c4dc1854f15c7b261136b58@o4507055338815488.ingest.us.sentry.io/4511925276311552",
         "GOOGLE_MAPS_ANDROID_API_KEY": "AIzaSyCh58kp6fJjfgXwdL663jXDO21aTtxGdII",
         "GOOGLE_MAPS_IOS_API_KEY": "AIzaSyDE2B-45U7Fk_Y98hJ2VbNwH3K9gYV7ZXM"
