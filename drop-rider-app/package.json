@@ -74,6 +74,9 @@
     "tailwindcss": "^3.4.17",
     "zustand": "^5.0.12"
   },
+  "resolutions": {
+    "expo-constants": "~18.0.14"
+  },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@clerk/types": "^4.101.20",
