@@ -166,14 +166,14 @@ export default function SignUp() {
     };
 
     return (
-        <View className={darkTheme ? "bg-black" : ""} style={{ flex: 1, height: Dimensions.get('window').height }}>
+        <View className={darkTheme ? "bg-black" : "bg-[#f0f0f0]"} style={{ flex: 1, height: Dimensions.get('window').height }}>
             <ImageBackground source={images.authBgLight} style={{ position: 'absolute', width: '100%', height: Dimensions.get('window').height * 0.35 }}>
                 <LinearGradient
                     className="w-full h-full"
                     colors={[
                         darkTheme ? "rgba(0, 0, 0, 0.2)" : "transparent",
-                        darkTheme ? "rgba(0, 0, 0, 0.6)" : "rgba(240, 240, 240, 0.7)",
-                        darkTheme ? "rgba(0, 0, 0, 1)" : "rgb(240, 240, 240)",
+                        darkTheme ? "rgba(0, 0, 0, 0.6)" : "rgba(240, 240, 240, 0.8)",
+                        darkTheme ? "rgba(0, 0, 0, 1)" : "#f0f0f0",
                     ]}
                 />
             </ImageBackground>
@@ -245,7 +245,7 @@ export default function SignUp() {
                         </PressableScale>
 
                         <View className="flex-row items-center justify-center mt-6">
-                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-500"}`}>Already have an account? </Text>
+                            <Text className={`${darkTheme ? "text-gray-400" : "text-gray-700"}`}>Already have an account? </Text>
                             <PressableScale onPress={() => router.push("/(Auth)/sign-in/screen")}>
                                 <Text className="text-accentbg font-sans-semibold">Log In</Text>
                             </PressableScale>
