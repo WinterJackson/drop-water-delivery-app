@@ -582,7 +582,7 @@ export default function TripRadar() {
       <StatusBar translucent backgroundColor={darkTheme ? "black" : "white"} barStyle={darkTheme ? "light-content" : "dark-content"} />
       
       {/* Background Map */}
-      <View style={StyleSheet.absoluteFillObject}>
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 0, elevation: 0 }]}>
         {MapView && (
             <MapView
                 provider={Platform.OS !== 'web' ? PROVIDER_GOOGLE : undefined}
@@ -633,11 +633,12 @@ export default function TripRadar() {
         backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
         handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
         style={{
+          zIndex: 100,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.1,
           shadowRadius: 12,
-          elevation: 10,
+          elevation: 100,
         }}
       >
         {selectedOrder ? (

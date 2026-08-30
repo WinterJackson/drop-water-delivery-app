@@ -2,7 +2,7 @@ import React, { useContext, useState } from "react";
 import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, RefreshControl, Alert, TouchableOpacity, Modal } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -26,6 +26,7 @@ const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
 
 export default function Cashout() {
     const tabBarClearance = useTabBarClearance();
+    const insets = useSafeAreaInsets();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -497,7 +498,7 @@ export default function Cashout() {
                 <Text className="text-white font-sans-bold text-lg">Send STK Push</Text>
               )}
             </PressableScale>
-            <SafeAreaView edges={["bottom"]} />
+            <View style={{ height: Math.max(insets.bottom, 24) }} />
           </View>
         </View>
       </Modal>
@@ -573,7 +574,7 @@ export default function Cashout() {
                 <Text className="text-white font-sans-bold text-lg">Withdraw to M-Pesa</Text>
               )}
             </PressableScale>
-            <SafeAreaView edges={["bottom"]} />
+            <View style={{ height: Math.max(insets.bottom, 24) }} />
           </View>
         </View>
       </Modal>

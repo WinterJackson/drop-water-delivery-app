@@ -726,7 +726,7 @@ export default function ActiveDelivery() {
       </SafeAreaView>
 
       {/* ── Live Map & Zoom Controls ── */}
-      <View style={StyleSheet.absoluteFillObject}>
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 0, elevation: 0 }]}>
         {/* Search Bar Overlay */}
         <View className="absolute top-4 left-4 right-4 z-10">
             <View className={`flex-row items-center px-4 py-3 rounded-full border ${darkTheme ? "bg-black border-gray-800" : "bg-white border-gray-100"}`} style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }}>
@@ -810,7 +810,7 @@ export default function ActiveDelivery() {
         onChange={(index) => setSheetIndex(index)}
         backgroundStyle={{ backgroundColor: darkTheme ? BRAND.bgDark : BRAND.white }}
         handleIndicatorStyle={{ backgroundColor: darkTheme ? BRAND.gray800 : BRAND.gray200 }}
-        style={{ elevation: 10, zIndex: 10 }}
+        style={{ elevation: 100, zIndex: 100 }}
       >
         <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 120 }}>
           {isLoading ? (

@@ -1,5 +1,6 @@
 import React, { useContext, useState } from "react";
 import { View, Modal, TouchableOpacity, FlatList, Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from '@/components/ui/Text';
 import { UIThemeContext } from "@/context/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,6 +39,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
     const { currentTheme } = useContext(UIThemeContext);
     const darkTheme = currentTheme === "dark";
     const [modalVisible, setModalVisible] = useState(false);
+    const insets = useSafeAreaInsets();
 
     const selectedOption = VEHICLE_OPTIONS.find(opt => opt.value === value);
 
@@ -108,7 +110,7 @@ const VehicleDropdown: React.FC<VehicleDropdownProps> = ({
                     activeOpacity={1}
                     onPress={() => setModalVisible(false)}
                 >
-                    <View className={`w-full max-h-[50%] rounded-t-3xl pt-2 pb-6 ${darkTheme ? "bg-black" : "bg-white"}`}>
+                    <View className={`w-full max-h-[50%] rounded-t-3xl pt-2 ${darkTheme ? "bg-black" : "bg-white"}`} style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
                         <View className="items-center mb-4">
                             <View className={`w-12 h-1.5 rounded-full mt-2 ${darkTheme ? "bg-gray-800" : "bg-gray-300"}`} />
                         </View>

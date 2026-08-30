@@ -316,7 +316,7 @@ export default function OperationBase() {
       <StatusBar translucent backgroundColor="transparent" barStyle={darkTheme ? "light-content" : "dark-content"} />
 
       {/* FULL SCREEN MAP */}
-      <View style={StyleSheet.absoluteFillObject}>
+      <View style={[StyleSheet.absoluteFillObject, { zIndex: 0, elevation: 0 }]}>
         {MapView && location && !loading ? (
           <MapView
             ref={mapRef}
@@ -423,11 +423,9 @@ export default function OperationBase() {
 
         {/* MAP UI OVERLAYS */}
         {/* Back Button & Search */}
-        <View style={{ top: insets.top + 10, paddingHorizontal: 16, zIndex: 50 }} className="absolute flex-row items-center w-full pointer-events-box-none">
+        <View style={{ top: insets.top + 10, paddingHorizontal: 16 }} className="absolute flex-row items-center w-full pointer-events-box-none">
           <PressableScale onPress={() => router.back()} className="mr-3 pointer-events-auto">
-            <View className={`w-11 h-11 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}>
-              <BackButtonMinimal />
-            </View>
+            <BackButtonMinimal />
           </PressableScale>
 
           <View className="flex-1 pointer-events-auto">
@@ -449,7 +447,7 @@ export default function OperationBase() {
         </View>
 
         {/* Zoom & Location Controls */}
-        <View className="absolute right-4 top-1/2 -translate-y-1/2 gap-3 z-40">
+        <View className="absolute right-4 top-1/2 -translate-y-1/2 gap-3">
           <PressableScale
             onPress={snapToCurrentLocation}
             className={`w-10 h-10 rounded-full items-center justify-center shadow-md border ${darkTheme ? "bg-[#201f1f] border-[#3f4850]" : "bg-white border-gray-200"}`}
@@ -479,7 +477,7 @@ export default function OperationBase() {
 
         {/* Distance Pill */}
         {distanceToBase && Number(distanceToBase) > 0.5 && (
-          <View className="absolute top-[130px] self-center z-40">
+          <View className="absolute top-[130px] self-center">
             <View className={`px-4 py-2 rounded-full shadow-md ${darkTheme ? "bg-[#201f1f]" : "bg-white"}`} style={darkTheme ? { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) } : { ...(darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }) }}>
               <Text className={`text-sm font-sans-semibold ${darkTheme ? "text-white" : "text-gray-800"}`}>
                 {distanceToBase} km from your physical location
@@ -493,6 +491,7 @@ export default function OperationBase() {
       <BottomSheet
         ref={bottomSheetRef}
         index={1}
+        style={{ zIndex: 100, elevation: 100 }}
         snapPoints={['35%', '50%', '90%']}
         backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
         handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}

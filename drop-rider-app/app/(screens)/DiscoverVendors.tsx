@@ -336,7 +336,7 @@ export default function DiscoverVendors() {
 
       {/* Content */}
       <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFillObject}>
+          <View style={[StyleSheet.absoluteFillObject, { zIndex: 0, elevation: 0 }]}>
             {MapView && (
               <>
               <MapView
@@ -371,7 +371,7 @@ export default function DiscoverVendors() {
                   />
                 ))}
               </MapView>
-              <View className="absolute top-4 right-4 pointer-events-auto flex-row gap-2" style={{ zIndex: 10 }}>
+              <View className="absolute top-4 right-4 pointer-events-auto flex-row gap-2">
                 <PressableScale
                   onPress={snapToCurrentLocation}
                   className={`w-10 h-10 rounded-full items-center justify-center shadow-sm border ${darkTheme ? "bg-surface-variant border-outline-variant" : "bg-white border-gray-200"}`}
@@ -399,6 +399,7 @@ export default function DiscoverVendors() {
           </View>
           <BottomSheet
             index={1}
+            style={{ zIndex: 100, elevation: 100 }}
             snapPoints={['35%', '50%', '90%']}
             backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
             handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
