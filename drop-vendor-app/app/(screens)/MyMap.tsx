@@ -427,13 +427,13 @@ export default function MyMap() {
                         <Text className={`mt-2 text-center px-12 font-sans-semibold text-sm ${darkTheme ? "text-[#89929b]" : "text-slate-400"}`}>Map requires a native build.</Text>
                     </View>
                 )}
-                <SafeAreaView edges={["top"]} className="absolute w-full" pointerEvents="box-none">
-                    <View className="px-4 pt-3 flex-row items-center justify-between" pointerEvents="box-none">
+                <SafeAreaView edges={["top"]} className="absolute w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+                    <View className="px-4 pt-3 flex-row items-center" pointerEvents="box-none">
                         <View className="flex-row items-center flex-1" pointerEvents="box-none">
                             <PressableScale onPress={() => router.back()} className="mr-3 pointer-events-auto">
                                 <BackButtonMinimal />
                             </PressableScale>
-                            <View className={`flex-1 mr-3 flex-row items-center px-4 py-3 rounded-full border pointer-events-auto ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                            <View className={`flex-1 flex-row items-center px-4 py-3 rounded-full border pointer-events-auto ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
                                 <Ionicons name="search" size={20} color={darkTheme ? "#89929b" : "#94a3b8"} className="mr-2" />
                                 <TextInput
                                     placeholder="Search order ID, rider, or customer"
@@ -444,26 +444,24 @@ export default function MyMap() {
                                 />
                             </View>
                         </View>
-                        <View className="flex-row items-center gap-2 pointer-events-auto">
-                            <View className="flex-row gap-2">
-                                <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
-                                </PressableScale>
-                                <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
-                                    <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
-                                </PressableScale>
-                            </View>
-                            <PressableScale accessibilityLabel="Centre the map on your store"
-                                onPress={() => {
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                    mapRef.current?.animateToRegion({ latitude: safeCenter.latitude, longitude: safeCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 800);
-                                }}
-                                className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`}
-                                style={shadowStyle}
-                            >
-                                <Ionicons name="navigate" size={20} color={BRAND.primary} />
-                            </PressableScale>
-                        </View>
+                    </View>
+                    <View className="absolute right-4 top-24 gap-3 pointer-events-auto">
+                        <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
+                        </PressableScale>
+                        <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`} style={shadowStyle}>
+                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
+                        </PressableScale>
+                        <PressableScale accessibilityLabel="Centre the map on your store"
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                mapRef.current?.animateToRegion({ latitude: safeCenter.latitude, longitude: safeCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }, 800);
+                            }}
+                            className={`w-10 h-10 rounded-full items-center justify-center border ${darkTheme ? "bg-[#121212] border-[#3f4850]" : "bg-white border-gray-100"}`}
+                            style={shadowStyle}
+                        >
+                            <Ionicons name="navigate" size={20} color={BRAND.primary} />
+                        </PressableScale>
                     </View>
                 </SafeAreaView>
             </View>
@@ -473,6 +471,7 @@ export default function MyMap() {
                 ref={bottomSheetRef}
                 index={0}
                 snapPoints={['35%', '60%', '90%']}
+                style={{ zIndex: 100 }}
                 backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
                 handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
             >

@@ -203,21 +203,19 @@ export default function LiveMap() {
                 )}
             </View>
 
-            <SafeAreaView edges={["top"]} className="absolute w-full pointer-events-none" style={{ zIndex: 50 }}>
-                <View className="px-4 pt-3 flex-row items-center justify-between pointer-events-none">
-                    <View className="flex-row items-center pointer-events-auto">
-                        <PressableScale onPress={() => router.back()} className="mr-4">
-                            <BackButtonMinimal />
-                        </PressableScale>
-                    </View>
-                    <View className="flex-row gap-2 pointer-events-auto">
-                        <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
-                        </PressableScale>
-                        <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
-                            <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
-                        </PressableScale>
-                    </View>
+            <SafeAreaView edges={["top"]} className="absolute w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+                <View className="px-4 pt-3 flex-row items-center pointer-events-none">
+                    <PressableScale onPress={() => router.back()} className="mr-4 pointer-events-auto">
+                        <BackButtonMinimal />
+                    </PressableScale>
+                </View>
+                <View className="absolute right-4 top-24 gap-3 pointer-events-auto">
+                    <PressableScale onPress={() => handleZoom(true)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>+</Text>
+                    </PressableScale>
+                    <PressableScale onPress={() => handleZoom(false)} className={`w-10 h-10 rounded-full items-center justify-center border shadow-sm ${darkTheme ? "bg-surface-container border-outline-variant" : "bg-white border-gray-200"}`}>
+                        <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-800"}`}>−</Text>
+                    </PressableScale>
                 </View>
             </SafeAreaView>
 
@@ -225,6 +223,7 @@ export default function LiveMap() {
                 ref={bottomSheetRef}
                 index={1}
                 snapPoints={['20%', '35%', '50%']}
+                style={{ zIndex: 100 }}
                 backgroundStyle={{ backgroundColor: darkTheme ? '#000000' : '#f8fafc' }}
                 handleIndicatorStyle={{ backgroundColor: darkTheme ? '#3f4850' : '#cbd5e1', width: 40 }}
             >

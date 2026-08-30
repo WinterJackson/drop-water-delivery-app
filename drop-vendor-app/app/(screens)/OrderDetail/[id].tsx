@@ -557,7 +557,11 @@ export default function OrderDetail() {
         </ScrollView>
 
         {/* Action Buttons */}
-        <View className={`px-5 pb-8 pt-4 border-t ${darkTheme ? "bg-black border-slate-800" : "bg-white border-gray-100"}`}>
+        {order.order_status !== "cancelled" && (
+          <View 
+            className={`px-5 pt-4 border-t ${darkTheme ? "bg-black border-slate-800" : "bg-white border-gray-100"}`}
+            style={{ paddingBottom: Math.max(32, tabBarClearance) }}
+          >
           {order.order_status === "pending" && order.payment_method === "cash" && (
             <View
               className={`p-4 mb-4 rounded-xl border ${
@@ -720,6 +724,7 @@ export default function OrderDetail() {
             </>
           )}
         </View>
+        )}
 
       </SafeAreaView>
 

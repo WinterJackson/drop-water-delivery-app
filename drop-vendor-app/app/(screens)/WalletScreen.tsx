@@ -2,7 +2,7 @@ import React, { useContext, useState } from "react";
 import { useTabBarClearance } from '@/constants/layout';
 import { View, ScrollView, RefreshControl, Dimensions, Alert, TouchableOpacity, Modal } from "react-native";
 import { Text, TextInput } from '@/components/ui/Text';
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import BackButtonMinimal from "@/components/ui/BackButtonMinimal";
@@ -26,6 +26,7 @@ const MONEY_INPUT = /^\d+(\.\d{1,2})?$/;
 
 export default function WalletScreen() {
     const tabBarClearance = useTabBarClearance();
+    const insets = useSafeAreaInsets();
   const router = useRouter();
   const { currentTheme } = useContext(UIThemeContext);
   const darkTheme = currentTheme === "dark";
@@ -431,7 +432,10 @@ export default function WalletScreen() {
         onRequestClose={() => setIsTopUpModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
+          <View 
+            className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}
+            style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+          >
             <View className="flex-row justify-between items-center mb-6">
               <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Top Up Wallet</Text>
               <PressableScale accessibilityLabel="Close the top-up form" onPress={() => setIsTopUpModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
@@ -478,7 +482,6 @@ export default function WalletScreen() {
                 <Text className="text-white font-sans-bold text-lg">Send STK Push</Text>
               )}
             </PressableScale>
-            <SafeAreaView edges={["bottom"]} />
           </View>
         </View>
       </Modal>
@@ -491,7 +494,10 @@ export default function WalletScreen() {
         onRequestClose={() => setIsWithdrawModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}>
+          <View 
+            className={`p-6 rounded-t-3xl ${darkTheme ? "bg-surface-container" : "bg-white"}`}
+            style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+          >
             <View className="flex-row justify-between items-center mb-6">
               <Text className={`text-xl font-sans-bold ${darkTheme ? "text-white" : "text-slate-900"}`}>Withdraw Funds</Text>
               <PressableScale accessibilityLabel="Close the withdrawal form" onPress={() => setIsWithdrawModalVisible(false)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-black/50" : "bg-slate-100"}`}>
@@ -539,7 +545,6 @@ export default function WalletScreen() {
                 <Text className="text-white font-sans-bold text-lg">Withdraw to M-Pesa</Text>
               )}
             </PressableScale>
-            <SafeAreaView edges={["bottom"]} />
           </View>
         </View>
       </Modal>
