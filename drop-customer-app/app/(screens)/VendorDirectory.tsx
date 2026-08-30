@@ -10,7 +10,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import BackButtonMinimal from '@/components/ui/BackButtonMinimal';
 import SearchBar from '@/components/common/Search';
 import { BRAND, TOAST } from '@/constants/brandColors';
-import { estimateDeliveryTime } from '@/utils/distance';
+import { estimateDeliveryTime, hasEstimate } from '@/utils/distance';
 import { useUserDetails } from '@/hooks/queries/useUser';
 import { Skeleton, SkeletonText } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -98,12 +98,12 @@ export default function VendorDirectory() {
                             <Text className={`${darkTheme ? 'text-gray-500' : 'text-gray-400'}`}>•</Text>
                             {item.is_accepting_orders === false ? (
                                 <StoreClosedNotice store={item} compact />
-                            ) : (
+                            ) : hasEstimate(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined) ? (
                             <View className="flex-row items-center gap-1">
-                                <Ionicons name="bicycle" size={24} color={BRAND.primary} />
+                                <Ionicons name="bicycle" size={14} color={BRAND.primary} />
                                 <Text className={`${darkTheme ? "text-gray-400" : "text-gray-600"}`}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
                             </View>
-                            )}
+                            ) : null}
                         </View>
                         <View className="flex-row flex-wrap gap-2 mt-1">
                             <View className={`px-2 py-1 rounded-md ${isWholesale ? 'bg-blue-100' : 'bg-green-100'}`}>

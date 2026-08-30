@@ -16,7 +16,7 @@ import { Text } from '@/components/ui/Text';
 import { Skeleton, SkeletonText, SkeletonButton } from "../ui/Skeleton";
 import { PressableScale } from "@/components/ui/PressableScale";
 import { useUserDetails } from "@/hooks/queries/useUser";
-import { estimateDeliveryTime } from "@/utils/distance";
+import { estimateDeliveryTime, hasEstimate } from "@/utils/distance";
 import StoreClosedNotice from "@/components/common/StoreClosedNotice";
 
 type Props = {
@@ -139,7 +139,7 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 											    same server field, as the store page. */}
 											{item.is_accepting_orders === false ? (
 												<StoreClosedNotice store={item} compact />
-											) : (
+											) : hasEstimate(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined) ? (
 											<View className="flex-row items-center gap-2">
 												<Image
 													source={require("../../assets/icons/bike-black.png")}
@@ -157,7 +157,7 @@ const FullHorizontalList = ({ title, data, loaded }: Props) => {
 															: "text-gray-600"
 													}>{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}</Text>
 											</View>
-											)}
+											) : null}
 										</View>
 										{/* ORDER NOW BUTTON */}
 										<PressableScale

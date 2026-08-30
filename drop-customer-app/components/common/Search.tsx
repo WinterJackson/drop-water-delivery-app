@@ -61,9 +61,14 @@ const SearchBar = ({
 
 	return (
 		<View
-			className={`px-4 flex-row items-center gap-2 flex-1 border ${darkTheme ? "border-transparent bg-gray-200/20" : "bg-white border-gray-200"} rounded-full ${width} ${height}`}
-			style={darkTheme ? undefined : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+			className={`px-4 flex-row items-center gap-2 flex-1 border ${darkTheme ? "border-neutral-700 bg-neutral-900" : "bg-white border-gray-200"} rounded-full ${width} ${height}`}
+			style={darkTheme ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 3 } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
 		>
+			<Ionicons
+				name="search"
+				size={18}
+				color={darkTheme ? BRAND.searchPlaceholderDark : BRAND.searchPlaceholderLight}
+			/>
 			<TextInput
 				ref={inputRef}
 				placeholder={placeholder}

@@ -1037,7 +1037,7 @@ const initialRegion: import("@/types/models").MapRegion = {
 										</MapView>
 						</TouchableWithoutFeedback>
 						{dataShown === "setLocation" && (
-							<View pointerEvents="none" className="absolute top-1/2 left-1/2 -mt-6 -ml-4 z-50">
+							<View pointerEvents="none" className="absolute top-1/2 left-1/2 -mt-6 -ml-4 z-10">
 								<Ionicons name="location" size={32} color={BRAND.primary} />
 							</View>
 						)}

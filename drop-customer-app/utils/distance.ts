@@ -51,7 +51,7 @@ export function estimateDeliveryTime(vendorLat?: number, vendorLng?: number, use
     // coordinate we lack. The same defect was fixed in four backend endpoints
     // and in `useDeliveryLocation`; this was the copy left in a client util.
     if (vendorLat == null || vendorLng == null || userLat == null || userLng == null) {
-        return "Est. Delivery available";
+        return "";
     }
 
     try {
@@ -69,6 +69,6 @@ export function estimateDeliveryTime(vendorLat?: number, vendorLng?: number, use
             return `${formatDuration(minMins)} - ${formatDuration(maxMins)}`;
         }
     } catch (error) {
-        return "Est. Delivery available";
+        return "";
     }
 }

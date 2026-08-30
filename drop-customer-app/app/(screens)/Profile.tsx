@@ -51,7 +51,7 @@ const Profile = () => {
 	const { clearPushToken } = usePushNotifications();
 	const { user: clerkUser } = useUser();
 	const { setTheme } = useContext(UIThemeContext);
-	const { data: User, refetch: fetchUserDetails, isLoading: isUserLoading } = useUserDetails();
+	const { data: User, refetch: fetchUserDetails, isLoading: isUserLoading, isPending: isUserPending } = useUserDetails();
 	const updateUser = useUpdateUser();
 	const { getToken } = useAuth()
 	const { currentTheme } = useContext(UIThemeContext);
@@ -139,7 +139,7 @@ const Profile = () => {
 		}
 	};
 
-	if (!User && !isUserLoading) {
+	if (!User && !isUserLoading && !isUserPending) {
 		return (
 			<DataFallbackUI 
 				title="Profile Unavailable"

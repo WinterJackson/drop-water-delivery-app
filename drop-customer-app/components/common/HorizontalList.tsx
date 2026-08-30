@@ -157,14 +157,24 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 								>
 									{/* IMAGE (PERFECT SQUARE) */}
 									<View className="w-full" style={{ height: w * 0.38 }}>
-										<Image
-											source={{ uri: item.profile_pic }}
-											style={{ width: '100%', height: '100%', borderRadius: 24 }}
-											contentFit="cover"
-											transition={200}
-										/>
+										{item.profile_pic ? (
+											<Image
+												source={{ uri: item.profile_pic }}
+												style={{ width: '100%', height: '100%', borderRadius: 24 }}
+												contentFit="cover"
+												transition={200}
+											/>
+										) : (
+											<View
+												className="w-full h-full items-center justify-center"
+												style={{ backgroundColor: BRAND.primary + '18', borderRadius: 24 }}
+											>
+												<Ionicons name="water" size={40} color={BRAND.primary} />
+												<Text className={`text-xs font-sans-semibold mt-1 ${darkTheme ? 'text-gray-400' : 'text-gray-500'}`}>No Image</Text>
+											</View>
+										)}
 									</View>
-									<View className="px-3 py-2">
+									<View className="px-3.5 py-2.5">
 										<Text
 											className={`font-sans-bold text-sm ${darkTheme ? "text-white" : "text-gray-900"}`}
 											numberOfLines={1}
@@ -181,14 +191,14 @@ const HorizontalList = ({ title, type, data, loaded, onSeeAll }: Props) => {
 												<StoreClosedNotice store={item} compact />
 											</View>
 										) : (
-											<View className="flex-row gap-3 justify-between items-center mt-1">
-												<View className="flex-row gap-1 items-center">
+											<View className="flex-row gap-2 justify-between items-center mt-1.5">
+												<View className="flex-row gap-1 items-center flex-1 overflow-hidden">
 													<Ionicons name="bicycle" size={14} color={BRAND.primary} />
-													<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+													<Text className={`text-xs ${darkTheme ? "text-gray-400" : "text-gray-600"}`} numberOfLines={1}>
 														{estimateDeliveryTime(item.lat, item.lng, User?.lat ?? undefined, User?.lng ?? undefined)}
 													</Text>
 												</View>
-												<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`}>
+												<Text className={`text-xs font-sans-bold ${darkTheme ? "text-gray-400" : "text-gray-600"}`} numberOfLines={1}>
 													{ratingLabel(item.rating, item.rating_count)}
 												</Text>
 											</View>

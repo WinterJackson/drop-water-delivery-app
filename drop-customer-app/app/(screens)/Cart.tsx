@@ -68,7 +68,7 @@ export default function Cart() {
 	// <--------------HOOKS---------------->
 	const router = useRouter();
 	const { fetchCart } = useContext(Context)
-	const { data: User } = useUserDetails()
+	const { data: User, isPending: isUserPending } = useUserDetails()
 	const {currentTheme} = useContext(UIThemeContext);
 	const darkTheme = currentTheme === "dark"
 	const api = useApiRequest()
@@ -476,12 +476,12 @@ export default function Cart() {
 		fetch_cart()
 	},[])
 
-	if (!User && !isCartLoading) {
+	if (!User && !isUserPending && !isCartLoading) {
 		return (
 			<DataFallbackUI 
 				title="User data unavailable"
 				message="We couldn't load your profile required for checkout. Please retry or go home."
-				onRetry={() => fetch_cart()}
+				onRetry={() => { fetch_cart(); }}
 			/>
 		);
 	}
