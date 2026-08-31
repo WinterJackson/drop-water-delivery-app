@@ -1,0 +1,222 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: oklch(0.97 0.02 235);
+  --color-brand-100: oklch(0.93 0.04 235);
+  --color-brand-200: oklch(0.87 0.07 235);
+  --color-brand-300: oklch(0.79 0.11 235);
+  --color-brand-400: oklch(0.70 0.14 235);
+  --color-brand-500: oklch(0.62 0.16 235);
+  --color-brand-600: oklch(0.54 0.15 235);
+  --color-brand-700: oklch(0.45 0.13 235);
+  --color-brand-800: oklch(0.37 0.10 235);
+  --color-brand-900: oklch(0.30 0.07 235);
+
+  --font-sans: var(--font-karla), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: var(--font-fredoka), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --animate-fade-in-up: fade-in-up 0.7s ease-out both;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@layer base {
+  :root {
+    --background: oklch(0.98 0.003 240);
+    --surface: oklch(1 0 0);
+    --surface-muted: oklch(0.96 0.004 240);
+    --border: oklch(0.90 0.006 240);
+    --foreground: oklch(0.18 0.012 240);
+    --foreground-muted: oklch(0.42 0.014 240);
+    --accent: oklch(0.50 0.16 235);
+    --accent-foreground: oklch(0.99 0 0);
+    --accent-subtle: oklch(0.94 0.04 235);
+    --success: oklch(0.52 0.14 155);
+    --warning: oklch(0.65 0.16 75);
+    --danger: oklch(0.55 0.20 25);
+    --ring: oklch(0.50 0.16 235);
+
+    --logo-on-light: block;
+    --logo-on-dark: none;
+
+    --chrome-inset: 10px;
+    --header-height: 3.5rem;
+    --header-block: calc(var(--chrome-inset) + var(--header-height));
+
+    --chrome: var(--accent);
+    --chrome-foreground: var(--accent-foreground);
+    --chrome-hover: oklch(0.43 0.15 235);
+    --chrome-active: var(--surface);
+    --chrome-active-foreground: var(--accent);
+    --chrome-rule: color-mix(in oklch, var(--accent-foreground) 38%, var(--accent));
+    --chrome-thumb: color-mix(in oklch, var(--accent-foreground) 75%, var(--accent));
+    --chrome-thumb-hover: var(--accent-foreground);
+    --chrome-edge: color-mix(in oklch, var(--accent-foreground) 75%, var(--accent));
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: oklch(0.15 0.008 245);
+      --surface: oklch(0.20 0.01 245);
+      --surface-muted: oklch(0.24 0.012 245);
+      --border: oklch(0.32 0.014 245);
+      --foreground: oklch(0.95 0.004 240);
+      --foreground-muted: oklch(0.72 0.010 240);
+      --accent: oklch(0.70 0.14 235);
+      --accent-foreground: oklch(0.13 0.01 245);
+      --accent-subtle: oklch(0.26 0.04 235);
+      --success: oklch(0.70 0.14 155);
+      --warning: oklch(0.78 0.14 75);
+      --danger: oklch(0.68 0.18 25);
+      --ring: oklch(0.70 0.14 235);
+
+      --logo-on-light: none;
+      --logo-on-dark: block;
+      --chrome-hover: oklch(0.78 0.12 235);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --background: oklch(0.15 0.008 245);
+    --surface: oklch(0.20 0.01 245);
+    --surface-muted: oklch(0.24 0.012 245);
+    --border: oklch(0.32 0.014 245);
+    --foreground: oklch(0.95 0.004 240);
+    --foreground-muted: oklch(0.72 0.010 240);
+    --accent: oklch(0.70 0.14 235);
+    --accent-foreground: oklch(0.13 0.01 245);
+    --accent-subtle: oklch(0.26 0.04 235);
+    --success: oklch(0.70 0.14 155);
+    --warning: oklch(0.78 0.14 75);
+    --danger: oklch(0.68 0.18 25);
+    --ring: oklch(0.70 0.14 235);
+
+    --logo-on-light: none;
+    --logo-on-dark: block;
+    --chrome-hover: oklch(0.78 0.12 235);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    font-synthesis-weight: none;
+    color: var(--foreground);
+  }
+
+  a { color: inherit; text-decoration: inherit; }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+}
+
+/* ── Semantic utilities ── */
+@utility bg-surface { background-color: var(--surface); }
+@utility bg-surface-muted { background-color: var(--surface-muted); }
+@utility bg-accent { background-color: var(--accent); }
+@utility bg-accent-subtle { background-color: var(--accent-subtle); }
+@utility text-foreground { color: var(--foreground); }
+@utility text-muted { color: var(--foreground-muted); }
+@utility text-accent { color: var(--accent); }
+@utility text-accent-foreground { color: var(--accent-foreground); }
+@utility text-success { color: var(--success); }
+@utility text-warning { color: var(--warning); }
+@utility text-danger { color: var(--danger); }
+@utility border-default { border-color: var(--border); }
+@utility bg-chrome { background-color: var(--chrome); }
+@utility text-chrome-foreground { color: var(--chrome-foreground); }
+@utility border-chrome { border-color: var(--chrome-rule); }
+@utility border-chrome-edge { border-color: var(--chrome-edge); }
+@utility ring-accent { --tw-ring-color: var(--accent); }
+
+@layer utilities {
+  .brand-chrome:focus-visible,
+  .brand-chrome :focus-visible {
+    outline-color: var(--chrome-foreground);
+  }
+}
+
+/* ── Glass card ── */
+.glass-card {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.06);
+}
+:root[data-theme="dark"] .glass-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.3);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ── Scrollbar ── */
+@layer base {
+  :root {
+    --scrollbar-thumb: color-mix(in oklch, var(--foreground) 42%, var(--background));
+    --scrollbar-thumb-hover: var(--foreground);
+  }
+
+  .brand-chrome {
+    --scrollbar-thumb: var(--chrome-thumb);
+    --scrollbar-thumb-hover: var(--chrome-thumb-hover);
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+  }
+
+  ::-webkit-scrollbar { width: 2px; height: 2px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
