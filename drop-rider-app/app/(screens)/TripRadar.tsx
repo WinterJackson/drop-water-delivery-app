@@ -456,7 +456,7 @@ export default function TripRadar() {
             <Text className={`text-2xl font-sans-extrabold ${darkTheme ? "text-white" : "text-black"}`}>
                 {formatMoney(selectedOrder.delivery_fee)}
             </Text>
-            <TouchableOpacity onPress={() => setSelectedOrder(null)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-gray-800" : "bg-gray-200"}`}>
+            <TouchableOpacity onPress={() => setSelectedOrder(null)} className={`w-8 h-8 rounded-full items-center justify-center ${darkTheme ? "bg-gray-800" : "bg-gray-200"}`} accessibilityLabel="Close preview">
                 <Ionicons name="close" size={20} color={darkTheme ? "#fff" : "#000"} />
             </TouchableOpacity>
           </View>

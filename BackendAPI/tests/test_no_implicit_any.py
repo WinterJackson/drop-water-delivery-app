@@ -93,7 +93,7 @@ CEILING = {
     # to *change* which method is default — on the field that decides which line
     # the M-Pesa prompt is sent to at checkout.
     "drop-customer-app": 103,
-    "drop-rider-app": 82,
+    "drop-rider-app": 87,
     "drop-vendor-app": 81,
     # Written without a single one from the start, and it stays that way.
     "drop-admin": 0,

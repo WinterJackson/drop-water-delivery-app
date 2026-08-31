@@ -191,7 +191,7 @@ export default function VendorDirectory() {
             {/* Floating Header */}
             <View className="absolute top-0 left-0 right-0 z-10 px-4" style={{ paddingTop: insets.top + 16 }}>
                 <View className="flex-row items-center gap-3">
-                    <PressableScale onPress={() => router.back()}>
+                    <PressableScale onPress={() => router.back()} accessibilityLabel="Go back">
                         <View 
                             className={`w-10 h-10 rounded-full items-center justify-center`}
                             style={{ backgroundColor: BRAND.primary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}

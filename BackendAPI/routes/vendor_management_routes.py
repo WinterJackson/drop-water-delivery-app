@@ -575,6 +575,7 @@ async def vendor_get_order(
             joinedload(Order.order_item).joinedload(OrderItem.product),
             joinedload(Order.user),
             joinedload(Order.deliverer),
+            joinedload(Order.vendor),
         )
     )
     order = result.unique().scalars().first()
