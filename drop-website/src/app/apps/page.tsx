@@ -65,9 +65,11 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Order water from local vendors, track deliveries, and pay securely.
             </p>
-            <Button disabled className="w-full">
-              <Download className="mr-2 h-4 w-4" /> Coming Soon (APK)
-            </Button>
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+              <Button className="w-full">
+                <Download className="mr-2 h-4 w-4" /> Download APK
+              </Button>
+            </a>
           </div>
 
           {/* Vendor App */}
@@ -79,9 +81,11 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Manage your storefront, accept orders, and dispatch riders.
             </p>
-            <Button disabled className="w-full">
-              <Download className="mr-2 h-4 w-4" /> Coming Soon (APK)
-            </Button>
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+              <Button className="w-full">
+                <Download className="mr-2 h-4 w-4" /> Download APK
+              </Button>
+            </a>
           </div>
 
           {/* Rider App */}
@@ -93,9 +97,11 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Accept deliveries, navigate efficiently, and earn on your schedule.
             </p>
-            <Button disabled className="w-full">
-              <Download className="mr-2 h-4 w-4" /> Coming Soon (APK)
-            </Button>
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+              <Button className="w-full">
+                <Download className="mr-2 h-4 w-4" /> Download APK
+              </Button>
+            </a>
           </div>
 
         </div>
