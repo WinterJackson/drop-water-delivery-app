@@ -91,19 +91,20 @@ pending → unassigned → accepted → preparing → ready → picked_up → de
 ## 💰 Revenue model
 
 Commission rates, fees and delivery pricing are **rows in `Platform_Settings`,
-not constants** — 34 settings across 6 groups, editable from the console at
+not constants** — 34 settings across 10 groups, editable from the console at
 `/platform/pricing` and live in all three apps on the next quote. The values
 below are the shipped defaults, not hard-coded behaviour.
 
 | Participant | Retail (B2C) | Wholesale (B2B) |
 |---|---|---|
-| **Platform** | 5% vendor commission + KSH 12 service fee | 2.5% commission + KSH 50 service fee |
+| **Platform** | 5% vendor commission + KSH 35 service fee | 5% commission + KSH 120 service fee + 5% delivery markup |
 | **Rider — gig** | 90% of the delivery fee | 90% |
 | **Rider — platinum** | 93% | 93% |
 | **Rider — in-house** | 100% | 100% |
 | **Vendor** | product revenue less commission | product revenue less commission |
 
 Surge is +KSH 10 in the peak windows (06:00–08:00 and 17:00–19:00 EAT).
+
 
 > **One pricing path.** `services/pricing_service.py::compute_order_quote` is the
 > only place an order total is computed. The client renders that quote verbatim,
