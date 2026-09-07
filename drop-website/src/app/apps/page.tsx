@@ -65,7 +65,7 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Order water from local vendors, track deliveries, and pay securely.
             </p>
-            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases/download/v1.0.0-beta/drop-customer-v1.0.0-beta.apk" className="w-full">
               <Button className="w-full">
                 <Download className="mr-2 h-4 w-4" /> Download APK
               </Button>
@@ -81,7 +81,7 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Manage your storefront, accept orders, and dispatch riders.
             </p>
-            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases/download/v1.0.0-beta/drop-vendor-v1.0.0-beta.apk" className="w-full">
               <Button className="w-full">
                 <Download className="mr-2 h-4 w-4" /> Download APK
               </Button>
@@ -97,7 +97,7 @@ export default function AppsPage() {
             <p className="text-sm text-[var(--foreground-muted)] mb-6 flex-1 leading-relaxed">
               Accept deliveries, navigate efficiently, and earn on your schedule.
             </p>
-            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases" target="_blank" rel="noopener noreferrer" className="w-full">
+            <a href="https://github.com/WinterJackson/drop-water-delivery-app/releases/download/v1.0.0-beta/drop-rider-v1.0.0-beta.apk" className="w-full">
               <Button className="w-full">
                 <Download className="mr-2 h-4 w-4" /> Download APK
               </Button>
