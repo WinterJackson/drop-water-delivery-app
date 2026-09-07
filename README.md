@@ -1,8 +1,12 @@
 # 💧 Drop — Multivendor Water Delivery Platform
 
 > A Kenya-focused multivendor water delivery marketplace. Three React Native apps
-> — Customer, Rider, Vendor — plus a web operations console, all served by a
+> — Customer, Rider, Vendor — plus a web landing page & operations console, all served by a
 > single FastAPI backend.
+
+**Live Deployments:**
+- 🌐 **Website & Beta APK Downloads:** [drop-water-delivery-website.vercel.app](https://drop-water-delivery-website.vercel.app/)
+- ⚡ **Admin Operations Console:** [drop-admin-five.vercel.app](https://drop-admin-five.vercel.app/)
 
 ---
 
@@ -10,11 +14,12 @@
 
 ```
 Multivendor-Water-Delivery-App/
-├── BackendAPI/          # FastAPI backend — the only server, shared by all four clients
+├── BackendAPI/          # FastAPI backend — the only server, shared by all clients
 ├── drop-customer-app/   # Expo app — customers order water
 ├── drop-rider-app/      # Expo app — riders deliver it
 ├── drop-vendor-app/     # Expo app — stores sell it
 ├── drop-admin/          # Next.js console — the owners run the business from it
+├── drop-website/        # Next.js landing page & beta app downloads
 ├── docs/                # Architecture, runbooks, deployment, audits
 └── docker-compose.yml   # Local PostgreSQL + PostGIS + Redis
 ```
