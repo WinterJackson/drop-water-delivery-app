@@ -30,6 +30,7 @@ export function Footer() {
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white">Company</h3>
             <ul className="flex flex-col gap-2.5">
               <li><Link href="/about" className="text-sm text-white/85 transition-colors hover:text-white">About Us</Link></li>
+              <li><Link href="/pitch-deck" className="text-sm text-white/85 transition-colors hover:text-white">Investor Deck</Link></li>
               <li><Link href="/contact" className="text-sm text-white/85 transition-colors hover:text-white">Contact</Link></li>
             </ul>
           </div>

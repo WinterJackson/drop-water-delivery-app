@@ -9,15 +9,10 @@ export function useTheme() {
 
   useEffect(() => {
     const stored = localStorage.getItem("theme") as Theme | null;
-    if (stored) {
-      setTheme(stored);
-      document.documentElement.setAttribute("data-theme", stored);
-    } else {
-      const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const initial = isDark ? "dark" : "light";
-      setTheme(initial);
-      document.documentElement.setAttribute("data-theme", initial);
-    }
+    const initial = stored || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(initial);
+    document.documentElement.setAttribute("data-theme", initial);
   }, []);
 
   const toggleTheme = () => {
