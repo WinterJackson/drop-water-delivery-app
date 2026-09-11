@@ -153,10 +153,19 @@ function baseEmailWrapper(title: string, badgeText: string, contentHtml: string)
 <body>
   <div class="wrapper">
     <div class="container">
+      <!-- Official Brand Logo Bar -->
+      <div style="background-color: #ffffff; padding: 22px 32px; border-bottom: 1px solid #e2e8f0; text-align: left;">
+        <a href="https://drop-water-delivery-website.vercel.app" style="text-decoration: none; display: inline-block;">
+          <img 
+            src="${BRAND_LOGO_URL}" 
+            alt="Drop Water Delivery" 
+            width="135" 
+            style="display: block; width: 135px; max-width: 100%; height: auto; border: 0;" 
+          />
+        </a>
+      </div>
+      <!-- Header Banner -->
       <div class="header">
-        <div style="margin-bottom: 16px;">
-          <img src="${BRAND_LOGO_URL}" alt="Drop" height="30" style="height: 30px; width: auto; max-width: 140px; display: block; border: 0; background-color: #ffffff; padding: 4px 10px; border-radius: 8px;" />
-        </div>
         <div class="badge">${escapeHtml(badgeText)}</div>
         <h1 class="title">${escapeHtml(title)}</h1>
         <p class="subtitle">Drop • Multivendor Water Delivery Platform</p>
